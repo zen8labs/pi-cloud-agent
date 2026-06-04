@@ -1,0 +1,40 @@
+// OpenCode config for the pr_review bundle (OpenCode 1.14.41).
+//
+// The in-sandbox supervisor parses this file, injects the concrete
+// provider/model resolved from AGENT_MODEL, and hands the result to OpenCode
+// inline via OPENCODE_CONFIG_CONTENT (the proven path the reference uses).
+//
+// Custom tools and subagents are NOT declared here: matching the reference,
+// the supervisor stages them into the workspace's `.opencode/` so OpenCode
+// auto-discovers them —
+//   * report_finding.js -> .opencode/tool/   (a tool() from @opencode-ai/plugin)
+//   * reviewer.md/critic.md -> .opencode/agent/   (subagent prompt bodies)
+// so this file only carries model selection, permissions, and tool enablement.
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // --- Model selection -----------------------------------------------------
+  // {env:AGENT_MODEL} is a documented hint, but the supervisor authoritatively
+  // overwrites `model`/`small_model` with the resolved AGENT_MODEL
+  // (provider/model, e.g. "anthropic/claude-sonnet-4-6") before launch, so the
+  // value here is just a sensible default if parsing is ever bypassed.
+  "model": "{env:AGENT_MODEL}",
+  "small_model": "{env:AGENT_MODEL}",
+
+  // --- Permissions ---------------------------------------------------------
+  // Headless review: allow all built-in actions so the agent is never blocked
+  // on an interactive permission prompt it cannot answer.
+  "permission": { "*": { "*": "allow" } },
+
+  // --- Tools ---------------------------------------------------------------
+  // Enable the built-in file/search/exec/edit tools the reviewer needs to pull
+  // surrounding context and run linters/tests. `edit` is allowed for throwaway
+  // scratch only; the review never pushes — findings flow via report_finding.
+  "tools": {
+    "read": true,
+    "grep": true,
+    "glob": true,
+    "bash": true,
+    "edit": true
+  }
+}

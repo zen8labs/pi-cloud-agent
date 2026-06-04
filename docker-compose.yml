@@ -1,0 +1,45 @@
+# Local / single-node deployment of the CoReview agent controller.
+# The sandbox runtime does NOT run here — it runs on E2B (PaaS or self-hosted).
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: coreview
+      POSTGRES_PASSWORD: coreview
+      POSTGRES_DB: coreview_agent
+    ports:
+      - "5432:5432"
+    volumes:
+      - agent_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coreview -d coreview_agent"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Lightweight web DB browser at http://localhost:8081
+  # (System: PostgreSQL · Server: db · User/Pass: coreview · DB: coreview_agent)
+  adminer:
+    image: adminer:4
+    ports:
+      - "8081:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      # Override the .env DB host so the container reaches the compose service.
+      DATABASE_URL: postgresql+asyncpg://coreview:coreview@db:5432/coreview_agent
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  agent_pg:

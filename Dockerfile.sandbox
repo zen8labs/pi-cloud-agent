@@ -1,0 +1,119 @@
+# Sandbox image for the CoReview in-sandbox runtime.
+#
+# Runs as PID 1 inside an E2B sandbox. Ported from the reference image build
+# (packages/modal-infra/src/images/base.py and packages/daytona-infra/src/
+# toolchain.py), trimmed to what a headless PR review needs. It bakes in:
+#   * git + curl + bash (clone, controller calls, the .coreview/setup.sh hook),
+#   * Node 22 + OpenCode 1.14.41 + @opencode-ai/plugin@1.14.41 + zod (the agent
+#     runtime the bridge drives, and the plugin deps the report_finding tool
+#     imports),
+#   * pre-staged @opencode-ai/plugin deps in /app/opencode-deps so OpenCode's
+#     Npm.install() is a no-op at boot (avoids the slow arborist reify that
+#     would otherwise block the first prompt),
+#   * Python 3.12 + httpx + the `agent/` package, so `runtime` and `bundles`
+#     import from /app.
+#
+# CRITICAL: OpenCode is pinned to 1.14.41. Later versions (1.14.42+, the Hono ->
+# Effect Schema migration) broke event publishing on the legacy /event SSE
+# endpoint the bridge depends on, so the bridge would connect, post the prompt,
+# and receive zero streamed message/idle events. Pin everywhere.
+#
+# The controller injects all run config via env at sandbox-create time (RUN_ID,
+# CONTROL_PLANE_URL, SANDBOX_AUTH_TOKEN, REPO_*, BUNDLE, AGENT_MODEL, LLM keys,
+# ...). No secret is baked into the image. Git auth is brokered on demand by
+# runtime.git_credential_helper against the controller's /git-credentials.
+
+FROM python:3.12-slim-bookworm
+
+# OpenCode + plugin version. MUST stay in sync with the version the bridge was
+# written against (see runtime/bridge.py). Pinned to 1.14.41 (see header).
+ARG OPENCODE_VERSION=1.14.41
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    NODE_ENV=development \
+    # Make /app importable so `python -m runtime.entrypoint` and the `bundles`
+    # package both resolve.
+    PYTHONPATH=/app \
+    # NODE_PATH for the globally installed @opencode-ai/plugin + zod the custom
+    # tool imports (mirrors the reference image env).
+    NODE_PATH=/usr/lib/node_modules
+
+# ---------------------------------------------------------------------------
+# System packages: git for repo ops, curl/ca-certificates for HTTPS + node
+# setup, bash for the .coreview/setup.sh repo hook.
+# ---------------------------------------------------------------------------
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        git \
+        curl \
+        ca-certificates \
+        bash \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# Node 22 (the OpenCode runtime requirement, per the reference image build).
+# ---------------------------------------------------------------------------
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && node --version \
+    && npm --version
+
+# ---------------------------------------------------------------------------
+# OpenCode 1.14.41 + the plugin SDK the report_finding tool imports.
+# ---------------------------------------------------------------------------
+RUN npm install -g "opencode-ai@${OPENCODE_VERSION}" \
+    && (opencode --version || echo "opencode installed") \
+    && npm install -g "@opencode-ai/plugin@${OPENCODE_VERSION}" zod
+
+# ---------------------------------------------------------------------------
+# Pre-stage @opencode-ai/plugin deps. At boot the supervisor copies these into
+# the workspace's .opencode/ so OpenCode finds a lockfile in sync and skips the
+# slow arborist reify() that would otherwise block the first prompt. The staged
+# plugin is pinned to OPENCODE_VERSION so it matches the global install.
+# ---------------------------------------------------------------------------
+RUN mkdir -p /app/opencode-deps \
+    && printf '%s' "{\"name\":\"opencode-tools\",\"type\":\"module\",\"dependencies\":{\"@opencode-ai/plugin\":\"${OPENCODE_VERSION}\"}}" \
+        > /app/opencode-deps/package.json \
+    && cd /app/opencode-deps \
+    && npm install --ignore-scripts --no-audit --no-fund
+
+# ---------------------------------------------------------------------------
+# Application: install the agent package so `runtime` + `bundles` import at /app.
+# ---------------------------------------------------------------------------
+WORKDIR /app
+
+# httpx is the only hard runtime dependency of the runtime package + the
+# credential helper. Installed before the source copy for layer caching.
+COPY pyproject.toml /app/pyproject.toml
+RUN pip install --no-cache-dir httpx
+
+# Copy the package sources. `runtime/` is the in-sandbox supervisor + bridge +
+# credential helper; `bundles/` holds the baked opencode config, skill, subagent
+# prompts, and the report_finding.js plugin tool the supervisor stages into
+# .opencode/.
+COPY runtime /app/runtime
+COPY bundles /app/bundles
+# core.types / core.bundles are dependency-light shared contracts that
+# bundles/pr_review/*.py import. Copy them so `bundles.pr_review.*` stays
+# importable in the sandbox (the runtime reads assets by path today, but this
+# removes a latent import landmine and keeps the bundle package self-consistent).
+COPY core /app/core
+
+# E2B runs commands as non-root `user`; ensure copied sources are world-readable
+# (empty __init__.py files were accidentally committed as 0600).
+RUN chmod -R a+rX /app/runtime /app/bundles /app/core
+
+# Workspace the repo is cloned into. E2B runs the supervisor as a NON-root user,
+# so it must be user-writable (the image builds as root). Sticky-bit 1777 (like
+# /tmp) lets the user create the clone dir without us knowing the runtime uid.
+# The credential-helper cache lives under /tmp (already 1777) — NOT /run, which
+# is a root-owned runtime tmpfs the user can't write to.
+RUN mkdir -p /workspace && chmod 1777 /workspace
+
+# The supervisor is PID 1: it configures git, clones the PR, stages the OpenCode
+# config/tools/subagents, starts OpenCode on :4096, drives the review via the
+# bridge, and forwards events to the controller.
+ENTRYPOINT ["python", "-m", "runtime.entrypoint"]

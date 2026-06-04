@@ -1,0 +1,88 @@
+"""Environment-backed settings.
+
+Model routing follows pr-agent's spirit: a primary LiteLLM model id plus an
+ordered list of fallbacks. Provider API keys are read straight from the
+environment (LiteLLM picks them up too).
+"""
+
+from __future__ import annotations
+
+from functools import lru_cache
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from core.types import ModelSpec, ReviewMode
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    # service
+    env: str = Field("local", alias="AGENT_ENV")
+    host: str = Field("0.0.0.0", alias="AGENT_HOST")
+    port: int = Field(8080, alias="AGENT_PORT")
+    control_plane_url: str = Field("http://localhost:8080", alias="CONTROL_PLANE_URL")
+
+    # state
+    database_url: str = Field(
+        "postgresql+asyncpg://coreview:coreview@localhost:5432/coreview_agent",
+        alias="DATABASE_URL",
+    )
+
+    # sandbox
+    e2b_api_key: str = Field("", alias="E2B_API_KEY")
+    e2b_template: str = Field("coreview-agent", alias="E2B_TEMPLATE")
+    sandbox_timeout_seconds: int = Field(2400, alias="SANDBOX_TIMEOUT_SECONDS")
+    sandbox_egress_allowlist: str = Field("", alias="SANDBOX_EGRESS_ALLOWLIST")
+
+    # harness / model — defaults to the self-hosted MiniMax served over an
+    # OpenAI-compatible gateway. AGENT_MODEL uses a custom "aigateway/" provider
+    # prefix: the in-sandbox supervisor maps it to OpenCode's @ai-sdk/openai-compatible
+    # provider, and the controller LLM service rewrites it to LiteLLM's "openai/" form
+    # (see core/llm/service.py::_litellm_model). The same id + gateway are shared by
+    # both the controller-side LLM service and the in-sandbox OpenCode harness.
+    harness: str = Field("opencode", alias="HARNESS")
+    agent_model: str = Field("aigateway/MiniMax/MiniMax-M2.7", alias="AGENT_MODEL")
+    agent_fallback_models: str = Field("", alias="AGENT_FALLBACK_MODELS")
+    agent_temperature: float = Field(0.2, alias="AGENT_TEMPERATURE")
+    ai_timeout: int = Field(120, alias="AI_TIMEOUT")
+    llm_max_tokens: int = Field(32000, alias="LLM_MAX_TOKENS")
+
+    # OpenAI-compatible gateway (the self-hosted MiniMax endpoint). Empty base_url
+    # falls back to the provider's default (api.openai.com) — set it for MiniMax.
+    openai_base_url: str = Field("", alias="OPENAI_BASE_URL")
+    openai_api_key: str = Field("", alias="OPENAI_API_KEY")
+    anthropic_api_key: str = Field("", alias="ANTHROPIC_API_KEY")
+
+    # rollout
+    default_review_mode: ReviewMode = Field(ReviewMode.agentic, alias="DEFAULT_REVIEW_MODE")
+
+    # VCS — GitHub
+    github_app_id: str = Field("", alias="GITHUB_APP_ID")
+    github_app_private_key: str = Field("", alias="GITHUB_APP_PRIVATE_KEY")
+    github_webhook_secret: str = Field("", alias="GITHUB_WEBHOOK_SECRET")
+    github_token: str = Field("", alias="GITHUB_TOKEN")
+
+    # VCS — GitLab
+    gitlab_token: str = Field("", alias="GITLAB_TOKEN")
+    gitlab_webhook_secret: str = Field("", alias="GITLAB_WEBHOOK_SECRET")
+    gitlab_url: str = Field("https://gitlab.com", alias="GITLAB_URL")
+
+    # VCS — Bitbucket
+    bitbucket_token: str = Field("", alias="BITBUCKET_TOKEN")
+    bitbucket_webhook_secret: str = Field("", alias="BITBUCKET_WEBHOOK_SECRET")
+
+    def model_spec(self) -> ModelSpec:
+        fallbacks = [m.strip() for m in self.agent_fallback_models.split(",") if m.strip()]
+        return ModelSpec(
+            model=self.agent_model, fallbacks=fallbacks, temperature=self.agent_temperature
+        )
+
+    def egress_allowlist(self) -> list[str]:
+        return [h.strip() for h in self.sandbox_egress_allowlist.split(",") if h.strip()]
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
