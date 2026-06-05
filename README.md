@@ -89,20 +89,25 @@ GITLAB_TOKEN=... / BITBUCKET_...=...
 # LLM provider keys + model routing (per pr-agent config)
 ```
 
-## Running (quick)
+## Quick start
 
 ```bash
 cp .env.example .env      # fill E2B_API_KEY, a GitHub token/app, an LLM key
 make install              # pip install -e ".[dev]"
+docker compose up db -d   # starts Postgres db in detached mode
 make dev                  # starts dev with uvicorn (port 8080)
-make up                   # Postgres + controller via docker compose (port 8080)
 # or, against your own Postgres:  make dev
-curl localhost:8080/healthz
+# in another terminal:
+ngrok http 8080
+# check connection
+curl <your-ngrok-url>/healthz
 ```
 
 The controller runs the API **and** an embedded worker in one process
 (`AGENT_RUN_WORKER=1`, the default). See [How to test](#how-to-test) for driving
 it with a real PR, and [How to deploy](#how-to-deploy) for remote deployment.
+
+Below instructions are for running the agent with docker.
 
 ## E2B setup
 
@@ -219,7 +224,7 @@ The sandbox bridge dials `CONTROL_PLANE_URL`, so it must be a **public** URL (no
 ```bash
 make up                                  # controller on :8080 (+ Postgres)
 # in another terminal:
-cloudflared tunnel --url http://localhost:8080      # or: ngrok http 8080
+ngrok http 8080
 ```
 
 Copy the public URL it prints and set it in `.env`, then restart:
@@ -253,6 +258,14 @@ curl localhost:8080/runs/<run_id> | jq
 A successful run posts inline + summary comments back on the PR. To keep a repo
 on the **legacy** `../pr-agent` reviewer during rollout, insert a `repo_flags`
 row (`provider, full_name, review_mode='legacy'`); default is `agentic`.
+
+### 7. Access the web app
+
+There is a simple web app to view the sessions and chat with the agent. Start it with:
+
+```bash
+make web-dev
+```
 
 ### DB tables
 

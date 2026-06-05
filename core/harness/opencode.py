@@ -38,12 +38,19 @@ class OpenCodeAdapter(HarnessAdapter):
         keys), repo coordinates, and per-run callback env are layered on by the
         orchestrator and sandbox provider — never here.
         """
-        return {
+        env = {
             "HARNESS": "opencode",
             "BUNDLE": task.bundle,
             "AGENT_MODEL": model.model,
             "AGENT_FALLBACK_MODELS": ",".join(model.fallbacks),
         }
+        # A free-form task (e.g. the general_agent chat session) carries the
+        # user's prompt in `inputs`; surface it to the supervisor so it can build
+        # the initial prompt. pr_review leaves this empty and drives off its skill.
+        user_prompt = task.inputs.get("user_prompt")
+        if user_prompt:
+            env["USER_PROMPT"] = str(user_prompt)
+        return env
 
     async def start(self, sandbox: SandboxHandle, run_id: str, session_id: str) -> Session:
         """Bind a session handle to the live sandbox.

@@ -30,3 +30,6 @@ down:
 
 sandbox-template:  ## build/publish the E2B sandbox template from Dockerfile.sandbox
 	e2b template build -c "python -m runtime.entrypoint" -d Dockerfile.sandbox --name coreview-agent
+
+web-dev:  ## run the web app locally
+	cd web && npm run dev

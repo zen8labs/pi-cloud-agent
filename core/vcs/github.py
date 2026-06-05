@@ -322,6 +322,52 @@ class GitHubProvider:
             base_url=_API_BASE, headers=headers, timeout=_TIMEOUT
         )
 
+    async def list_installed_repos(self, limit: int = 200) -> list[str]:
+        """Best-effort list of repos the agent can access, for the dashboard's
+        repo selector. Uses the App's installations (every repo the App is
+        installed on) or, with only a PAT, the token's own repos. Returns an
+        empty list rather than raising if creds are missing or the call fails —
+        the selector also allows a custom `owner/name`.
+        """
+        s = self._settings
+        accept = {"Accept": _ACCEPT, "X-GitHub-Api-Version": _API_VERSION}
+        repos: set[str] = set()
+        if s.github_app_id and s.github_app_private_key:
+            app_jwt = self._app_jwt()
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                insts = await client.get(
+                    f"{_API_BASE}/app/installations",
+                    headers=self._jwt_headers(app_jwt),
+                    params={"per_page": 100},
+                )
+                insts.raise_for_status()
+                for inst in insts.json():
+                    tok = await client.post(
+                        f"{_API_BASE}/app/installations/{inst['id']}/access_tokens",
+                        headers=self._jwt_headers(app_jwt),
+                    )
+                    if tok.status_code >= 300:
+                        continue
+                    itoken = tok.json()["token"]
+                    r = await client.get(
+                        f"{_API_BASE}/installation/repositories",
+                        headers={"Authorization": f"Bearer {itoken}", **accept},
+                        params={"per_page": 100},
+                    )
+                    if r.status_code >= 300:
+                        continue
+                    repos.update(x["full_name"] for x in r.json().get("repositories", []))
+        elif s.github_token:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                r = await client.get(
+                    f"{_API_BASE}/user/repos",
+                    headers={"Authorization": f"Bearer {s.github_token}", **accept},
+                    params={"per_page": 100, "sort": "updated"},
+                )
+                r.raise_for_status()
+                repos.update(x["full_name"] for x in r.json())
+        return sorted(repos)[:limit]
+
     # ── reads ────────────────────────────────────────────────────────────
 
     async def get_pull_request(self, repo: RepoRef, pr_number: int) -> PullRequest:

@@ -515,28 +515,45 @@ class SandboxSupervisor:
     # Bridge + review
     # ------------------------------------------------------------------
 
-    def _build_initial_prompt(self) -> str:
-        """Initial prompt = the pr-review SKILL.md body + a one-line PR pointer.
+    def _find_skill_body(self) -> str:
+        """Read the bundle's skill body (the real driver of the agent).
 
-        The bundle's skill is the real driver; we feed its body verbatim and
-        append the concrete PR to review so the agent knows the target.
+        Bundle-agnostic: each bundle stages exactly one skill under
+        ``opencode/skills/<name>/SKILL.md`` (pr-review for pr_review, general for
+        general_agent). We load the first SKILL.md we find and feed it verbatim.
         """
-        skill_path = self._bundle_opencode_dir() / "skills" / "pr-review" / "SKILL.md"
-        skill_body = ""
-        if skill_path.exists():
+        skills_dir = self._bundle_opencode_dir() / "skills"
+        if not skills_dir.is_dir():
+            return ""
+        for skill_md in sorted(skills_dir.glob("*/SKILL.md")):
             try:
-                skill_body = skill_path.read_text()
+                return skill_md.read_text()
             except OSError as e:
-                self.log.warn("prompt.skill_read_failed", path=str(skill_path), exc=e)
+                self.log.warn("prompt.skill_read_failed", path=str(skill_md), exc=e)
+        return ""
 
-        pr_line = (
-            f"Review PR #{self.pr_number} now, following the PR Review skill above."
-            if self.pr_number
-            else "Review this pull request now, following the PR Review skill above."
-        )
-        if skill_body:
-            return f"{skill_body.strip()}\n\n---\n\n{pr_line}"
-        return pr_line
+    def _build_initial_prompt(self) -> str:
+        """Build the initial prompt for the agent session.
+
+        Bundles with a skill (e.g. pr_review) get: skill body + a one-line task
+        pointer. Bundles without a skill (e.g. general_agent) pass the user's
+        prompt directly — OpenCode's own system prompt covers the how-to-work
+        instructions, so no wrapper is needed.
+        """
+        skill_body = self._find_skill_body()
+        user_prompt = os.environ.get("USER_PROMPT", "").strip()
+
+        if not skill_body:
+            return user_prompt
+
+        if user_prompt:
+            task_line = f"Carry out the following request, following the skill above:\n\n{user_prompt}"
+        elif self.pr_number:
+            task_line = f"Review PR #{self.pr_number} now, following the skill above."
+        else:
+            task_line = "Review this pull request now, following the skill above."
+
+        return f"{skill_body.strip()}\n\n---\n\n{task_line}"
 
     async def run_review(self) -> None:
         """Run the review once OpenCode is healthy.

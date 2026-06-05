@@ -33,8 +33,9 @@ class Settings(BaseSettings):
     # sandbox
     e2b_api_key: str = Field("", alias="E2B_API_KEY")
     e2b_template: str = Field("coreview-agent", alias="E2B_TEMPLATE")
-    sandbox_timeout_seconds: int = Field(2400, alias="SANDBOX_TIMEOUT_SECONDS")
+    sandbox_timeout_seconds: int = Field(3900, alias="SANDBOX_TIMEOUT_SECONDS")
     sandbox_egress_allowlist: str = Field("", alias="SANDBOX_EGRESS_ALLOWLIST")
+    run_wall_clock_seconds: int = Field(3600, alias="RUN_WALL_CLOCK_SECONDS")
 
     # harness / model — defaults to the self-hosted MiniMax served over an
     # OpenAI-compatible gateway. AGENT_MODEL uses a custom "aigateway/" provider
@@ -57,6 +58,12 @@ class Settings(BaseSettings):
 
     # rollout
     default_review_mode: ReviewMode = Field(ReviewMode.agentic, alias="DEFAULT_REVIEW_MODE")
+
+    # web dashboard
+    # Comma-separated repos ("owner/name") offered in the chat page's repo
+    # selector, and the origins allowed to call the API from the browser.
+    web_repos: str = Field("", alias="WEB_REPOS")
+    web_cors_origins: str = Field("*", alias="WEB_CORS_ORIGINS")
 
     # VCS — GitHub
     github_app_id: str = Field("", alias="GITHUB_APP_ID")
@@ -81,6 +88,12 @@ class Settings(BaseSettings):
 
     def egress_allowlist(self) -> list[str]:
         return [h.strip() for h in self.sandbox_egress_allowlist.split(",") if h.strip()]
+
+    def web_repo_list(self) -> list[str]:
+        return [r.strip() for r in self.web_repos.split(",") if r.strip()]
+
+    def web_cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.web_cors_origins.split(",") if o.strip()] or ["*"]
 
 
 @lru_cache

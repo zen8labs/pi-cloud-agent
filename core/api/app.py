@@ -52,11 +52,23 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(title="CoReview Agent", version="0.1.0", lifespan=lifespan)
 
-    from core.api.routes import internal, runs, webhooks
+    # Allow the Next.js web dashboard (a separate origin) to call the API and
+    # consume the SSE stream from the browser. No auth in this phase.
+    from fastapi.middleware.cors import CORSMiddleware
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=get_settings().web_cors_origin_list(),
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    from core.api.routes import internal, meta, runs, webhooks
 
     app.include_router(webhooks.router)
     app.include_router(runs.router)
     app.include_router(internal.router)
+    app.include_router(meta.router)
 
     @app.get("/healthz")
     async def healthz():

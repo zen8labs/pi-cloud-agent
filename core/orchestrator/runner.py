@@ -22,7 +22,7 @@ from core.sandbox import (
 from core.state import get_session
 from core.state import repo as runs
 from core.state.models import Run
-from core.types import CorrelationContext, RunStatus, TaskSpec
+from core.types import CorrelationContext, RunLimits, RunStatus, TaskSpec
 from core.vcs import get_vcs_provider
 
 log = get_logger("orchestrator")
@@ -36,6 +36,17 @@ async def execute_run(run: Run) -> None:
 
     bundle = get_bundle(run.bundle)
     task: TaskSpec = bundle.build_task(run.trigger)
+    task = TaskSpec(
+        bundle=task.bundle,
+        instructions=task.instructions,
+        repo=task.repo,
+        inputs=task.inputs,
+        limits=RunLimits(
+            wall_clock_seconds=settings.run_wall_clock_seconds,
+            max_parallel_units=task.limits.max_parallel_units,
+            max_tokens=task.limits.max_tokens,
+        ),
+    )
     model = settings.model_spec()
     adapter = get_harness_adapter()
     sandbox_provider = get_sandbox_provider()
@@ -68,11 +79,14 @@ async def execute_run(run: Run) -> None:
         sandbox_handle = created.handle
         await _set_provider_object_id(run.id, sandbox_handle.provider_object_id)
 
-        # 3) Run the harness session, streaming events into Postgres + the bus.
+        # 3) Run the harness session. The bridge already persists each event to
+        #    run_events via the internal /events endpoint (the single writer), so
+        #    here we only consume the relayed bus stream for control flow —
+        #    advancing the loop and terminating on error/done. Re-recording here
+        #    would double every row in the log (and the dashboard feed).
         await _set(run.id, RunStatus.running)
         session = await adapter.start(sandbox_handle, run.id, run.session_id)
         async for event in adapter.run(session, task):
-            await _record_event(run.id, event.type.value, event.data)
             if event.type is EventType.error:
                 raise RuntimeError(event.data.get("message", "harness error"))
 
@@ -185,8 +199,3 @@ async def _set(run_id: str, status: RunStatus, error: str | None = None) -> None
 async def _set_provider_object_id(run_id: str, provider_object_id: str) -> None:
     async with get_session() as db:
         await runs.set_provider_object_id(db, run_id, provider_object_id)
-
-
-async def _record_event(run_id: str, type_: str, data: dict) -> None:
-    async with get_session() as db:
-        await runs.append_event(db, run_id, type_, data)

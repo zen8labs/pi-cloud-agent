@@ -66,7 +66,8 @@ def get_bundle(name: str) -> Bundle:
 
 
 def _import_builtin_bundles() -> None:
-    try:
-        import bundles.pr_review.bundle  # noqa: F401  (registers on import)
-    except Exception:
-        pass
+    for module in ("bundles.pr_review.bundle", "bundles.general_agent.bundle"):
+        try:
+            __import__(module)  # registers on import
+        except Exception:
+            pass

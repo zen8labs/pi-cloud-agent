@@ -72,6 +72,10 @@ async def post_finding(run_id: str, f: FindingIn, run: Run = Depends(_authed_run
             evidence=f.evidence,
             grounded=grounded,
         )
+        # Also record it in the append-only event log so it streams live to the
+        # dashboard (the SSE feed reads run_events) and is replayable on resume,
+        # not just available as a separate findings query.
+        await runs.append_event(db, run_id, "finding", {**f.model_dump(), "grounded": grounded})
     await event_bus.publish(run_id, {"type": "finding", "data": f.model_dump()})
     return {"ok": True, "grounded": grounded}
 

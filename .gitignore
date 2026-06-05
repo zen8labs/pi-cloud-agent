@@ -6,3 +6,6 @@ __pycache__/
 .mypy_cache/
 .env
 *.egg-info/
+
+# AIHub auto-generated history
+.specstory/
