@@ -1,10 +1,6 @@
-# agent
+# Cloud Agent
 
-Agentic cloud-agent runtime for CoReview. A **minimal, task-agnostic core**
-(sandbox + VCS + harness + API) plus **capability bundles** that specialize it.
-The first bundle is **PR code review**; the same core is meant to later run other
-agents (complete-a-PR, Excel, deep-research, …) by adding bundles, not by
-changing the core.
+Agentic cloud-agent runtime for CoReview. A **minimal, task-agnostic core** (sandbox + VCS + harness + API) plus **capability bundles** that specialize it. The first bundle is **PR code review**; the same core is meant to later run other agents (complete-a-PR, Excel, deep-research, …) by adding bundles, not by changing the core.
 
 ---
 
@@ -19,13 +15,9 @@ webhook ─▶ core (FastAPI, trust boundary)
            ◀─ findings JSON ─ publish inline + summary comments via core/vcs
 ```
 
-- **Core is task-agnostic.** It knows about sandboxes, VCS, a harness, and runs —
-  not about "PR review."
-- **Bundles are the specialization.** A bundle = portable **MCP tools** + a task
-  builder + an output schema + per-harness **skill/subagent** prompt files.
-- **Harness is swappable.** OpenCode today, behind a `HarnessAdapter` so pi-agent
-  / Claude Agent SDK can drop in later. Behavioral logic stays in MCP tools so it
-  ports for free; only prompt assets are harness-specific.
+- **Core is task-agnostic.** It knows about sandboxes, VCS, a harness, and runs — not about "PR review."
+- **Bundles are the specialization.** A bundle = portable **MCP tools** + a task builder + an output schema + per-harness **skill/subagent** prompt files.
+- **Harness is swappable.** OpenCode today, behind a `HarnessAdapter` so pi-agent / Claude Agent SDK can drop in later. Behavioral logic stays in MCP tools so it ports for free; only prompt assets are harness-specific.
 - **Secrets never enter the sandbox.** The sandbox runs untrusted PR code.
 
 ## Layout
@@ -56,17 +48,12 @@ agent/
 
 ## Key decisions
 
-- **Language:** Python core (copy-paste pr-agent's VCS/webhook/config/model
-  routing; controller↔harness is an HTTP boundary regardless).
-- **Sandbox:** **E2B** — PaaS now, self-host in our VPC later via the open-source
-  `e2b-dev/infra` (no code change, same SDK).
-- **Harness:** **OpenCode** server, headless, inside the sandbox, behind an
-  adapter.
-- **State:** **Postgres** for runs/events/results. **No Cloudflare Durable
-  Objects** 
+- **Language:** Python core (copy-paste pr-agent's VCS/webhook/config/model routing; controller↔harness is an HTTP boundary regardless).
+- **Sandbox:** **E2B** — PaaS now, self-host in our VPC later via the open-source `e2b-dev/infra` (no code change, same SDK).
+- **Harness:** **OpenCode** server, headless, inside the sandbox, behind an adapter.
+- **State:** **Postgres** for runs/events/results. **No Cloudflare Durable Objects** 
 - **VCS:** GitHub primary; GitLab + Bitbucket day 0; Azure DevOps later.
-- **Model routing:** follow pr-agent (LiteLLM, config/DB-driven); the controller
-  picks the model and injects it into the harness's provider config.
+- **Model routing:** follow pr-agent (LiteLLM, config/DB-driven); the controller picks the model and injects it into the harness's provider config.
 - **Tools:** MCP, so they're portable across harnesses.
 
 ## Prerequisites (target)
@@ -74,8 +61,7 @@ agent/
 - Python 3.12+
 - Postgres (shared with the existing stack)
 - An **E2B** account / `E2B_API_KEY` (PaaS), or self-hosted E2B later
-- VCS app credentials (GitHub primary; GitLab + Bitbucket day 0) for webhook
-  verification + short-lived clone tokens + comment posting
+- VCS app credentials (GitHub primary; GitLab + Bitbucket day 0) for webhook verification + short-lived clone tokens + comment posting
 - LLM provider keys, configured the pr-agent way
 
 Expected env:
@@ -103,17 +89,13 @@ ngrok http 8080
 curl <your-ngrok-url>/healthz
 ```
 
-The controller runs the API **and** an embedded worker in one process
-(`AGENT_RUN_WORKER=1`, the default). See [How to test](#how-to-test) for driving
-it with a real PR, and [How to deploy](#how-to-deploy) for remote deployment.
+The controller runs the API **and** an embedded worker in one process (`AGENT_RUN_WORKER=1`, the default). See [How to test](#how-to-test) for driving it with a real PR, and [How to deploy](#how-to-deploy) for remote deployment.
 
 Below instructions are for running the agent with docker.
 
 ## E2B setup
 
-The agent runs each review inside an [E2B](https://e2b.dev) sandbox — a
-Firecracker microVM built from `Dockerfile.sandbox` (OpenCode `1.14.41` + our
-`runtime/` + `bundles/`). Set this up once.
+The agent runs each review inside an [E2B](https://e2b.dev) sandbox — a Firecracker microVM built from `Dockerfile.sandbox` (OpenCode `1.14.41` + our `runtime/` + `bundles/`). Set this up once.
 
 ### 1. Account + API key
 
@@ -131,31 +113,24 @@ e2b auth login           # opens a browser; or: export E2B_API_KEY=... before co
 
 ### 3. Build & publish the sandbox template
 
-The template is the prebuilt image E2B boots per run. Build it from
-`Dockerfile.sandbox` and name it `coreview-agent`:
+The template is the prebuilt image E2B boots per run. Build it from `Dockerfile.sandbox` and name it `coreview-agent`:
 
 ```bash
 make sandbox-template
 # == e2b template build -c "python -m runtime.entrypoint" -d Dockerfile.sandbox --name coreview-agent
 ```
 
-This pushes the image to your E2B account and prints a **template id**. Set it in
-`.env`:
+This pushes the image to your E2B account and prints a **template id**. Set it in `.env`:
 
 ```
 E2B_TEMPLATE=coreview-agent     # the --name you built (or the template id)
 ```
 
-Rebuild the template whenever `runtime/`, `bundles/`, or `Dockerfile.sandbox`
-change. (The first build takes a few minutes — it installs Node 22 + OpenCode +
-plugins.)
+Rebuild the template whenever `runtime/`, `bundles/`, or `Dockerfile.sandbox` change. (The first build takes a few minutes — it installs Node 22 + OpenCode + plugins.)
 
 ### 4. (Later) self-hosting in your VPC
 
-E2B's infrastructure is open source (`e2b-dev/infra`, Terraform). To move off
-PaaS, deploy it in your VPC and point the SDK at it — **no code change**, same
-`E2B_API_KEY`/`E2B_TEMPLATE` flow. This is the planned path once the flow is
-validated on PaaS.
+E2B's infrastructure is open source (`e2b-dev/infra`, Terraform). To move off PaaS, deploy it in your VPC and point the SDK at it — **no code change**, same `E2B_API_KEY`/`E2B_TEMPLATE` flow. This is the planned path once the flow is validated on PaaS.
 
 > **Model note:** the default model is the self-hosted **MiniMax** served
 > OpenAI-compatibly (`AGENT_MODEL=aigateway/MiniMax/MiniMax-M2.7`), matching
@@ -167,42 +142,32 @@ validated on PaaS.
 
 ## How to test
 
-End-to-end local testing means: run the controller on your machine, expose it to
-the internet so a real Git host can reach the webhook **and** the sandbox bridge
-can dial back, build the E2B sandbox template, then open a PR.
+End-to-end local testing means: run the controller on your machine, expose it to the internet so a real Git host can reach the webhook **and** the sandbox bridge can dial back, build the E2B sandbox template, then open a PR.
 
 ### 1. Build the E2B sandbox template
 
-See [E2B setup](#e2b-setup) above — you need `E2B_API_KEY`, the `coreview-agent`
-template built, and `E2B_TEMPLATE` set in `.env`.
+See [E2B setup](#e2b-setup) above — you need `E2B_API_KEY`, the `coreview-agent` template built, and `E2B_TEMPLATE` set in `.env`.
 
 ### 2. Create a GitHub App
 
-The controller uses a GitHub App for webhook delivery, cloning, and posting
-comments. Create one if you don't already have one:
+The controller uses a GitHub App for webhook delivery, cloning, and posting comments. Create one if you don't already have one:
 
 1. Go to **GitHub → Settings → Developer settings → GitHub Apps → New GitHub App**.
 2. Fill in the basics:
    - **GitHub App name:** any name (e.g. `coreview-dev`)
    - **Homepage URL:** any URL (e.g. your tunnel URL or `https://example.com`)
-   - **Webhook URL:** `https://<your-tunnel-host>/webhooks/github`
-     *(you'll start the tunnel in step 3 — come back and fill this in, or update
-     it after the tunnel is running)*
-   - **Webhook secret:** generate a random string (e.g. `openssl rand -hex 32`)
-     and paste it here; you'll put the same value in `.env`.
+   - **Webhook URL:** `https://<your-tunnel-host>/webhooks/github` *(you'll start the tunnel in step 3 — come back and fill this in, or update it after the tunnel is running)*
+   - **Webhook secret:** generate a random string (e.g. `openssl rand -hex 32`) and paste it here; you'll put the same value in `.env`.
 3. Set **Repository permissions**:
    - **Contents:** Read-only (for cloning)
    - **Pull requests:** Read & write (for reading diffs and posting review comments)
-   - **Issues:** Read-only (required to subscribe to `Issue comment` events, which
-     is how PR comments are delivered to the webhook)
+   - **Issues:** Read-only (required to subscribe to `Issue comment` events, which is how PR comments are delivered to the webhook)
 4. Subscribe to **events**:
    - **Pull request** — triggers an automatic review when a PR is opened or synced
-   - **Issues** — triggers a review when someone comments `/review` on a PR
-     *(only available after enabling Issues read permission above)*
+   - **Issues** — triggers a review when someone comments `/review` on a PR *(only available after enabling Issues read permission above)*
 5. Click **Create GitHub App**.
 6. On the app's settings page, note the **App ID**.
-7. Scroll to **Private keys** → **Generate a private key** → download the `.pem`
-   file. Keep it safe.
+7. Scroll to **Private keys** → **Generate a private key** → download the `.pem` file. Keep it safe.
 8. Click **Install App** (left sidebar) → install it on your test repo (or org).
 
 ### 3. Configure credentials in `.env`
@@ -213,13 +178,11 @@ GITHUB_APP_PRIVATE_KEY=<contents of the downloaded .pem file, or path to it>
 GITHUB_WEBHOOK_SECRET=<the webhook secret you set in step 2>
 ```
 
-- **LLM:** set `AGENT_MODEL=aigateway/MiniMax/MiniMax-M2.7`, `OPENAI_BASE_URL` to your
-  self-hosted gateway, and `OPENAI_API_KEY` to its key (same as `../pr-agent`).
+- **LLM:** set `AGENT_MODEL=aigateway/MiniMax/MiniMax-M2.7`, `OPENAI_BASE_URL` to your self-hosted gateway, and `OPENAI_API_KEY` to its key (same as `../pr-agent`).
 
 ### 4. Start the controller + expose it publicly
 
-The sandbox bridge dials `CONTROL_PLANE_URL`, so it must be a **public** URL (not
-`localhost`). Use a tunnel:
+The sandbox bridge dials `CONTROL_PLANE_URL`, so it must be a **public** URL (not `localhost`). Use a tunnel:
 
 ```bash
 make up                                  # controller on :8080 (+ Postgres)
@@ -233,17 +196,13 @@ Copy the public URL it prints and set it in `.env`, then restart:
 CONTROL_PLANE_URL=https://<your-tunnel-host>
 ```
 
-Go back to your GitHub App settings and update the **Webhook URL** to
-`https://<your-tunnel-host>/webhooks/github` if you used a placeholder earlier.
+Go back to your GitHub App settings and update the **Webhook URL** to `https://<your-tunnel-host>/webhooks/github` if you used a placeholder earlier.
 
 ### 5. Install the GitHub App on your test repo
 
-If you chose **Only select repositories** during installation in step 2.8, make
-sure your test repo is in the list. GitHub → **Settings → Developer settings →
-GitHub Apps → [your app] → Install App** to add or change repositories.
+If you chose **Only select repositories** during installation in step 2.8, make sure your test repo is in the list. GitHub → **Settings → Developer settings → GitHub Apps → [your app] → Install App** to add or change repositories.
 
-(GitLab → register the webhook at `…/webhooks/gitlab` with `X-Gitlab-Token` =
-`GITLAB_WEBHOOK_SECRET`; Bitbucket → `…/webhooks/bitbucket`.)
+(GitLab → register the webhook at `…/webhooks/gitlab` with `X-Gitlab-Token` = `GITLAB_WEBHOOK_SECRET`; Bitbucket → `…/webhooks/bitbucket`.)
 
 ### 6. Trigger a review
 
@@ -255,9 +214,7 @@ Open a PR on the test repo (or comment `/review` on an existing one). Then watch
 curl localhost:8080/runs/<run_id> | jq
 ```
 
-A successful run posts inline + summary comments back on the PR. To keep a repo
-on the **legacy** `../pr-agent` reviewer during rollout, insert a `repo_flags`
-row (`provider, full_name, review_mode='legacy'`); default is `agentic`.
+A successful run posts inline + summary comments back on the PR. To keep a repo on the **legacy** `../pr-agent` reviewer during rollout, insert a `repo_flags` row (`provider, full_name, review_mode='legacy'`); default is `agentic`.
 
 ### 7. Access the web app
 
@@ -286,20 +243,15 @@ make compile     # fast syntax check across core/ bundles/ runtime/
 ```
 
 **Default tier** (runs anywhere; the API tier uses a throwaway SQLite DB):
-- `tests/test_smoke.py` — webhook signature verify, bundle→task mapping, harness
-  bus→event translation.
+- `tests/test_smoke.py` — webhook signature verify, bundle→task mapping, harness bus→event translation.
 - `tests/test_config.py` — model routing, fallbacks, egress allowlist parsing.
-- `tests/test_llm.py` — the LLM service builds correct LiteLLM/gateway args and
-  honours fallback ordering (mocked).
+- `tests/test_llm.py` — the LLM service builds correct LiteLLM/gateway args and honours fallback ordering (mocked).
 - `tests/test_sandbox.py` — E2B env assembly + provider create/stop (mocked SDK).
 - `tests/test_harness.py` — OpenCode adapter runtime env, bus translation, timeout.
 - `tests/test_vcs.py` — GitLab + Bitbucket webhook verify/parse.
-- `tests/test_api.py` — real FastAPI app over SQLite: `/healthz`, webhook
-  signature rejection, webhook→run creation→`/runs/{id}` read-back, internal
-  bridge callbacks (events, findings, status), and token auth.
+- `tests/test_api.py` — real FastAPI app over SQLite: `/healthz`, webhook signature rejection, webhook→run creation→`/runs/{id}` read-back, internal bridge callbacks (events, findings, status), and token auth.
 
-**Live tier** (opt-in — reads secrets from ``agent/.env`` via ``tests/conftest.py``;
-each test still self-skips if its required keys are missing):
+**Live tier** (opt-in — reads secrets from ``agent/.env`` via ``tests/conftest.py``; each test still self-skips if its required keys are missing):
 
 ```bash
 make test-live   # all @pytest.mark.live tests (LLM + E2B + harness)
@@ -319,15 +271,13 @@ Required keys in ``agent/.env`` (see ``.env.example``):
 | ``test_harness_live.py`` | ``E2B_API_KEY``, ``E2B_TEMPLATE``; OpenCode prompt test also needs ``OPENAI_BASE_URL`` |
 | ``test_vcs_live.py`` | ``TEST_REPO`` (e.g. `org/repo`) + ``GITHUB_TOKEN`` or ``GITHUB_APP_ID``/``GITHUB_APP_PRIVATE_KEY`` |
 
-Shell exports still win over ``.env``; test fixtures (SQLite ``DATABASE_URL``, etc.)
-are never overridden by ``.env``.
+Shell exports still win over ``.env``; test fixtures (SQLite ``DATABASE_URL``, etc.) are never overridden by ``.env``.
 
 `make test` runs the default tier and skips the live tier automatically.
 
 ## How to deploy
 
-The controller is a standard container; the sandbox runs on E2B (PaaS now,
-self-hosted later — no code change). Two images:
+The controller is a standard container; the sandbox runs on E2B (PaaS now, self-hosted later — no code change). Two images:
 
 | Image | Built from | Runs where |
 |---|---|---|
@@ -336,17 +286,14 @@ self-hosted later — no code change). Two images:
 
 ### 1. Publish the sandbox template
 
-Same as testing step 1 (`make sandbox-template`), from CI or a release step
-whenever `runtime/` or `bundles/` change. Pin `opencode-ai` in `Dockerfile.sandbox`
-for reproducibility.
+Same as testing step 1 (`make sandbox-template`), from CI or a release step whenever `runtime/` or `bundles/` change. Pin `opencode-ai` in `Dockerfile.sandbox` for reproducibility.
 
 ### 2. Deploy the controller
 
 Any container host (a VM with Docker, ECS/Fargate, Cloud Run, or k8s). It needs:
 
 - a reachable **Postgres** (`DATABASE_URL`),
-- a **public HTTPS** ingress for `/webhooks/*` and the sandbox callbacks
-  (`CONTROL_PLANE_URL` must be this public URL),
+- a **public HTTPS** ingress for `/webhooks/*` and the sandbox callbacks (`CONTROL_PLANE_URL` must be this public URL),
 - the `.env` secrets (`E2B_API_KEY`, VCS creds, LLM key).
 
 ```bash
@@ -361,63 +308,30 @@ docker run -d --name coreview-agent --env-file .env -p 8080:8080 \
   <registry>/coreview-agent:<tag>
 ```
 
-Put TLS/ingress (Caddy, Nginx, an ALB, or the platform's built-in) in front so
-`https://agent.yourco.com` terminates to the container's `:8080`.
+Put TLS/ingress (Caddy, Nginx, an ALB, or the platform's built-in) in front so `https://agent.yourco.com` terminates to the container's `:8080`.
 
 ### 3. Scaling notes
 
-- **Workers:** the embedded worker uses `FOR UPDATE SKIP LOCKED`, so you can run
-  multiple controller replicas and they won't double-process runs. For a
-  dedicated worker tier, run replicas with `AGENT_RUN_WORKER=1` and the API tier
-  with `AGENT_RUN_WORKER=0`. (Note: the in-process event bus is per-process —
-  for a split API/worker tier, promote `core/orchestrator/bus.py` to Redis
-  pub/sub.) ⚠️ Before running **more than one replica**, fix the single-replica
-  orphan-reconciliation bug — see [Known issues](#known-issues).
-- **E2B self-host:** point the SDK at your `e2b-dev/infra` deployment; no app
-  change.
-- **Migrations:** `init_db()` auto-creates tables on boot for convenience; for
-  production use Alembic (dependency already included) and disable auto-create.
+- **Workers:** the embedded worker uses `FOR UPDATE SKIP LOCKED`, so you can run multiple controller replicas and they won't double-process runs. For a dedicated worker tier, run replicas with `AGENT_RUN_WORKER=1` and the API tier with `AGENT_RUN_WORKER=0`. (Note: the in-process event bus is per-process — for a split API/worker tier, promote `core/orchestrator/bus.py` to Redis pub/sub.) ⚠️ Before running **more than one replica**, fix the single-replica orphan-reconciliation bug — see [Known issues](#known-issues).
+- **E2B self-host:** point the SDK at your `e2b-dev/infra` deployment; no app change.
+- **Migrations:** `init_db()` auto-creates tables on boot for convenience; for production use Alembic (dependency already included) and disable auto-create.
 
 ## Known issues
 
-Tracked bugs to fix before the relevant scale-out. Unchecked = open; this list is
-the canonical record (the code and `ARCHITECTURE.md` point here).
+Tracked bugs to fix before the relevant scale-out. Unchecked = open; this list is the canonical record (the code and `ARCHITECTURE.md` point here).
 
-- [ ] **Orphan reconciliation is single-replica only.** On boot,
-  `reconcile_orphaned_runs` (`core/state/repo.py`) marks *every* in-flight run
-  (`provisioning` / `running` / `publishing`) as `failed` to clear runs stranded
-  by a crash. With more than one controller replica, booting/restarting one
-  replica also fails runs the *other* replicas are still actively processing. The
-  `runs.claimed_at` lease column exists but isn't consulted yet. **Fix:** only
-  reconcile runs whose `claimed_at` lease has expired (or gate reconciliation
-  behind leader election / a heartbeat reaper) before running multiple replicas.
-  Safe as-is for the default single-process deployment.
+- [ ] **Orphan reconciliation is single-replica only.** On boot, `reconcile_orphaned_runs` (`core/state/repo.py`) marks *every* in-flight run (`provisioning` / `running` / `publishing`) as `failed` to clear runs stranded by a crash. With more than one controller replica, booting/restarting one replica also fails runs the *other* replicas are still actively processing. The `runs.claimed_at` lease column exists but isn't consulted yet. **Fix:** only reconcile runs whose `claimed_at` lease has expired (or gate reconciliation behind leader election / a heartbeat reaper) before running multiple replicas. Safe as-is for the default single-process deployment.
 
 ## Implementation status & known TODOs
 
-This is a working MVP, ported faithfully from the proven `ref/background-agents`
-OpenCode integration. The seams compile, import, and pass smoke tests. Remaining
-items need validation on a first live run:
+This is a working MVP, ported faithfully from the proven `ref/background-agents` OpenCode integration. The seams compile, import, and pass smoke tests. Remaining items need validation on a first live run:
 
-- **OpenCode `1.14.41`** (`runtime/bridge.py`, `runtime/entrypoint.py`,
-  `bundles/pr_review/opencode/opencode.jsonc`): the session/`/event`-SSE/prompt
-  driving and config are ported against this exact pin (the version the reference
-  proved out). Keep the pin; if you upgrade OpenCode, re-validate the bridge SSE
-  path. Subagent agent-file frontmatter (`mode: subagent`) should be confirmed on
-  first run (bodies still load as agent prompts regardless).
-- **`report_finding` tool** (`bundles/pr_review/tools/report_finding.js`): now an
-  `@opencode-ai/plugin` `tool()` (the reference's proven pattern), posting to
-  `/internal/runs/{id}/findings` — not an MCP server.
-- **E2B SDK specifics** (`core/sandbox/e2b_provider.py`): confirm `connect`/resume
-  parameter names and pause semantics against the installed `e2b` version.
-- **Bitbucket inline comments** (`core/vcs/bitbucket.py`): anchor `to`/`from`
-  placement is best-effort; verify against a real repo. GitLab/Bitbucket post
-  per-comment (no bundled review like GitHub).
-- **Sandbox egress allowlist**: passed as env to the sandbox; strict network
-  egress firewalling is enforced at the template/self-host layer (deferred).
-- **LLM keys in the sandbox**: the in-sandbox agent needs them to call the model
-  (unlike git creds, which are brokered). Mitigated by egress allowlist +
-  ephemeral sandboxes; planned hardening is a controller-side LLM proxy.
+- **OpenCode `1.14.41`** (`runtime/bridge.py`, `runtime/entrypoint.py`, `bundles/pr_review/opencode/opencode.jsonc`): the session/`/event`-SSE/prompt driving and config are ported against this exact pin (the version the reference proved out). Keep the pin; if you upgrade OpenCode, re-validate the bridge SSE path. Subagent agent-file frontmatter (`mode: subagent`) should be confirmed on first run (bodies still load as agent prompts regardless).
+- **`report_finding` tool** (`bundles/pr_review/tools/report_finding.js`): now an `@opencode-ai/plugin` `tool()` (the reference's proven pattern), posting to `/internal/runs/{id}/findings` — not an MCP server.
+- **E2B SDK specifics** (`core/sandbox/e2b_provider.py`): confirm `connect`/resume parameter names and pause semantics against the installed `e2b` version.
+- **Bitbucket inline comments** (`core/vcs/bitbucket.py`): anchor `to`/`from` placement is best-effort; verify against a real repo. GitLab/Bitbucket post per-comment (no bundled review like GitHub).
+- **Sandbox egress allowlist**: passed as env to the sandbox; strict network egress firewalling is enforced at the template/self-host layer (deferred).
+- **LLM keys in the sandbox**: the in-sandbox agent needs them to call the model (unlike git creds, which are brokered). Mitigated by egress allowlist + ephemeral sandboxes; planned hardening is a controller-side LLM proxy.
 
 ## Bundles
 
@@ -428,31 +342,20 @@ A capability bundle lives under `bundles/<name>/` and provides:
 - `schema.py` — the bundle's structured output contract
 - `<harness>/` — per-harness assets (e.g. `opencode/skills`, `opencode/subagents`)
 
-Adding a bundle does **not** touch the core. Adding a harness means one adapter +
-porting prompt assets; tools and core are untouched.
+Adding a bundle does **not** touch the core. Adding a harness means one adapter porting prompt assets; tools and core are untouched.
 
 ### Deferred (tracked, not built yet)
 
 - Triage gate (gate cheap PRs before booting a sandbox)
-- Snapshot / warm-pool latency optimization (E2B `pause`/`resume` + prebuilt
-  templates)
+- Snapshot / warm-pool latency optimization (E2B `pause`/`resume` + prebuilt templates)
 - Knowledge base (old mem0 layer **dropped**; redesigned later as MCP tools)
 - Live streaming / multiplayer UI (SSE + Redis if/when needed)
 - Azure DevOps provider
 
 ## Implementation blueprint: `../ref/background-agents/`
 
-The Ramp-inspired Open-Inspect reference is cloned at `../ref/background-agents/`.
-Its control-plane is TS/Cloudflare (we don't use that), but its
-**`packages/sandbox-runtime` is Python and ports almost directly** into our core:
-the supervisor (`entrypoint.py`), the outbound `bridge.py`, the
-`git_credential_helper.py`, GitHub-App auth, OpenCode plugins/tools, and a
-capability-flagged `SandboxProvider` interface (E2B ≈ their Daytona persistent
-provider). 
+The Ramp-inspired Open-Inspect reference is cloned at `../ref/background-agents/`. Its control-plane is TS/Cloudflare (we don't use that), but its **`packages/sandbox-runtime` is Python and ports almost directly** into our core: the supervisor (`entrypoint.py`), the outbound `bridge.py`, the `git_credential_helper.py`, GitHub-App auth, OpenCode plugins/tools, and a capability-flagged `SandboxProvider` interface (E2B ≈ their Daytona persistent provider). 
 
 ## Relationship to `../pr-agent/`
 
-`../pr-agent/` is the legacy one-shot reviewer, kept as a fallback behind a
-feature flag. `agent/` does not import from it — reusable pieces are
-**copy-pasted/ported** in. Once `agent/` is proven, `../pr-agent/` will be
-deleted.
+`../pr-agent/` is the legacy one-shot reviewer, kept as a fallback behind a feature flag. `agent/` does not import from it — reusable pieces are **copy-pasted/ported** in. Once `agent/` is proven, `../pr-agent/` will be deleted.

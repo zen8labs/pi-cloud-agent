@@ -1,14 +1,8 @@
 # Architecture
 
-CoReview Agent is a **cloud agent runtime**: a webhook-driven controller that
-runs a capable coding agent *inside an ephemeral sandbox*, on a real checkout of
-the code under review, and publishes grounded results back to the source host.
+CoReview Agent is a **cloud agent runtime**: a webhook-driven controller that runs a capable coding agent *inside an ephemeral sandbox*, on a real checkout of the code under review, and publishes grounded results back to the source host.
 
-This document is the design record. Read it to understand **why** the pieces are
-shaped the way they are before you change a seam. The first — and today only —
-capability is **pull-request review**, but the architecture is deliberately split
-so that future capabilities (complete-a-PR, deep research, spreadsheet work, …)
-are added as *bundles* on the same core, not as forks of it.
+This document is the design record. Read it to understand **why** the pieces are shaped the way they are before you change a seam. The first — and today only — capability is **pull-request review**, but the architecture is deliberately split so that future capabilities (complete-a-PR, deep research, spreadsheet work, …) are added as *bundles* on the same core, not as forks of it.
 
 > **Companion docs**
 > - [`README.md`](./README.md) — how to run, test, and deploy.
@@ -21,23 +15,14 @@ are added as *bundles* on the same core, not as forks of it.
 
 ## 1. The thesis: agentic-in-sandbox, not one-shot
 
-A one-shot reviewer stuffs the diff into a single prompt, parses the reply, and
-posts it. It is context- and verification-starved: it cannot read across files,
-run a linter, or check a test — so it hallucinates and misses real bugs.
+A one-shot reviewer stuffs the diff into a single prompt, parses the reply, and posts it. It is context- and verification-starved: it cannot read across files, run a linter, or check a test — so it hallucinates and misses real bugs.
 
-CoReview Agent takes the opposite bet: put a capable model **in a tool-calling
-loop, on a real checkout, in a sandbox**. It pulls surrounding code on demand,
-runs linters and tests, and **grounds every finding** against actual file content
-or command output before reporting it. The agent is limited by model
-intelligence, not by missing context or tools.
+CoReview Agent takes the opposite bet: put a capable model **in a tool-calling loop, on a real checkout, in a sandbox**. It pulls surrounding code on demand, runs linters and tests, and **grounds every finding** against actual file content or command output before reporting it. The agent is limited by model intelligence, not by missing context or tools.
 
 Two design implications run through everything below:
 
-1. **Invest in tools and verification, not bigger prompts.** A finding without
-   evidence is speculation; the `report_finding` contract *requires* a quoted
-   read range or captured command output.
-2. **The core knows nothing about "PR review."** It knows about sandboxes, a VCS,
-   a harness, and runs. The review behavior lives entirely in a bundle.
+1. **Invest in tools and verification, not bigger prompts.** A finding without evidence is speculation; the `report_finding` contract *requires* a quoted read range or captured command output.
+2. **The core knows nothing about "PR review."** It knows about sandboxes, a VCS, a harness, and runs. The review behavior lives entirely in a bundle.
 
 ---
 
@@ -67,34 +52,20 @@ flowchart LR
 
 Four roles, two trust zones:
 
-- **Controller** (`core/`, trusted): the coordinator and the trust boundary. It
-  verifies webhooks, queues runs, brokers short-lived secrets, and publishes
-  results. It never executes untrusted code.
-- **Sandbox** (an E2B Firecracker microVM, untrusted): ephemeral compute holding
-  the checkout and dev tools. It runs the PR author's code, so it is treated as
-  hostile — non-root, ephemeral per run, no long-lived secrets.
-- **Supervisor + Bridge** (`runtime/`, in-sandbox glue): the supervisor is PID-1
-  inside the VM; the bridge is the harness↔controller link. **The bridge dials
-  the controller outbound** — the controller never reaches into the sandbox.
-- **Harness** (OpenCode, server-first): the managed agent runtime that runs the
-  actual tool-calling loop. It lives behind an adapter so it can be swapped.
+- **Controller** (`core/`, trusted): the coordinator and the trust boundary. It verifies webhooks, queues runs, brokers short-lived secrets, and publishes results. It never executes untrusted code.
+- **Sandbox** (an E2B Firecracker microVM, untrusted): ephemeral compute holding the checkout and dev tools. It runs the PR author's code, so it is treated as hostile — non-root, ephemeral per run, no long-lived secrets.
+- **Supervisor + Bridge** (`runtime/`, in-sandbox glue): the supervisor is PID-1 inside the VM; the bridge is the harness↔controller link. **The bridge dials the controller outbound** — the controller never reaches into the sandbox.
+- **Harness** (OpenCode, server-first): the managed agent runtime that runs the actual tool-calling loop. It lives behind an adapter so it can be swapped.
 
-**Why outbound-dial?** A sandbox that only makes outbound calls works through NAT
-and firewalls and needs no inbound exposure. The single credential it holds is a
-per-run bearer token scoped to that one run's callbacks — see
-[§5](#5-trust-boundary--secrets).
+**Why outbound-dial?** A sandbox that only makes outbound calls works through NAT and firewalls and needs no inbound exposure. The single credential it holds is a per-run bearer token scoped to that one run's callbacks — see [§5](#5-trust-boundary--secrets).
 
-**Why a server-first, open-source harness?** You can drive it from any
-controller, build other clients later, and — crucially — the agent can read the
-harness's own source to resolve ambiguous behavior instead of guessing it. Don't
-build a bespoke agent loop; drive a real one behind an adapter.
+**Why a server-first, open-source harness?** You can drive it from any controller, build other clients later, and — crucially — the agent can read the harness's own source to resolve ambiguous behavior instead of guessing it. Don't build a bespoke agent loop; drive a real one behind an adapter.
 
 ---
 
 ## 3. The request lifecycle
 
-A single review, end to end. Status transitions are the `RunStatus` enum in
-`core/types.py`; persistence is described in [§6](#6-state--persistence).
+A single review, end to end. Status transitions are the `RunStatus` enum in `core/types.py`; persistence is described in [§6](#6-state--persistence).
 
 ```mermaid
 sequenceDiagram
@@ -128,28 +99,15 @@ sequenceDiagram
     W->>SBX: stop sandbox (always, in finally)
 ```
 
-The controller-side driver is `core/orchestrator/runner.py::execute_run`. It owns
-only the **generic** state machine and the trust-boundary operations
-(provisioning, secret brokering, publishing). It knows nothing about *how* a
-review is performed — that is the bundle's skill.
+The controller-side driver is `core/orchestrator/runner.py::execute_run`. It owns only the **generic** state machine and the trust-boundary operations (provisioning, secret brokering, publishing). It knows nothing about *how* a review is performed — that is the bundle's skill.
 
-**Event relay (the in-process seam).** The bridge POSTs events/findings to the
-controller's internal API (`core/api/routes/internal.py`). Those handlers
-`publish()` onto an in-process per-run event bus (`core/orchestrator/bus.py`); the
-harness adapter's `run()` `subscribe()`s and yields typed `Event`s back to
-`execute_run` until a terminal `done`/`error`. **This is why the API and worker
-share a process by default** — the bus is in-memory. To split them into separate
-tiers, promote the bus to Redis pub/sub; the call sites don't change. (The
-live-log SSE endpoint in `core/api/routes/runs.py` deliberately polls the
-`run_events` table instead of the bus, so it works regardless of process layout.)
+**Event relay (the in-process seam).** The bridge POSTs events/findings to the controller's internal API (`core/api/routes/internal.py`). Those handlers `publish()` onto an in-process per-run event bus (`core/orchestrator/bus.py`); the harness adapter's `run()` `subscribe()`s and yields typed `Event`s back to `execute_run` until a terminal `done`/`error`. **This is why the API and worker share a process by default** — the bus is in-memory. To split them into separate tiers, promote the bus to Redis pub/sub; the call sites don't change. (The live-log SSE endpoint in `core/api/routes/runs.py` deliberately polls the `run_events` table instead of the bus, so it works regardless of process layout.)
 
 ---
 
 ## 4. Core contracts (the seams)
 
-The extension points are all `typing.Protocol`s resolved by small factory
-functions, so a new provider/harness/bundle drops in **without touching the
-core**. Keep these contracts free of provider- and harness-specific detail.
+The extension points are all `typing.Protocol`s resolved by small factory functions, so a new provider/harness/bundle drops in **without touching the core**. Keep these contracts free of provider- and harness-specific detail.
 
 | Contract | File | Responsibility |
 |---|---|---|
@@ -159,22 +117,15 @@ core**. Keep these contracts free of provider- and harness-specific detail.
 | `HarnessAdapter` | `core/harness/base.py` | `runtime_env` (boot config) · `start` · `run` (stream events) · `stop` |
 | `Bundle` | `core/bundles.py` | portable MCP/plugin tools · `build_task(trigger) → TaskSpec` · per-harness prompt assets |
 
-Each contract has a factory: `get_vcs_provider(name)`, `get_sandbox_provider()`,
-`get_harness_adapter(name)`, `get_bundle(name)`. They lazy-import their
-implementations so importing the package never forces an optional dependency
-(e.g. the `e2b` or `litellm` SDK) to be installed — important for the
-dependency-light in-sandbox runtime and for `make compile`.
+Each contract has a factory: `get_vcs_provider(name)`, `get_sandbox_provider()`, `get_harness_adapter(name)`, `get_bundle(name)`. They lazy-import their implementations so importing the package never forces an optional dependency (e.g. the `e2b` or `litellm` SDK) to be installed — important for the dependency-light in-sandbox runtime and for `make compile`.
 
-`TaskSpec` is the pivot: a bundle turns a raw webhook trigger into a
-harness-agnostic `TaskSpec`, and the orchestrator drives *that* — it never sees
-the trigger's provider-specific shape.
+`TaskSpec` is the pivot: a bundle turns a raw webhook trigger into a harness-agnostic `TaskSpec`, and the orchestrator drives *that* — it never sees the trigger's provider-specific shape.
 
 ---
 
 ## 5. Trust boundary & secrets
 
-The sandbox runs untrusted PR-author code. The governing rule: **no long-lived
-secret ever enters the sandbox.**
+The sandbox runs untrusted PR-author code. The governing rule: **no long-lived secret ever enters the sandbox.**
 
 - **Per-run bearer token.** At create time the controller mints a `SANDBOX_AUTH_TOKEN`
   (`Run.auth_token`) and injects it as the *only* credential the sandbox holds.
@@ -201,20 +152,13 @@ secret ever enters the sandbox.**
   token**, not the App's — mixing them would let a user approve their own
   unreviewed code through the bot (a privilege-escalation vector).
 
-**The one acknowledged exposure: LLM keys.** The in-sandbox agent needs an LLM
-key to call the model, so LLM provider keys (passed via `secret_env`, kept
-separate from non-secret `env`) genuinely enter the sandbox. This is mitigated by
-the sandbox's ephemerality and an egress allowlist; the planned hardening is a
-controller-side LLM proxy so keys never cross the boundary. Until then, treat the
-gateway key as the blast radius of one ephemeral run.
+**The one acknowledged exposure: LLM keys.** The in-sandbox agent needs an LLM key to call the model, so LLM provider keys (passed via `secret_env`, kept separate from non-secret `env`) genuinely enter the sandbox. This is mitigated by the sandbox's ephemerality and an egress allowlist; the planned hardening is a controller-side LLM proxy so keys never cross the boundary. Until then, treat the gateway key as the blast radius of one ephemeral run.
 
 ---
 
 ## 6. State & persistence
 
-State lives in **Postgres** (`core/state/`), replacing the Cloudflare Durable
-Objects of the reference implementation with VPC-native pieces. Four tables
-(`core/state/models.py`):
+State lives in **Postgres** (`core/state/`), replacing the Cloudflare Durable Objects of the reference implementation with VPC-native pieces. Four tables (`core/state/models.py`):
 
 - **`runs`** — one row per review: status, repo/PR coordinates, the opaque
   `trigger` payload, the per-run `auth_token`, the provider's native sandbox id,
@@ -225,31 +169,17 @@ Objects of the reference implementation with VPC-native pieces. Four tables
   present) and a `published` flag. **Only grounded findings are published.**
 - **`repo_flags`** — per-repo `legacy`|`agentic` override for rollout ([§10](#10-feature-flagged-rollout)).
 
-**Worker claim, not a single writer.** `core/state/repo.py::claim_next_run` uses
-`SELECT … FOR UPDATE SKIP LOCKED`, so multiple worker processes can pull from the
-same queue without double-processing — the durable-object single-writer pattern
-replaced with ordinary row locking.
+**Worker claim, not a single writer.** `core/state/repo.py::claim_next_run` uses `SELECT … FOR UPDATE SKIP LOCKED`, so multiple worker processes can pull from the same queue without double-processing — the durable-object single-writer pattern replaced with ordinary row locking.
 
-**Orphan reconciliation.** Completion and wall-clock-timeout logic lives
-in-process, so a controller restart would otherwise strand an in-flight run as
-`running` forever (its sandbox is already gone). On boot,
-`reconcile_orphaned_runs` fails any run left mid-flight. ⚠️ Today this is
-unconditional, which is safe only for a **single controller replica** — see the
-known-issues checklist in the README before scaling out.
+**Orphan reconciliation.** Completion and wall-clock-timeout logic lives in-process, so a controller restart would otherwise strand an in-flight run as `running` forever (its sandbox is already gone). On boot, `reconcile_orphaned_runs` fails any run left mid-flight. ⚠️ Today this is unconditional, which is safe only for a **single controller replica** — see the known-issues checklist in the README before scaling out.
 
-**Migrations.** `init_db()` auto-creates tables on boot for dev convenience.
-Production should manage schema with Alembic (already a dependency) and disable
-auto-create; the migration directory is not scaffolded yet.
+**Migrations.** `init_db()` auto-creates tables on boot for dev convenience. Production should manage schema with Alembic (already a dependency) and disable auto-create; the migration directory is not scaffolded yet.
 
 ---
 
 ## 7. VCS providers
 
-GitHub is the primary backend; **GitLab and Bitbucket are day-0** behind the same
-`VCSProvider` contract (`core/vcs/`). Azure DevOps is planned. Implementations are
-ported and reshaped from the legacy `../pr-agent` providers, but reduced to the
-small surface a headless review needs: verify/parse webhook, mint clone token,
-get PR (metadata + paginated diff), publish inline + summary.
+GitHub is the primary backend; **GitLab and Bitbucket are day-0** behind the same `VCSProvider` contract (`core/vcs/`). Azure DevOps is planned. Implementations are ported and reshaped from the legacy `../pr-agent` providers, but reduced to the small surface a headless review needs: verify/parse webhook, mint clone token, get PR (metadata + paginated diff), publish inline + summary.
 
 Provider-specific sharp edges worth knowing:
 
@@ -268,9 +198,7 @@ Provider-specific sharp edges worth knowing:
 
 ## 8. The sandbox runtime: supervisor + bridge
 
-Everything under `runtime/` runs **inside** the sandbox and ships in a *different*
-image (`Dockerfile.sandbox`) than the controller. The sandbox boots a **baked
-template**, so changes here require a template rebuild, not a controller restart.
+Everything under `runtime/` runs **inside** the sandbox and ships in a *different* image (`Dockerfile.sandbox`) than the controller. The sandbox boots a **baked template**, so changes here require a template rebuild, not a controller restart.
 
 **Supervisor** (`runtime/entrypoint.py`, PID-1), in order:
 
@@ -288,12 +216,7 @@ template**, so changes here require a template rebuild, not a controller restart
    invisible — this is the primary debug surface).
 7. Monitor OpenCode with backoff/restart; handle SIGTERM/SIGINT gracefully.
 
-**Bridge** (`runtime/bridge.py`): creates an OpenCode session, opens the `/event`
-SSE stream *before* injecting the prompt (or the first events are missed), posts
-the prompt with a monotonically-ascending `messageID`, translates OpenCode
-message-parts into controller events, and posts a terminal `{status: done}` when
-the session goes idle. Findings do **not** flow through the bridge — the
-`report_finding` tool POSTs them straight to the internal API.
+**Bridge** (`runtime/bridge.py`): creates an OpenCode session, opens the `/event` SSE stream *before* injecting the prompt (or the first events are missed), posts the prompt with a monotonically-ascending `messageID`, translates OpenCode message-parts into controller events, and posts a terminal `{status: done}` when the session goes idle. Findings do **not** flow through the bridge — the `report_finding` tool POSTs them straight to the internal API.
 
 > **The OpenCode pin is load-bearing.** OpenCode is pinned to **1.14.41**
 > everywhere (`Dockerfile.sandbox`, the bridge, `opencode.jsonc`). A later release
@@ -301,21 +224,13 @@ the session goes idle. Findings do **not** flow through the bridge — the
 > connects, posts the prompt, and receives zero streamed events. If you bump
 > OpenCode, re-validate the entire bridge SSE path.
 
-**Model wiring.** `AGENT_MODEL` uses a `provider/model` form, e.g.
-`aigateway/MiniMax/MiniMax-M2.7`. The custom `aigateway/` prefix tells the
-supervisor to wire OpenCode's provider block to the self-hosted OpenAI-compatible
-gateway (`@ai-sdk/openai-compatible` + `OPENAI_BASE_URL`/`OPENAI_API_KEY`). The
-same `AGENT_MODEL` is reused by the controller-side LLM service, which rewrites
-the `aigateway/` prefix to LiteLLM's `openai/` when calling the gateway directly
-([§9](#9-capability-bundles) keeps tools portable; model routing is shared so the
-controller and the in-sandbox agent always agree on the model).
+**Model wiring.** `AGENT_MODEL` uses a `provider/model` form, e.g. `aigateway/MiniMax/MiniMax-M2.7`. The custom `aigateway/` prefix tells the supervisor to wire OpenCode's provider block to the self-hosted OpenAI-compatible gateway (`@ai-sdk/openai-compatible` + `OPENAI_BASE_URL`/`OPENAI_API_KEY`). The same `AGENT_MODEL` is reused by the controller-side LLM service, which rewrites the `aigateway/` prefix to LiteLLM's `openai/` when calling the gateway directly ([§9](#9-capability-bundles) keeps tools portable; model routing is shared so the controller and the in-sandbox agent always agree on the model).
 
 ---
 
 ## 9. Capability bundles
 
-A bundle specializes the task-agnostic core for one job. It lives under
-`bundles/<name>/` and contributes:
+A bundle specializes the task-agnostic core for one job. It lives under `bundles/<name>/` and contributes:
 
 - **Portable parts** (harness-independent): tool servers/plugins (behavioral
   logic lives here so it ports across harnesses), an output schema (`schema.py`),
@@ -323,8 +238,7 @@ A bundle specializes the task-agnostic core for one job. It lives under
 - **Per-harness assets**: prompt files under `<harness>/` — for OpenCode, the
   `skill`, the `reviewer`/`critic` subagents, and `opencode.jsonc`.
 
-The `pr_review` bundle implements a **split → fan-out → critic → report** flow,
-expressed *declaratively in the skill*, not in controller code:
+The `pr_review` bundle implements a **split → fan-out → critic → report** flow, expressed *declaratively in the skill*, not in controller code:
 
 1. The skill reads `git diff base...head` and splits it into independent review
    units.
@@ -336,21 +250,13 @@ expressed *declaratively in the skill*, not in controller code:
 4. Survivors are reported once each via `report_finding`, which POSTs to the
    controller. The controller publishes only grounded findings.
 
-Keeping fan-out declarative in the bundle is what lets the core stay
-task-agnostic — the harness spawns the subagents; the controller just relays
-events and publishes results.
+Keeping fan-out declarative in the bundle is what lets the core stay task-agnostic — the harness spawns the subagents; the controller just relays events and publishes results.
 
 ---
 
 ## 10. Feature-flagged rollout
 
-During migration off the legacy one-shot `../pr-agent`, each repo resolves to a
-`ReviewMode` — `legacy` (hand off to the standalone pr-agent deployment) or
-`agentic` (handle here). `core/config/flags.py::resolve_review_mode` checks the
-`repo_flags` table first, then falls back to the `DEFAULT_REVIEW_MODE` env
-(default `agentic`). This allows side-by-side A/B rollout and an instant
-per-repo kill switch back to the proven path. The webhook returns an
-`X-CoReview-Route: legacy|agentic` header so routing is observable.
+During migration off the legacy one-shot `../pr-agent`, each repo resolves to a `ReviewMode` — `legacy` (hand off to the standalone pr-agent deployment) or `agentic` (handle here). `core/config/flags.py::resolve_review_mode` checks the `repo_flags` table first, then falls back to the `DEFAULT_REVIEW_MODE` env (default `agentic`). This allows side-by-side A/B rollout and an instant per-repo kill switch back to the proven path. The webhook returns an `X-CoReview-Route: legacy|agentic` header so routing is observable.
 
 ---
 
@@ -369,18 +275,13 @@ Because each seam is a Protocol + factory, extension is additive:
   schema, tools, and per-harness assets, and register it. The core never imports
   a bundle directly; bundles self-register on import.
 
-The golden rule: **new capability or integration = a new module behind an
-existing contract, never an edit to the orchestrator.** If you find yourself
-adding capability-specific logic to `core/orchestrator/`, the abstraction is
-leaking — push it into a bundle or a provider.
+The golden rule: **new capability or integration = a new module behind an existing contract, never an edit to the orchestrator.** If you find yourself adding capability-specific logic to `core/orchestrator/`, the abstraction is leaking — push it into a bundle or a provider.
 
 ---
 
 ## 12. Known limitations & deferred work
 
-Honest map of what is *not* built yet (see the README's "Known issues" checklist
-for actively-tracked bugs, and `building-a-cloud-agent.md` §9 for the full
-roadmap):
+Honest map of what is *not* built yet (see the README's "Known issues" checklist for actively-tracked bugs, and `building-a-cloud-agent.md` §9 for the full roadmap):
 
 - **Single-replica reconciliation** — `reconcile_orphaned_runs` fails *all*
   in-flight runs on boot, which is unsafe with more than one controller replica.
@@ -398,5 +299,4 @@ roadmap):
   pre-filter yet.
 - **Alembic not scaffolded** — schema is auto-created on boot.
 
-When you pick up any of these, update this section and the companion docs so the
-map stays honest.
+When you pick up any of these, update this section and the companion docs so the map stays honest.
