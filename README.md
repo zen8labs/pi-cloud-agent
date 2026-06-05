@@ -1,10 +1,6 @@
-# agent
+# Cloud Agent
 
-Agentic cloud-agent runtime for CoReview. A **minimal, task-agnostic core**
-(sandbox + VCS + harness + API) plus **capability bundles** that specialize it.
-The first bundle is **PR code review**; the same core is meant to later run other
-agents (complete-a-PR, Excel, deep-research, …) by adding bundles, not by
-changing the core.
+Agentic cloud-agent runtime for CoReview. A **minimal, task-agnostic core** (sandbox + VCS + harness + API) plus **capability bundles** that specialize it. The first bundle is **PR code review**; the same core is meant to later run other agents (complete-a-PR, Excel, deep-research, …) by adding bundles, not by changing the core.
 
 ---
 
