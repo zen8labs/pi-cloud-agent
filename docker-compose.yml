@@ -29,9 +29,9 @@ services:
 
   agent:
     build:
-      context: .
+      context: ./agent
       dockerfile: Dockerfile
-    env_file: .env
+    env_file: agent/.env
     environment:
       # Override the .env DB host so the container reaches the compose service.
       DATABASE_URL: postgresql+asyncpg://coreview:coreview@db:5432/coreview_agent
