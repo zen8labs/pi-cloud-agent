@@ -5,6 +5,36 @@ import type { AgentEvent, RunStatus } from "@/lib/types";
 import { STATUS_META } from "@/lib/format";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 
+/* ── Subagent session model ──────────────────────────────────────────────── */
+
+export type SubagentSession = {
+  sessionId: string;
+  description: string;
+  status: "running" | "done";
+};
+
+export function extractSubagents(events: AgentEvent[]): SubagentSession[] {
+  const sessions = new Map<string, SubagentSession>();
+  for (const e of events) {
+    if (e.type !== "subagent_event") continue;
+    const d = e.data || {};
+    const sid = String(d.subagent_session_id ?? "");
+    if (!sid) continue;
+    const eventType = String(d.event_type ?? "");
+    if (eventType === "start") {
+      sessions.set(sid, {
+        sessionId: sid,
+        description: String(d.task_description ?? `Task ${sessions.size + 1}`),
+        status: "running",
+      });
+    } else if (eventType === "done") {
+      const existing = sessions.get(sid);
+      if (existing) existing.status = "done";
+    }
+  }
+  return Array.from(sessions.values());
+}
+
 /* ── Fold the flat event log into renderable blocks ──────────────────────── */
 
 type ToolBlock = {
@@ -13,6 +43,7 @@ type ToolBlock = {
   args: Record<string, unknown>;
   status: string;
   callId: string;
+  isTask?: boolean;
 };
 
 type Block =
@@ -28,12 +59,32 @@ function foldEvents(
   events: AgentEvent[],
   userPrompt: string | null,
   showLogs: boolean,
+  selectedSubagentId: string | null,
 ): Block[] {
   const blocks: Block[] = [];
-  if (userPrompt) blocks.push({ kind: "user", text: userPrompt });
+  if (!selectedSubagentId && userPrompt) blocks.push({ kind: "user", text: userPrompt });
   const toolByCall = new Map<string, ToolBlock>();
 
   for (const e of events) {
+    // ── Subagent event routing ───────────────────────────────────────────
+    if (e.type === "subagent_event") {
+      const d = e.data || {};
+      const sid = String(d.subagent_session_id ?? "");
+      const innerType = String(d.event_type ?? "");
+      if (innerType === "start" || innerType === "done") continue;
+
+      if (selectedSubagentId) {
+        // In subagent view: only show this subagent's events.
+        if (sid !== selectedSubagentId) continue;
+        foldInnerEvent(innerType, d, blocks, toolByCall, showLogs);
+      }
+      // In main view: task tool_calls already represent the subagent — skip inner events.
+      continue;
+    }
+
+    // ── Main session events ──────────────────────────────────────────────
+    if (selectedSubagentId) continue; // main-session events hidden in subagent view
+
     const d = e.data || {};
     switch (e.type) {
       case "token": {
@@ -48,6 +99,7 @@ function foldEvents(
         const callId = String(d.callId ?? "");
         const args = (d.args as Record<string, unknown>) || {};
         const status = String(d.status ?? "");
+        const isTask = String(d.tool ?? "") === "task";
         const existing = callId ? toolByCall.get(callId) : undefined;
         if (existing) {
           existing.status = status;
@@ -60,6 +112,7 @@ function foldEvents(
           args,
           status,
           callId,
+          isTask,
         };
         if (callId) toolByCall.set(callId, block);
         blocks.push(block);
@@ -98,6 +151,56 @@ function foldEvents(
     }
   }
   return blocks.filter((b) => b.kind !== "assistant" || b.text.trim().length > 0);
+}
+
+function foldInnerEvent(
+  innerType: string,
+  d: Record<string, unknown>,
+  blocks: Block[],
+  toolByCall: Map<string, ToolBlock>,
+  showLogs: boolean,
+): void {
+  switch (innerType) {
+    case "token": {
+      const content = String(d.content ?? "");
+      if (!content) return;
+      const last = blocks[blocks.length - 1];
+      if (last && last.kind === "assistant") last.text += content;
+      else blocks.push({ kind: "assistant", text: content });
+      return;
+    }
+    case "tool_call": {
+      const callId = String(d.callId ?? "");
+      const args = (d.args as Record<string, unknown>) || {};
+      const status = String(d.status ?? "");
+      const existing = callId ? toolByCall.get(callId) : undefined;
+      if (existing) {
+        existing.status = status;
+        if (Object.keys(args).length) existing.args = args;
+        return;
+      }
+      const block: ToolBlock = {
+        kind: "tool",
+        tool: String(d.tool ?? "tool"),
+        args,
+        status,
+        callId,
+      };
+      if (callId) toolByCall.set(callId, block);
+      blocks.push(block);
+      return;
+    }
+    case "log": {
+      const text = logText(d);
+      if (!text || (!showLogs && isVerbose(text))) return;
+      blocks.push({ kind: "log", text });
+      return;
+    }
+    case "error": {
+      blocks.push({ kind: "error", text: String(d.message ?? d.error ?? "error") });
+      return;
+    }
+  }
 }
 
 function isVerbose(text: string): boolean {
@@ -177,15 +280,17 @@ export function ActivityFeed({
   userPrompt,
   active,
   showLogs = false,
+  selectedSubagentId = null,
 }: {
   events: AgentEvent[];
   userPrompt: string | null;
   active: boolean;
   showLogs?: boolean;
+  selectedSubagentId?: string | null;
 }) {
   const blocks = useMemo(
-    () => foldEvents(events, userPrompt, showLogs),
-    [events, userPrompt, showLogs],
+    () => foldEvents(events, userPrompt, showLogs, selectedSubagentId),
+    [events, userPrompt, showLogs, selectedSubagentId],
   );
   const endRef = useRef<HTMLDivElement>(null);
   const count = blocks.length;
@@ -304,6 +409,8 @@ function CollapsibleLog({ text }: { text: string }) {
 }
 
 function ToolRow({ block }: { block: ToolBlock }) {
+  if (block.isTask) return <TaskRow block={block} />;
+
   const verb = TOOL_VERB[block.tool] ?? block.tool;
   const summary = toolSummary(block.tool, block.args);
   const failed = block.status === "error";
@@ -327,6 +434,35 @@ function ToolRow({ block }: { block: ToolBlock }) {
       )}
       {failed && <span className="text-xs text-red-500">failed</span>}
       {running && <span className="text-[11px] text-[var(--color-faint)]">running…</span>}
+    </div>
+  );
+}
+
+function TaskRow({ block }: { block: ToolBlock }) {
+  const desc = String(
+    (block.args as Record<string, string>).description ||
+      (block.args as Record<string, string>).prompt ||
+      "",
+  );
+  const failed = block.status === "error";
+  const done = block.status === "completed";
+  const running = !done && !failed;
+
+  return (
+    <div className="activity-row activity-row--task">
+      <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+        {failed ? (
+          <span className="text-red-500">✕</span>
+        ) : done ? (
+          <span className="text-emerald-500">✓</span>
+        ) : (
+          <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-[var(--color-accent)]" />
+        )}
+      </span>
+      <span className="font-medium text-[var(--color-ink)]">task</span>
+      {desc && <span className="activity-row-code truncate max-w-xs">{desc}</span>}
+      {running && <span className="text-[11px] text-[var(--color-faint)]">running…</span>}
+      {failed && <span className="text-xs text-red-500">failed</span>}
     </div>
   );
 }

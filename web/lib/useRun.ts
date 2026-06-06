@@ -5,7 +5,7 @@ import { api, streamUrl } from "./api";
 import { type AgentEvent, type RunDetail, type RunStatus } from "./types";
 
 // Event names the controller streams as agent activity (each carries `id: seq`).
-const FEED_EVENTS = ["token", "tool_call", "log", "finding"] as const;
+const FEED_EVENTS = ["token", "tool_call", "log", "finding", "subagent_event"] as const;
 
 /**
  * Live view of a single run over a resumable SSE stream.

@@ -344,21 +344,17 @@ class AgentBridge:
     async def _parse_sse_stream(
         self,
         response: httpx.Response,
-        timeout_ctx: asyncio.Timeout | None,
     ) -> AsyncIterator[dict[str, Any]]:
         """Parse the OpenCode Server-Sent-Events stream.
 
-        SSE events are ``data: {json}`` blocks separated by blank lines. If a
-        timeout context is provided, its deadline is reset on every chunk so the
-        inactivity timeout measures gaps between data, not total duration.
+        SSE events are ``data: {json}`` blocks separated by blank lines.
+        Timeout rescheduling is intentionally NOT done here — the caller resets
+        the deadline only on meaningful events, so heartbeats don't mask stuck
+        subagents.
         """
         buffer = ""
         async for chunk in response.aiter_text():
             buffer += chunk
-            if timeout_ctx is not None:
-                timeout_ctx.reschedule(
-                    asyncio.get_running_loop().time() + self.sse_inactivity_timeout
-                )
 
             while "\n\n" in buffer:
                 event_str, buffer = buffer.split("\n\n", 1)
@@ -447,15 +443,20 @@ class AgentBridge:
           1. open the SSE stream (``GET /event``);
           2. POST the prompt to ``/session/{id}/prompt_async`` with an ascending
              ``messageID``;
-          3. only forward parts of assistant messages whose ``parentID`` equals
-             our injected message id (filters out unrelated/cached chatter);
-          4. terminate on the parent session's ``session.idle`` event (or the
-             equivalent ``session.status`` with ``status.type == "idle"``).
+          3. forward parts of assistant messages whose ``parentID`` equals our
+             injected message id (filters out unrelated/cached chatter);
+          4. track subagent sessions spawned by ``task`` tool calls and forward
+             their events as ``subagent_event`` type;
+          5. terminate on the parent session's ``session.idle`` event.
 
-        Note the ordering: the SSE stream MUST be opened before posting the
-        prompt, otherwise the first events can be missed. Parts that arrive
-        before their owning ``message.updated`` authorizes the message id are
-        buffered and replayed on authorization.
+        The SSE stream MUST be opened before posting the prompt to avoid missing
+        early events. Parts that arrive before their owning ``message.updated``
+        authorizes the message id are buffered and replayed on authorization.
+
+        Hang-safety: the inactivity timeout is reset only on meaningful events,
+        NOT on ``server.heartbeat`` — so a stuck subagent that produces no real
+        output will time out in ``sse_inactivity_timeout`` seconds rather than
+        running until ``PROMPT_MAX_DURATION``.
         """
         assert self.opencode_client is not None and self.opencode_session_id
 
@@ -467,15 +468,20 @@ class AgentBridge:
             f"{self.opencode_base_url}/session/{self.opencode_session_id}/prompt_async"
         )
 
-        # Text already forwarded, keyed by part id, so the final catch-up only
-        # emits text longer than what was already streamed.
+        # --- Parent-session state ---
         cumulative_text: dict[str, str] = {}
         allowed_assistant_msg_ids: set[str] = set()
-        # Parts seen before their owning message was authorized; replayed once
-        # the message.updated event authorizes the message id.
+        # Parts buffered before their owning message was authorized.
         pending_parts: dict[str, list[tuple[dict[str, Any], Any]]] = {}
         pending_parts_total = 0
         loop = asyncio.get_running_loop()
+
+        # --- Subagent-session state ---
+        # session_id → {description, allowed_msg_ids, cumulative_text}
+        subagent_sessions: dict[str, dict[str, Any]] = {}
+        # Task descriptions extracted from parent tool_calls, correlated to the
+        # next new subagent session that appears in the stream.
+        pending_task_descs: list[str] = []
 
         def buffer_part(oc_msg_id: str, part: dict[str, Any], delta: Any) -> None:
             nonlocal pending_parts_total
@@ -484,17 +490,45 @@ class AgentBridge:
             pending_parts.setdefault(oc_msg_id, []).append((part, delta))
             pending_parts_total += 1
 
+        def _apply_cumtext(
+            ev: dict[str, Any],
+            part: dict[str, Any],
+            delta: Any,
+            cumtext: dict[str, str],
+        ) -> None:
+            """Update cumulative text tracking in-place for token events."""
+            if ev["type"] != "token":
+                return
+            part_id = part.get("id", "")
+            if delta:
+                cumtext[part_id] = cumtext.get(part_id, "") + str(delta)
+                ev["data"]["content"] = cumtext[part_id]
+            else:
+                cumtext[part_id] = str(part.get("text", ""))
+
         def emit_part(part: dict[str, Any], delta: Any) -> dict[str, Any] | None:
-            """Transform a part, tracking cumulative text for the final catch-up."""
             ev = self._transform_part_to_event(part, delta)
-            if ev and ev["type"] == "token":
-                part_id = part.get("id", "")
-                if delta:
-                    cumulative_text[part_id] = cumulative_text.get(part_id, "") + str(delta)
-                    ev["data"]["content"] = cumulative_text[part_id]
-                else:
-                    cumulative_text[part_id] = str(part.get("text", ""))
+            if ev:
+                _apply_cumtext(ev, part, delta, cumulative_text)
             return ev
+
+        def emit_subagent_part(
+            sid: str, part: dict[str, Any], delta: Any
+        ) -> dict[str, Any] | None:
+            ev = self._transform_part_to_event(part, delta)
+            if not ev:
+                return None
+            sa = subagent_sessions[sid]
+            _apply_cumtext(ev, part, delta, sa["cumulative_text"])
+            return {
+                "type": "subagent_event",
+                "data": {
+                    "subagent_session_id": sid,
+                    "task_description": sa["description"],
+                    "event_type": ev["type"],
+                    **ev["data"],
+                },
+            }
 
         try:
             deadline = loop.time() + self.sse_inactivity_timeout
@@ -526,49 +560,120 @@ class AgentBridge:
                             f"{prompt_response.text}"
                         )
 
-                    async for event in self._parse_sse_stream(sse_response, timeout_ctx):
+                    async for event in self._parse_sse_stream(sse_response):
                         event_type = event.get("type")
                         props = event.get("properties", {})
                         if not isinstance(props, dict):
                             props = {}
 
+                        # Heartbeats do NOT reset the inactivity timeout — this is
+                        # intentional. A stuck subagent still sends heartbeats but
+                        # produces no real output; we want the inactivity timeout to
+                        # fire so the session doesn't hang for PROMPT_MAX_DURATION.
                         if event_type in ("server.connected", "server.heartbeat"):
                             continue
 
-                        # Authorize assistant messages parented to our prompt.
+                        # Reset the inactivity timeout only on meaningful activity.
+                        timeout_ctx.reschedule(loop.time() + self.sse_inactivity_timeout)
+
+                        # ── message.updated ──────────────────────────────────────
                         if event_type == "message.updated":
                             info = props.get("info", {})
-                            if info.get("sessionID") != self.opencode_session_id:
-                                continue
-                            if info.get("role") != "assistant":
-                                continue
-                            oc_msg_id = info.get("id", "")
-                            if oc_msg_id and info.get("parentID") == opencode_message_id:
-                                allowed_assistant_msg_ids.add(oc_msg_id)
-                                replay = pending_parts.pop(oc_msg_id, [])
-                                if replay:
-                                    pending_parts_total -= len(replay)
-                                    for part, delta in replay:
-                                        ev = emit_part(part, delta)
-                                        if ev:
-                                            yield ev
+                            sid = info.get("sessionID", "")
+
+                            if sid == self.opencode_session_id:
+                                # Parent session: authorize assistant messages.
+                                if info.get("role") != "assistant":
+                                    continue
+                                oc_msg_id = info.get("id", "")
+                                if oc_msg_id and info.get("parentID") == opencode_message_id:
+                                    allowed_assistant_msg_ids.add(oc_msg_id)
+                                    replay = pending_parts.pop(oc_msg_id, [])
+                                    if replay:
+                                        pending_parts_total -= len(replay)
+                                        for part, delta in replay:
+                                            ev = emit_part(part, delta)
+                                            if ev:
+                                                yield ev
+                            elif sid:
+                                # Subagent session: register if new, authorize msgs.
+                                if sid not in subagent_sessions:
+                                    desc = (
+                                        pending_task_descs.pop(0)
+                                        if pending_task_descs
+                                        else f"Task {len(subagent_sessions) + 1}"
+                                    )
+                                    subagent_sessions[sid] = {
+                                        "description": desc,
+                                        "allowed_msg_ids": set(),
+                                        "cumulative_text": {},
+                                    }
+                                    self.log.info(
+                                        "bridge.subagent_start",
+                                        subagent_session_id=sid,
+                                        description=desc,
+                                    )
+                                    yield {
+                                        "type": "subagent_event",
+                                        "data": {
+                                            "subagent_session_id": sid,
+                                            "task_description": desc,
+                                            "event_type": "start",
+                                        },
+                                    }
+                                if info.get("role") == "assistant":
+                                    sa_msg_id = info.get("id", "")
+                                    if sa_msg_id:
+                                        subagent_sessions[sid]["allowed_msg_ids"].add(sa_msg_id)
+                                        # Replay buffered parts that arrived early.
+                                        replay = pending_parts.pop(sa_msg_id, [])
+                                        if replay:
+                                            pending_parts_total -= len(replay)
+                                            for part, delta in replay:
+                                                sa_ev = emit_subagent_part(sid, part, delta)
+                                                if sa_ev:
+                                                    yield sa_ev
                             continue
 
+                        # ── message.part.updated ─────────────────────────────────
                         if event_type == "message.part.updated":
                             part = props.get("part", {})
                             delta = props.get("delta")
                             oc_msg_id = part.get("messageID", "")
+
                             if oc_msg_id in allowed_assistant_msg_ids:
                                 ev = emit_part(part, delta)
                                 if ev:
+                                    # Capture task description for subagent correlation.
+                                    if (
+                                        ev["type"] == "tool_call"
+                                        and ev["data"].get("tool") == "task"
+                                        and ev["data"].get("status") in ("pending", "running")
+                                    ):
+                                        desc = (ev["data"].get("args") or {}).get(
+                                            "description", ""
+                                        )
+                                        if desc:
+                                            pending_task_descs.append(desc)
                                     yield ev
-                            elif oc_msg_id:
-                                buffer_part(oc_msg_id, part, delta)
+                            else:
+                                # Check subagent sessions first, then buffer.
+                                matched = False
+                                for sid, sa in subagent_sessions.items():
+                                    if oc_msg_id in sa["allowed_msg_ids"]:
+                                        sa_ev = emit_subagent_part(sid, part, delta)
+                                        if sa_ev:
+                                            yield sa_ev
+                                        matched = True
+                                        break
+                                if not matched and oc_msg_id:
+                                    buffer_part(oc_msg_id, part, delta)
                             continue
 
-                        # Terminal: parent session goes idle.
+                        # ── session.idle ─────────────────────────────────────────
                         if event_type == "session.idle":
-                            if props.get("sessionID") == self.opencode_session_id:
+                            sid = props.get("sessionID", "")
+                            if sid == self.opencode_session_id:
                                 async for fe in self._fetch_final_message_state(
                                     opencode_message_id,
                                     cumulative_text,
@@ -576,11 +681,23 @@ class AgentBridge:
                                 ):
                                     yield fe
                                 return
+                            elif sid in subagent_sessions:
+                                sa = subagent_sessions[sid]
+                                yield {
+                                    "type": "subagent_event",
+                                    "data": {
+                                        "subagent_session_id": sid,
+                                        "task_description": sa["description"],
+                                        "event_type": "done",
+                                    },
+                                }
                             continue
+
                         if event_type == "session.status":
                             status = props.get("status", {})
+                            sid = props.get("sessionID", "")
                             if (
-                                props.get("sessionID") == self.opencode_session_id
+                                sid == self.opencode_session_id
                                 and isinstance(status, dict)
                                 and status.get("type") == "idle"
                             ):
@@ -619,7 +736,7 @@ class AgentBridge:
         except TimeoutError as e:
             await self._request_opencode_stop("inactivity_timeout")
             raise RuntimeError(
-                f"SSE stream inactive for {self.sse_inactivity_timeout:.0f}s (no data received)."
+                f"SSE stream inactive for {self.sse_inactivity_timeout:.0f}s (no meaningful events)."
             ) from e
         except httpx.ReadError as e:
             raise SSEConnectionError(f"SSE read error: {e}") from e
