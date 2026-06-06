@@ -25,6 +25,9 @@ function ChatInner() {
   const [bundle, setBundle] = useState(params.get("bundle") || "general_agent");
   const [prNumber, setPrNumber] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [branches, setBranches] = useState<string[]>([]);
+  const [branch, setBranch] = useState("");
+  const [branchesLoading, setBranchesLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -38,6 +41,37 @@ function ChatInner() {
   }, [repos, repo]);
 
   const effectiveRepo = repo === "__custom__" ? customRepo.trim() : repo;
+
+  // Pull the repo's branches so the user can pick one; default to the repo's
+  // real default branch (so we never assume `main` on a `master`-only repo).
+  useEffect(() => {
+    if (!effectiveRepo || !effectiveRepo.includes("/")) {
+      setBranches([]);
+      setBranch("");
+      return;
+    }
+    let cancelled = false;
+    setBranchesLoading(true);
+    api
+      .listBranches(effectiveRepo)
+      .then(({ branches, default: def }) => {
+        if (cancelled) return;
+        setBranches(branches);
+        setBranch(def || branches[0] || "");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setBranches([]);
+        setBranch("");
+      })
+      .finally(() => {
+        if (!cancelled) setBranchesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveRepo]);
+
   const isReview = bundle === "pr_review";
   const canSubmit =
     !!effectiveRepo &&
@@ -53,6 +87,7 @@ function ChatInner() {
         repo: effectiveRepo,
         bundle,
         prompt: isReview ? prompt.trim() || "Review this pull request." : prompt.trim(),
+        branch: branch || null,
         pr_number: isReview ? Number(prNumber) : null,
       });
       router.push(`/sessions/${run.id}`);
@@ -104,6 +139,27 @@ function ChatInner() {
           <option value="general_agent">Agent task</option>
           <option value="pr_review">PR review</option>
         </select>
+
+        {/* Branch selector — PR review derives its branch from the PR itself. */}
+        {!isReview && (
+          <select
+            value={branch}
+            onChange={(e) => setBranch(e.target.value)}
+            disabled={branchesLoading || branches.length === 0}
+            title="Branch to clone"
+            className="max-w-[14rem] rounded-lg border border-[var(--color-line-strong)] bg-[var(--color-surface)] px-3 py-1.5 font-mono text-sm focus:border-[var(--color-accent)] focus:outline-none disabled:opacity-60"
+          >
+            {branchesLoading && <option value="">Loading branches…</option>}
+            {!branchesLoading && branches.length === 0 && (
+              <option value="">{branch || "default branch"}</option>
+            )}
+            {branches.map((b) => (
+              <option key={b} value={b}>
+                {b}
+              </option>
+            ))}
+          </select>
+        )}
 
         {isReview && (
           <input

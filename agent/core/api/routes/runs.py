@@ -34,7 +34,9 @@ class CreateRunIn(BaseModel):
     bundle: str = "general_agent"
     provider: str = "github"
     host: str = "github.com"
-    default_branch: str = "main"
+    # Branch to clone. When omitted, the controller resolves the repo's real
+    # default branch (so we don't assume `main` on a `master`-only repo).
+    branch: str | None = None
     pr_number: int | None = None
 
 _TERMINAL = {RunStatus.succeeded.value, RunStatus.failed.value, RunStatus.cancelled.value}
@@ -74,16 +76,30 @@ async def create_run(body: CreateRunIn):
     if not owner or not name:
         raise HTTPException(422, "repo must be in 'owner/name' form")
 
+    # Resolve which branch to clone: an explicit selection wins; otherwise ask
+    # the provider for the repo's real default branch so we never assume `main`.
+    # The sandbox applies a priority fallback if even this can't be cloned.
+    branch = (body.branch or "").strip()
+    if not branch:
+        try:
+            from core.vcs import get_vcs_provider
+
+            vcs = get_vcs_provider(body.provider)
+            if hasattr(vcs, "get_default_branch"):
+                branch = await vcs.get_default_branch(body.repo) or ""
+        except Exception:  # noqa: BLE001 — fall through to the sandbox fallback
+            branch = ""
+
     trigger = {
         "provider": body.provider,
         "host": body.host,
         "owner": owner,
         "name": name,
         "clone_url": f"https://{body.host}/{owner}/{name}.git",
-        "default_branch": body.default_branch,
+        "default_branch": branch,
         "base_sha": "",
         "head_sha": "",
-        "head_branch": body.default_branch,
+        "head_branch": branch,
         "pr_number": body.pr_number,
         "user_prompt": body.prompt,
     }

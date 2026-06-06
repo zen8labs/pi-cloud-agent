@@ -63,12 +63,13 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    from core.api.routes import internal, meta, runs, webhooks
+    from core.api.routes import internal, meta, runs, settings, webhooks
 
     app.include_router(webhooks.router)
     app.include_router(runs.router)
     app.include_router(internal.router)
     app.include_router(meta.router)
+    app.include_router(settings.router)
 
     @app.get("/healthz")
     async def healthz():

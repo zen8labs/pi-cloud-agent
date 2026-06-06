@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const links = [
   { href: "/", label: "Sessions", icon: SessionsIcon, match: (p: string) => p === "/" || p.startsWith("/sessions") },
   { href: "/chat", label: "New session", icon: ChatIcon, match: (p: string) => p.startsWith("/chat") },
+  { href: "/settings", label: "Settings", icon: SettingsIcon, match: (p: string) => p.startsWith("/settings") },
 ];
 
 export function SideNav() {
@@ -62,6 +63,17 @@ function ChatIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
       <path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function SettingsIcon({ className }: { className?: string }) {
+  // Horizontal sliders — reads unambiguously as "settings/controls".
+  return (
+    <svg className={className} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+      <path d="M2 4.5h7M11.5 4.5h2.5M2 11.5h2.5M7 11.5h7" />
+      <circle cx="10" cy="4.5" r="1.6" />
+      <circle cx="5.5" cy="11.5" r="1.6" />
     </svg>
   );
 }

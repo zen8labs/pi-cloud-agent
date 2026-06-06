@@ -173,28 +173,62 @@ class SandboxSupervisor:
                 self.log.warn("git.config_failed", config_key=key, stderr=stderr)
         self.log.info("git.credentials_configured", shim_available=shim_available)
 
+    async def _clone_with_fallback(self) -> bool:
+        """Clone the repo at the requested branch, else the remote's default HEAD.
+
+        The controller resolves each repo's real default branch from the VCS API
+        before launching, so the requested branch (head, then default) normally
+        clones first try. If none is set — or a stale one can't be found — we
+        clone with no ``--branch`` so git uses whatever the remote's default
+        HEAD is. No hardcoded branch-name guessing. Sets ``self.clone_error`` if
+        even the default-HEAD clone fails.
+        """
+        # Requested branches in order, de-duplicated. For a PR review head is the
+        # PR branch; for a chat session head == the resolved default branch.
+        requested: list[str] = []
+        for b in (self.repo_head_branch, self.repo_default_branch):
+            if b and b not in requested:
+                requested.append(b)
+
+        last_stderr = ""
+        for branch in requested:
+            rc, stderr = await self._git(
+                "clone", "--depth", str(CLONE_DEPTH_COMMITS), "--branch", branch,
+                self.repo_clone_url, str(self.repo_path),
+            )
+            if rc == 0:
+                self.log.info("git.clone_branch_ok", branch=branch)
+                return True
+            last_stderr = stderr
+            self.log.warn("git.clone_branch_failed", branch=branch, stderr=stderr)
+
+        # No branch specified, or it no longer exists: clone the remote's default.
+        rc, stderr = await self._git(
+            "clone", "--depth", str(CLONE_DEPTH_COMMITS),
+            self.repo_clone_url, str(self.repo_path),
+        )
+        if rc == 0:
+            self.log.info("git.clone_default_head_ok")
+            return True
+        self.clone_error = (stderr or last_stderr).strip() or f"git exited {rc}"
+        self.log.error("git.clone_error", stderr=self.clone_error, exit_code=rc)
+        return False
+
     async def clone_repo(self) -> bool:
         """Shallow-clone the PR repo and check out the head SHA.
 
         Clones the head branch (token-free URL — the credential helper supplies
         auth), then resets to the exact ``REPO_HEAD_SHA`` so the review runs
         against the precise commit the controller recorded, not a moving tip.
+        Falls back to the remote's default HEAD when the requested branch is
+        missing (see ``_clone_with_fallback``).
         """
         if not self.repo_clone_url:
             self.log.error("git.clone_skip", reason="no_clone_url")
             return False
 
         self.log.info("git.clone_start", repo_name=self.repo_name, head_sha=self.repo_head_sha)
-        branch = self.repo_head_branch or self.repo_default_branch
-        clone_args = ["clone", "--depth", str(CLONE_DEPTH_COMMITS)]
-        if branch:
-            clone_args += ["--branch", branch]
-        clone_args += [self.repo_clone_url, str(self.repo_path)]
-
-        rc, stderr = await self._git(*clone_args)
-        if rc != 0:
-            self.clone_error = stderr.strip() or f"git exited {rc}"
-            self.log.error("git.clone_error", stderr=stderr, exit_code=rc)
+        if not await self._clone_with_fallback():
             return False
 
         # Pin to the exact head SHA. The shallow clone may not contain it if the

@@ -368,6 +368,74 @@ class GitHubProvider:
                 repos.update(x["full_name"] for x in r.json())
         return sorted(repos)[:limit]
 
+    async def get_default_branch(self, repo_full_name: str) -> str | None:
+        """Return the repo's real default branch (`main`, `master`, …), or None.
+
+        Best-effort: a manual chat session has no PR payload to read the branch
+        from, so we resolve it here instead of assuming `main`. Returns None on
+        any failure so callers can fall back to a priority guess.
+        """
+        owner, _, name = repo_full_name.partition("/")
+        if not owner or not name:
+            return None
+        try:
+            token = await self.mint_clone_token(repo_full_name)
+        except ValueError:
+            return None
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": _ACCEPT,
+            "X-GitHub-Api-Version": _API_VERSION,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                r = await client.get(f"{_API_BASE}/repos/{owner}/{name}", headers=headers)
+                r.raise_for_status()
+                return r.json().get("default_branch") or None
+        except httpx.HTTPError as exc:
+            log.warning("get_default_branch failed repo=%s: %s", repo_full_name, exc)
+            return None
+
+    async def list_branches(self, repo_full_name: str, limit: int = 300) -> list[str]:
+        """List branch names for the repo's branch selector (paginated).
+
+        Best-effort — returns an empty list rather than raising if creds are
+        missing or the call fails; the selector still allows the resolved default.
+        """
+        owner, _, name = repo_full_name.partition("/")
+        if not owner or not name:
+            return []
+        try:
+            token = await self.mint_clone_token(repo_full_name)
+        except ValueError:
+            return []
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": _ACCEPT,
+            "X-GitHub-Api-Version": _API_VERSION,
+        }
+        branches: list[str] = []
+        page = 1
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                while len(branches) < limit:
+                    r = await client.get(
+                        f"{_API_BASE}/repos/{owner}/{name}/branches",
+                        headers=headers,
+                        params={"per_page": 100, "page": page},
+                    )
+                    r.raise_for_status()
+                    batch = r.json()
+                    if not batch:
+                        break
+                    branches.extend(b["name"] for b in batch)
+                    if len(batch) < 100:
+                        break
+                    page += 1
+        except httpx.HTTPError as exc:
+            log.warning("list_branches failed repo=%s: %s", repo_full_name, exc)
+        return branches[:limit]
+
     # ── reads ────────────────────────────────────────────────────────────
 
     async def get_pull_request(self, repo: RepoRef, pr_number: int) -> PullRequest:

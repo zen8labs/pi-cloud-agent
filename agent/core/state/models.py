@@ -103,6 +103,28 @@ class Finding(Base):
     run: Mapped[Run] = relationship(back_populates="findings")
 
 
+class RepoSetting(Base):
+    """Per-repo dashboard settings the `/settings` page manages.
+
+    Currently just the branch the PR-review agent clones for a repo (empty =
+    use the repo's real default branch). Add columns here for future per-repo
+    settings rather than spawning parallel tables.
+    """
+
+    __tablename__ = "repo_settings"
+    __table_args__ = (UniqueConstraint("provider", "full_name", name="uq_repo_setting"),)
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True
+    )
+    provider: Mapped[str] = mapped_column(String(32))
+    full_name: Mapped[str] = mapped_column(String(255))
+    pr_review_branch: Mapped[str] = mapped_column(String(255), default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
 class RepoFlag(Base):
     """Per-repo review-mode override for feature-flagged rollout."""
 

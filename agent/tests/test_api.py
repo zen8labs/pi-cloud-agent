@@ -87,6 +87,39 @@ def test_runs_unknown_404(client):
     assert client.get("/runs/does-not-exist").status_code == 404
 
 
+def test_repo_branch_setting_round_trips(client):
+    # No override → branch is "" (means "use the repo default").
+    r = client.get("/settings/repo-branches")
+    assert r.status_code == 200
+    by_repo = {x["repo"]: x["branch"] for x in r.json()["repos"]}
+    assert by_repo.get("octo/repo", "") == ""
+
+    # Pin a branch; it persists and comes back on the next read.
+    r = client.put("/settings/repo-branches", json={"repo": "octo/repo", "branch": "develop"})
+    assert r.status_code == 200
+    assert r.json()["branch"] == "develop"
+    by_repo = {
+        x["repo"]: x["branch"] for x in client.get("/settings/repo-branches").json()["repos"]
+    }
+    assert by_repo.get("octo/repo") == "develop"
+
+    # Clearing it (empty branch) reverts to the repo default.
+    client.put("/settings/repo-branches", json={"repo": "octo/repo", "branch": ""})
+    by_repo = {
+        x["repo"]: x["branch"] for x in client.get("/settings/repo-branches").json()["repos"]
+    }
+    assert by_repo.get("octo/repo", "") == ""
+
+
+def test_branches_endpoint_renders_without_creds(client):
+    # No GitHub creds in tests → best-effort empty result, never a 500.
+    r = client.get("/repos/octo/repo/branches")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["branches"] == []
+    assert body["default"] is None
+
+
 def test_internal_findings_auth(client):
     # create a run to get a valid token
     body = json.dumps(_pr_payload()).encode()

@@ -1,4 +1,4 @@
-import type { AgentEvent, AppConfig, RunDetail, RunSummary } from "./types";
+import type { AgentEvent, AppConfig, RepoBranch, RunDetail, RunSummary } from "./types";
 
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") || "http://localhost:8080";
@@ -40,12 +40,29 @@ export const api = {
     repo: string;
     prompt: string;
     bundle?: string;
+    branch?: string | null;
     pr_number?: number | null;
   }) => req<RunSummary>(`/runs`, { method: "POST", body: JSON.stringify(body) }),
 
   listRepos: () => req<{ repos: string[] }>(`/repos`).then((r) => r.repos),
 
+  listBranches: (repo: string) =>
+    req<{ branches: string[]; default: string | null }>(
+      `/repos/${repo}/branches`,
+    ),
+
   getConfig: () => req<AppConfig>(`/config`),
+
+  listRepoBranches: () =>
+    req<{ source: string; repos: RepoBranch[] }>(`/settings/repo-branches`).then(
+      (r) => r.repos,
+    ),
+
+  setRepoBranch: (repo: string, branch: string) =>
+    req<{ repo: string; branch: string }>(`/settings/repo-branches`, {
+      method: "PUT",
+      body: JSON.stringify({ repo, branch }),
+    }),
 };
 
 export function streamUrl(id: string): string {

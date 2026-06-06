@@ -9,6 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from core.config.flags import resolve_review_mode
+from core.config.repo_settings import get_pr_review_branch
 from core.logger import get_logger
 from core.state import get_session
 from core.state import repo as runs
@@ -60,6 +61,11 @@ async def receive_webhook(provider: str, request: Request) -> Response:
             log.info("routing to legacy", extra={"repo": parsed.repo.full_name})
             return Response(status_code=202, headers={"X-CoReview-Route": "legacy"})
 
+        # Per-repo dashboard override for the branch auto-started reviews fall
+        # back to when the event carries no branch of its own ("" = repo default).
+        default_branch_override = await get_pr_review_branch(
+            db, provider, parsed.repo.full_name
+        )
         run = await runs.create_run(
             db,
             bundle="pr_review",
@@ -67,7 +73,7 @@ async def receive_webhook(provider: str, request: Request) -> Response:
             repo_full_name=parsed.repo.full_name,
             pr_number=parsed.repo.pr_number,
             head_sha=parsed.repo.head_sha,
-            trigger=_trigger_payload(parsed),
+            trigger=_trigger_payload(parsed, default_branch_override),
         )
     log.info("run queued", extra={"run_id": run.id, "repo": parsed.repo.full_name})
     return Response(
@@ -82,7 +88,7 @@ def _is_review_command(command: str | None) -> bool:
     return c.startswith("/review") or c.startswith("/coreview")
 
 
-def _trigger_payload(parsed) -> dict:
+def _trigger_payload(parsed, default_branch_override: str = "") -> dict:
     r = parsed.repo
     return {
         "provider": parsed.provider,
@@ -90,7 +96,7 @@ def _trigger_payload(parsed) -> dict:
         "owner": r.owner,
         "name": r.name,
         "clone_url": r.clone_url,
-        "default_branch": r.default_branch,
+        "default_branch": default_branch_override or r.default_branch,
         "base_sha": r.base_sha,
         "head_sha": r.head_sha,
         "head_branch": r.head_branch,

@@ -45,6 +45,12 @@ export interface AppConfig {
   default_bundle: string;
 }
 
+export interface RepoBranch {
+  repo: string;
+  /** Pinned PR-review branch; empty string means "use the repo default". */
+  branch: string;
+}
+
 export const TERMINAL: RunStatus[] = ["succeeded", "failed", "cancelled"];
 
 export function isTerminal(s: RunStatus): boolean {
