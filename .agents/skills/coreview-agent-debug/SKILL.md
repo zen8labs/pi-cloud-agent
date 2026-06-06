@@ -1,6 +1,6 @@
 ---
 name: coreview-agent-debug
-description: Diagnose and fix failures in the CoReview agentic PR-review system (agent/) — runs stuck or failing, no review posted, webhooks not arriving, the in-sandbox supervisor/clone/OpenCode failing, or sessions showing wrong status. Use when a PR review run misbehaves and you need the debugging playbook: where to look (Sessions UI live log, controller logs, E2B dashboard, Postgres), the two-image rebuild rule, and the taxonomy of known failures with fixes. NOT for first-time setup (use coreview-agent-setup) or understanding how the system is built / rebuilding it (use build-pr-review-agent).
+description: Diagnose and fix failures in the CoReview agentic PR-review system (agent/) — runs stuck or failing, no review posted, webhooks not arriving, the in-sandbox supervisor/clone/OpenCode failing, or sessions showing wrong status. Use when a PR review run misbehaves and you need the debugging playbook - where to look (Sessions UI live log, controller logs, E2B dashboard, Postgres), the two-image rebuild rule, and the taxonomy of known failures with fixes. NOT for first-time setup (use coreview-agent-setup) or understanding how the system is built / rebuilding it (use build-pr-review-agent).
 ---
 
 # Debugging the CoReview agent

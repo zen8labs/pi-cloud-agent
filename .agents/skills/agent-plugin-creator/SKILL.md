@@ -1,5 +1,5 @@
 ---
-name: bundle-creator
+name: agent-plugin-creator
 description: >
   Design and scaffold new capability bundles for the Cloud-Agent system, extending it into new
   vertical domains (finance, BA, growth, HR, security, etc.). Use when the user wants to add a new
