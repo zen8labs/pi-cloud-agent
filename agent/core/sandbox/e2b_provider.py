@@ -151,6 +151,7 @@ class E2BSandboxProvider:
             await sandbox.commands.run(
                 "python -m runtime.entrypoint",
                 background=True,
+                timeout=config.timeout_seconds,
                 envs=env,
                 cwd="/app",
             )

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 
 import pytest
 
@@ -13,6 +12,7 @@ from core.harness.opencode import OpenCodeAdapter
 from core.orchestrator.bus import event_bus
 from core.sandbox.provider import SandboxHandle
 from core.types import ModelSpec, RepoRef, RunLimits, TaskSpec
+from runtime.log_config import StructuredLogger
 
 
 def _task(wall_clock_seconds: int = 30) -> TaskSpec:
@@ -55,13 +55,13 @@ def test_build_opencode_config_injects_custom_provider(monkeypatch, tmp_path):
     sup = SandboxSupervisor.__new__(SandboxSupervisor)
     sup.agent_model = "aigateway/MiniMax/MiniMax-M2.7"
     sup.bundle = "pr_review"
-    sup.log = __import__("logging").getLogger("test")
+    sup.log = StructuredLogger("test")
 
     cfg = sup._build_opencode_config()
 
-    # OpenCode model keys can't contain slashes, so the top-level model uses the
-    # last path segment as the key; the full path is carried in the model `name`.
-    assert cfg["model"] == "aigateway/MiniMax-M2.7"
+    # Preserve the full gateway model path; shortening this to MiniMax-M2.7
+    # makes the gateway reject the request as an unauthorized model.
+    assert cfg["model"] == "aigateway/MiniMax/MiniMax-M2.7"
 
     provider_block = cfg.get("provider", {}).get("aigateway", {})
     assert provider_block.get("npm") == "@ai-sdk/openai-compatible", (
@@ -72,8 +72,8 @@ def test_build_opencode_config_injects_custom_provider(monkeypatch, tmp_path):
     assert options.get("apiKey") == "test-key"
 
     models = provider_block.get("models", {})
-    assert "MiniMax-M2.7" in models, "the slash-free model key must be declared"
-    assert models["MiniMax-M2.7"].get("name") == "MiniMax/MiniMax-M2.7", (
+    assert "MiniMax/MiniMax-M2.7" in models, "the full gateway model key must be declared"
+    assert models["MiniMax/MiniMax-M2.7"].get("name") == "MiniMax/MiniMax-M2.7", (
         "the model `name` must be the full path the gateway expects"
     )
 
@@ -91,7 +91,7 @@ def test_build_opencode_config_no_npm_for_builtin_providers(monkeypatch):
         sup = SandboxSupervisor.__new__(SandboxSupervisor)
         sup.agent_model = f"{builtin}/some-model"
         sup.bundle = "pr_review"
-        sup.log = __import__("logging").getLogger("test")
+        sup.log = StructuredLogger("test")
 
         cfg = sup._build_opencode_config()
         block = cfg.get("provider", {}).get(builtin, {})

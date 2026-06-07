@@ -4,7 +4,7 @@
 # (packages/modal-infra/src/images/base.py and packages/daytona-infra/src/
 # toolchain.py), trimmed to what a headless PR review needs. It bakes in:
 #   * git + curl + bash (clone, controller calls, the .coreview/setup.sh hook),
-#   * Node 22 + OpenCode 1.14.41 + @opencode-ai/plugin@1.14.41 + zod (the agent
+#   * Node 22 + OpenCode 1.16.2 + @opencode-ai/plugin@1.16.2 + zod (the agent
 #     runtime the bridge drives, and the plugin deps the report_finding tool
 #     imports),
 #   * pre-staged @opencode-ai/plugin deps in /app/opencode-deps so OpenCode's
@@ -13,7 +13,7 @@
 #   * Python 3.12 + httpx + the `agent/` package, so `runtime` and `bundles`
 #     import from /app.
 #
-# CRITICAL: OpenCode is pinned to 1.14.41. Later versions (1.14.42+, the Hono ->
+# CRITICAL: OpenCode is pinned to 1.16.2. Later versions (1.14.42+, the Hono ->
 # Effect Schema migration) broke event publishing on the legacy /event SSE
 # endpoint the bridge depends on, so the bridge would connect, post the prompt,
 # and receive zero streamed message/idle events. Pin everywhere.
@@ -26,8 +26,8 @@
 FROM python:3.12-slim-bookworm
 
 # OpenCode + plugin version. MUST stay in sync with the version the bridge was
-# written against (see runtime/bridge.py). Pinned to 1.14.41 (see header).
-ARG OPENCODE_VERSION=1.14.41
+# written against (see runtime/bridge.py). Pinned to 1.16.2 (see header).
+ARG OPENCODE_VERSION=1.16.2
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -62,7 +62,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && npm --version
 
 # ---------------------------------------------------------------------------
-# OpenCode 1.14.41 + the plugin SDK the report_finding tool imports.
+# OpenCode 1.16.2 + the plugin SDK the report_finding tool imports.
 # ---------------------------------------------------------------------------
 RUN npm install -g "opencode-ai@${OPENCODE_VERSION}" \
     && (opencode --version || echo "opencode installed") \

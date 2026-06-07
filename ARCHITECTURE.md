@@ -218,11 +218,11 @@ Everything under `runtime/` runs **inside** the sandbox and ships in a *differen
 
 **Bridge** (`runtime/bridge.py`): creates an OpenCode session, opens the `/event` SSE stream *before* injecting the prompt (or the first events are missed), posts the prompt with a monotonically-ascending `messageID`, translates OpenCode message-parts into controller events, and posts a terminal `{status: done}` when the session goes idle. Findings do **not** flow through the bridge — the `report_finding` tool POSTs them straight to the internal API.
 
-> **The OpenCode pin is load-bearing.** OpenCode is pinned to **1.14.41**
-> everywhere (`Dockerfile.sandbox`, the bridge, `opencode.jsonc`). A later release
-> changed the `/event` SSE behavior the bridge depends on — after it, the bridge
-> connects, posts the prompt, and receives zero streamed events. If you bump
-> OpenCode, re-validate the entire bridge SSE path.
+> **The OpenCode pin is load-bearing.** OpenCode is pinned to **1.16.2**
+> everywhere (`Dockerfile.sandbox`, the bridge, `opencode.jsonc`). Versions 1.14.42–1.15.x
+> broke the `/event` SSE endpoint (zero streamed events); 1.16.2 restores it and
+> fixes a subagent hang where the parent session never fired `session.idle` after a
+> subagent completed. If you bump OpenCode, re-validate the full bridge SSE path.
 
 **Model wiring.** `AGENT_MODEL` uses a `provider/model` form, e.g. `aigateway/MiniMax/MiniMax-M2.7`. The custom `aigateway/` prefix tells the supervisor to wire OpenCode's provider block to the self-hosted OpenAI-compatible gateway (`@ai-sdk/openai-compatible` + `OPENAI_BASE_URL`/`OPENAI_API_KEY`). The same `AGENT_MODEL` is reused by the controller-side LLM service, which rewrites the `aigateway/` prefix to LiteLLM's `openai/` when calling the gateway directly ([§9](#9-capability-bundles) keeps tools portable; model routing is shared so the controller and the in-sandbox agent always agree on the model).
 

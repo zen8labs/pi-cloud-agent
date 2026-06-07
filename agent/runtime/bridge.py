@@ -1,9 +1,6 @@
 """Agent bridge: drive OpenCode and forward its events to the controller.
 
-This is a faithful port of the reference ``sandbox_runtime.bridge`` (a proven
-OpenCode 1.14.41 integration) with the transport swapped out. The reference
-dialed a Cloudflare Durable Object over a *bidirectional* WebSocket and reacted
-to inbound ``prompt``/``stop`` commands. Our controller is a FastAPI service we
+Our controller is a FastAPI service we
 reach over plain HTTP, and the review is *outbound-driven* and single-shot: the
 supervisor tells the bridge which prompt to run, the bridge injects it into
 OpenCode, subscribes to OpenCode's ``/event`` SSE stream, and POSTs each derived
@@ -19,8 +16,7 @@ Controller HTTP API (base = ``CONTROL_PLANE_URL``; every call carries
 Findings are NOT sent here — the bundle's ``report_finding`` OpenCode tool POSTs
 them directly to ``/internal/runs/{RUN_ID}/findings``.
 
-OpenCode 1.14.41 server API the bridge drives (all confirmed against the
-reference bridge, which pins 1.14.41):
+OpenCode 1.16.2 server API the bridge drives:
 
     POST /session                              -> {"id": ...}             (create)
     GET  /session/{id}                         -> 200 if it still exists  (validate)
@@ -42,7 +38,10 @@ import asyncio
 import json
 import os
 import secrets
+import threading
 import time
+import urllib.error
+import urllib.request
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, ClassVar
@@ -231,7 +230,10 @@ class AgentBridge:
         Returns True if the review completed (OpenCode went idle), False if it
         ended in an error. Posts a terminal status to the controller either way.
         """
-        self.log.info("bridge.run_start")
+        self.log.info(
+            "bridge.run_start",
+            sse_inactivity_timeout_s=self.sse_inactivity_timeout,
+        )
         self.http_client = httpx.AsyncClient(
             timeout=httpx.Timeout(self.HTTP_DEFAULT_TIMEOUT, connect=self.HTTP_CONNECT_TIMEOUT)
         )
@@ -377,7 +379,7 @@ class AgentBridge:
 
         Returns ``{"type": ..., "data": {...}}`` or ``None`` to drop the part.
         Part shapes (``text``/``tool``/``step-*`` and the tool ``state`` keys)
-        match the reference bridge's read of OpenCode 1.14.41 message parts.
+        match OpenCode 1.16.2 message parts.
         """
         part_type = part.get("type", "")
 
@@ -439,7 +441,9 @@ class AgentBridge:
     async def _stream_opencode_response_sse(self, content: str) -> AsyncIterator[dict[str, Any]]:
         """Inject the prompt and stream OpenCode's response as controller events.
 
-        Mirrors the reference flow for OpenCode 1.14.41:
+        Flow for OpenCode 1.16.2 (note: 1.16.2 does not fire ``session.idle``
+        after the parent's final step when subagents are used — termination is
+        instead detected from ``step_finish`` with a non-tool-call reason):
           1. open the SSE stream (``GET /event``);
           2. POST the prompt to ``/session/{id}/prompt_async`` with an ascending
              ``messageID``;
@@ -483,12 +487,15 @@ class AgentBridge:
         # next new subagent session that appears in the stream.
         pending_task_descs: list[str] = []
 
-        def buffer_part(oc_msg_id: str, part: dict[str, Any], delta: Any) -> None:
+
+
+        def buffer_part(oc_msg_id: str, part: dict[str, Any], delta: Any) -> bool:
             nonlocal pending_parts_total
             if pending_parts_total >= self.MAX_PENDING_PART_EVENTS:
-                return
+                return False
             pending_parts.setdefault(oc_msg_id, []).append((part, delta))
             pending_parts_total += 1
+            return True
 
         def _apply_cumtext(
             ev: dict[str, Any],
@@ -520,6 +527,7 @@ class AgentBridge:
                 return None
             sa = subagent_sessions[sid]
             _apply_cumtext(ev, part, delta, sa["cumulative_text"])
+
             return {
                 "type": "subagent_event",
                 "data": {
@@ -530,10 +538,51 @@ class AgentBridge:
                 },
             }
 
+        watchdog_fired = False
+        watchdog_reason = ""
+        watchdog_thread: threading.Thread | None = None
+        watchdog_stop = threading.Event()
+        current_task = asyncio.current_task()
+        last_meaningful_activity = loop.time()
+
+        def watchdog() -> None:
+            nonlocal watchdog_fired, watchdog_reason
+            self.log.info("bridge.watchdog_start", timeout_s=self.sse_inactivity_timeout)
+            while not watchdog_stop.is_set():
+                remaining = (
+                    last_meaningful_activity + self.sse_inactivity_timeout - loop.time()
+                )
+                if remaining <= 0:
+                    watchdog_fired = True
+                    watchdog_reason = (
+                        f"SSE stream inactive for {self.sse_inactivity_timeout:.0f}s "
+                        "(no meaningful events)."
+                    )
+                    data = {
+                        "level": "error",
+                        "message": (
+                            "bridge.inactivity_timeout "
+                            f"timeout_s={self.sse_inactivity_timeout} "
+                            f"elapsed_s={round(loop.time() - prompt_start, 1)}"
+                        ),
+                        "logger": "bridge",
+                    }
+                    self._post_controller_sync(
+                        "events",
+                        {"type": "log", "data": data},
+                    )
+                    self._post_controller_sync(
+                        "status",
+                        {"status": "error", "detail": watchdog_reason},
+                    )
+                    self._request_opencode_stop_sync("inactivity_timeout")
+                    if current_task:
+                        loop.call_soon_threadsafe(current_task.cancel)
+                    return
+                watchdog_stop.wait(min(remaining, 5.0))
+
         try:
-            deadline = loop.time() + self.sse_inactivity_timeout
-            async with asyncio.timeout_at(deadline) as timeout_ctx:
-                async with self.opencode_client.stream(
+            async with self.opencode_client.stream(
                     "GET",
                     sse_url,
                     timeout=httpx.Timeout(None, connect=self.HTTP_CONNECT_TIMEOUT, read=None),
@@ -544,6 +593,13 @@ class AgentBridge:
                         )
 
                     prompt_start = loop.time()
+                    last_meaningful_activity = prompt_start
+                    watchdog_thread = threading.Thread(
+                        target=watchdog,
+                        name="bridge-inactivity-watchdog",
+                        daemon=True,
+                    )
+                    watchdog_thread.start()
                     prompt_response = await self.opencode_client.post(
                         async_url,
                         json=request_body,
@@ -560,21 +616,69 @@ class AgentBridge:
                             f"{prompt_response.text}"
                         )
 
+                    def mark_meaningful_activity() -> None:
+                        nonlocal last_meaningful_activity
+                        last_meaningful_activity = loop.time()
+
                     async for event in self._parse_sse_stream(sse_response):
                         event_type = event.get("type")
                         props = event.get("properties", {})
                         if not isinstance(props, dict):
                             props = {}
 
-                        # Heartbeats do NOT reset the inactivity timeout — this is
-                        # intentional. A stuck subagent still sends heartbeats but
-                        # produces no real output; we want the inactivity timeout to
-                        # fire so the session doesn't hang for PROMPT_MAX_DURATION.
+                        # Hard wall-clock guard: checked first on every event so it
+                        # fires regardless of which branch handles the event.
+                        if loop.time() > prompt_start + self.PROMPT_MAX_DURATION:
+                            self.log.error(
+                                "bridge.prompt_max_duration_exceeded",
+                                max_s=self.PROMPT_MAX_DURATION,
+                            )
+                            await self._request_opencode_stop("prompt_max_duration_timeout")
+                            async for fe in self._fetch_final_message_state(
+                                opencode_message_id,
+                                cumulative_text,
+                                allowed_assistant_msg_ids,
+                            ):
+                                yield fe
+                            raise RuntimeError(
+                                f"Prompt exceeded max duration of {self.PROMPT_MAX_DURATION:.0f}s."
+                            )
+
+                        # Heartbeats and session.status keepalives do NOT reset the
+                        # inactivity timeout — this is intentional. Both are periodic
+                        # OpenCode signals that prove the TCP connection is alive but
+                        # carry no task progress. A genuinely stuck session (bash hung,
+                        # subagent looping, no tokens) must time out in
+                        # sse_inactivity_timeout seconds rather than run to
+                        # PROMPT_MAX_DURATION because these keepalives keep firing.
                         if event_type in ("server.connected", "server.heartbeat"):
                             continue
 
-                        # Reset the inactivity timeout only on meaningful activity.
-                        timeout_ctx.reschedule(loop.time() + self.sse_inactivity_timeout)
+                        # session.status is OpenCode's per-session keepalive. It must
+                        # never reset the timeout unless it is the parent idle signal.
+                        if event_type == "session.status":
+                            status = props.get("status", {})
+                            sid = props.get("sessionID", "")
+                            self.log.debug(
+                                "bridge.session_status",
+                                sid=sid,
+                                status_type=status.get("type") if isinstance(status, dict) else status,
+                                is_parent=sid == self.opencode_session_id,
+                            )
+                            if (
+                                sid == self.opencode_session_id
+                                and isinstance(status, dict)
+                                and status.get("type") == "idle"
+                            ):
+                                self.log.info("bridge.parent_idle")
+                                async for fe in self._fetch_final_message_state(
+                                    opencode_message_id,
+                                    cumulative_text,
+                                    allowed_assistant_msg_ids,
+                                ):
+                                    yield fe
+                                return
+                            continue  # non-idle status — no reschedule, no further processing
 
                         # ── message.updated ──────────────────────────────────────
                         if event_type == "message.updated":
@@ -586,7 +690,12 @@ class AgentBridge:
                                 if info.get("role") != "assistant":
                                     continue
                                 oc_msg_id = info.get("id", "")
-                                if oc_msg_id and info.get("parentID") == opencode_message_id:
+                                if (
+                                    oc_msg_id
+                                    and info.get("parentID") == opencode_message_id
+                                    and oc_msg_id not in allowed_assistant_msg_ids
+                                ):
+                                    mark_meaningful_activity()
                                     allowed_assistant_msg_ids.add(oc_msg_id)
                                     replay = pending_parts.pop(oc_msg_id, [])
                                     if replay:
@@ -598,6 +707,7 @@ class AgentBridge:
                             elif sid:
                                 # Subagent session: register if new, authorize msgs.
                                 if sid not in subagent_sessions:
+                                    mark_meaningful_activity()
                                     desc = (
                                         pending_task_descs.pop(0)
                                         if pending_task_descs
@@ -623,7 +733,12 @@ class AgentBridge:
                                     }
                                 if info.get("role") == "assistant":
                                     sa_msg_id = info.get("id", "")
-                                    if sa_msg_id:
+                                    if (
+                                        sa_msg_id
+                                        and sa_msg_id
+                                        not in subagent_sessions[sid]["allowed_msg_ids"]
+                                    ):
+                                        mark_meaningful_activity()
                                         subagent_sessions[sid]["allowed_msg_ids"].add(sa_msg_id)
                                         # Replay buffered parts that arrived early.
                                         replay = pending_parts.pop(sa_msg_id, [])
@@ -644,6 +759,7 @@ class AgentBridge:
                             if oc_msg_id in allowed_assistant_msg_ids:
                                 ev = emit_part(part, delta)
                                 if ev:
+                                    mark_meaningful_activity()
                                     # Capture task description for subagent correlation.
                                     if (
                                         ev["type"] == "tool_call"
@@ -656,6 +772,27 @@ class AgentBridge:
                                         if desc:
                                             pending_task_descs.append(desc)
                                     yield ev
+                                    # OpenCode 1.16.2 does not fire session.idle after the
+                                    # parent's final step — detect completion via step_finish
+                                    # with a non-tool-call reason ("stop", "end_turn", "length").
+                                    if (
+                                        ev["type"] == "log"
+                                        and ev["data"].get("event") == "step_finish"
+                                        and ev["data"].get("reason") not in (
+                                            None, "tool_use", "tool-calls", "tool_result"
+                                        )
+                                    ):
+                                        self.log.info(
+                                            "bridge.parent_idle",
+                                            reason=ev["data"].get("reason"),
+                                        )
+                                        async for fe in self._fetch_final_message_state(
+                                            opencode_message_id,
+                                            cumulative_text,
+                                            allowed_assistant_msg_ids,
+                                        ):
+                                            yield fe
+                                        return
                             else:
                                 # Check subagent sessions first, then buffer.
                                 matched = False
@@ -663,6 +800,7 @@ class AgentBridge:
                                     if oc_msg_id in sa["allowed_msg_ids"]:
                                         sa_ev = emit_subagent_part(sid, part, delta)
                                         if sa_ev:
+                                            mark_meaningful_activity()
                                             yield sa_ev
                                         matched = True
                                         break
@@ -673,7 +811,18 @@ class AgentBridge:
                         # ── session.idle ─────────────────────────────────────────
                         if event_type == "session.idle":
                             sid = props.get("sessionID", "")
-                            if sid == self.opencode_session_id:
+                            is_parent = sid == self.opencode_session_id
+                            is_known_subagent = sid in subagent_sessions
+                            self.log.info(
+                                "bridge.session_idle",
+                                sid=sid,
+                                is_parent=is_parent,
+                                is_known_subagent=is_known_subagent,
+                                known_subagent_count=len(subagent_sessions),
+                                elapsed_s=round(loop.time() - prompt_start, 1),
+                            )
+                            if is_parent:
+                                self.log.info("bridge.parent_idle")
                                 async for fe in self._fetch_final_message_state(
                                     opencode_message_id,
                                     cumulative_text,
@@ -681,8 +830,13 @@ class AgentBridge:
                                 ):
                                     yield fe
                                 return
-                            elif sid in subagent_sessions:
+                            elif is_known_subagent:
                                 sa = subagent_sessions[sid]
+                                self.log.info(
+                                    "bridge.subagent_idle",
+                                    sid=sid,
+                                    description=sa["description"],
+                                )
                                 yield {
                                     "type": "subagent_event",
                                     "data": {
@@ -691,23 +845,8 @@ class AgentBridge:
                                         "event_type": "done",
                                     },
                                 }
-                            continue
-
-                        if event_type == "session.status":
-                            status = props.get("status", {})
-                            sid = props.get("sessionID", "")
-                            if (
-                                sid == self.opencode_session_id
-                                and isinstance(status, dict)
-                                and status.get("type") == "idle"
-                            ):
-                                async for fe in self._fetch_final_message_state(
-                                    opencode_message_id,
-                                    cumulative_text,
-                                    allowed_assistant_msg_ids,
-                                ):
-                                    yield fe
-                                return
+                            else:
+                                self.log.warn("bridge.session_idle_unknown_sid", sid=sid)
                             continue
 
                         if event_type == "session.error":
@@ -733,13 +872,16 @@ class AgentBridge:
                                 f"Prompt exceeded max duration of {self.PROMPT_MAX_DURATION:.0f}s."
                             )
 
-        except TimeoutError as e:
-            await self._request_opencode_stop("inactivity_timeout")
-            raise RuntimeError(
-                f"SSE stream inactive for {self.sse_inactivity_timeout:.0f}s (no meaningful events)."
-            ) from e
+        except asyncio.CancelledError as e:
+            if watchdog_fired:
+                raise RuntimeError(watchdog_reason) from e
+            raise
         except httpx.ReadError as e:
             raise SSEConnectionError(f"SSE read error: {e}") from e
+        finally:
+            watchdog_stop.set()
+            if watchdog_thread and watchdog_thread.is_alive():
+                watchdog_thread.join(timeout=1.0)
 
     async def _fetch_final_message_state(
         self,
@@ -803,6 +945,43 @@ class AgentBridge:
             return True
         except Exception as e:  # noqa: BLE001
             self.log.warn("bridge.stop_request_error", reason=reason, exc=e)
+            return False
+
+    def _post_controller_sync(self, kind: str, payload: dict[str, Any]) -> bool:
+        """Thread-safe watchdog fallback: POST directly without the event loop."""
+        try:
+            data = json.dumps(payload).encode()
+            req = urllib.request.Request(
+                f"{self.control_plane_url}/internal/runs/{self.run_id}/{kind}",
+                data=data,
+                headers={
+                    "Authorization": f"Bearer {self.auth_token}",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=self.HTTP_DEFAULT_TIMEOUT) as resp:
+                return 200 <= resp.status < 300
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            self.log.warn("bridge.sync_controller_post_error", kind=kind, exc=e)
+            return False
+
+    def _request_opencode_stop_sync(self, reason: str) -> bool:
+        """Thread-safe watchdog fallback: abort OpenCode without the event loop."""
+        if not self.opencode_session_id:
+            return False
+        try:
+            req = urllib.request.Request(
+                f"{self.opencode_base_url}/session/{self.opencode_session_id}/abort",
+                data=b"",
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=self.OPENCODE_REQUEST_TIMEOUT) as resp:
+                ok = 200 <= resp.status < 300
+            self.log.info("bridge.stop_requested", reason=reason, sync=True)
+            return ok
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            self.log.warn("bridge.stop_request_error", reason=reason, sync=True, exc=e)
             return False
 
     # ------------------------------------------------------------------

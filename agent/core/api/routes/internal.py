@@ -128,4 +128,5 @@ async def post_status(run_id: str, s: StatusIn, run: Run = Depends(_authed_run))
         await event_bus.publish(
             run_id, {"type": "error", "data": {"message": s.detail or s.status}}
         )
+        await event_bus.publish(run_id, {"type": "done", "data": {"status": s.status}})
     return {"ok": True}

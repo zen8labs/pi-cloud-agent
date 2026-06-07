@@ -82,36 +82,85 @@ A bundle under `bundles/<name>/` contributes:
 
 The `pr_review` bundle runs a **split → fan-out reviewer → critic → report_finding** flow declared in the skill prompt, not in controller code.
 
-## Critical pins and invariants
+## Live debugging
 
-- **OpenCode is pinned to `1.14.41`** everywhere (`Dockerfile.sandbox`, bridge, `opencode.jsonc`). A later release changed the `/event` SSE behavior — bumping breaks the bridge silently (connects but receives zero events). Re-validate the entire SSE path before upgrading.
-- **`Dockerfile.sandbox` changes require `make sandbox-template`** — the E2B template is a baked image. Controller-only changes just need a restart.
-- **Secrets never enter the sandbox** (except LLM keys — acknowledged exposure). Git credentials are brokered per-request via `runtime/git_credential_helper.py` → `/internal/runs/{id}/git-credentials`. The sandbox holds only a per-run bearer token scoped to that one run.
-- **Single-replica reconciliation bug**: `reconcile_orphaned_runs` on boot fails *all* in-flight runs unconditionally — safe only with one controller replica. Do not run multiple replicas until this is fixed.
+All bridge logs, subagent steps, and findings land in `run_events`. Query them:
 
-## State
+```bash
+RUN_ID=<run_id>
 
-Postgres, four tables: `runs`, `run_events`, `findings`, `repo_flags`. Schema is auto-created via `init_db()` on boot (no Alembic migrations scaffolded yet). Adminer runs at `localhost:8081` after `make up` (server: `db`, user/pass: `coreview`, db: `coreview_agent`).
+# Live tail
+curl -N localhost:8080/runs/$RUN_ID/stream
 
-## Environment variables
+# All events
+curl -s localhost:8080/runs/$RUN_ID/events | jq '.events[]'
 
+# Bridge diagnostics (progress heartbeats, idle signals, timeouts)
+curl -s localhost:8080/runs/$RUN_ID/events \
+  | jq '.events[] | select(.type == "log") | {seq, event: .data.event, data: .data}'
+
+# Subagent step counts (logged every 5 steps — high count + reason=tool-calls = spinning)
+curl -s localhost:8080/runs/$RUN_ID/events \
+  | jq '.events[] | select(.data.event == "bridge.subagent_step_count")'
+
+# Recent runs
+docker compose exec db psql -U coreview -d coreview_agent -c \
+  "SELECT id, status, bundle, created_at FROM runs ORDER BY created_at DESC LIMIT 10;"
+
+# All events for a run (direct Postgres)
+docker compose exec db psql -U coreview -d coreview_agent -c \
+  "SELECT seq, type, data->>'event', created_at FROM run_events WHERE run_id='$RUN_ID' ORDER BY seq;"
 ```
-E2B_API_KEY, E2B_TEMPLATE=coreview-agent
-DATABASE_URL=postgresql+asyncpg://...
-GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_WEBHOOK_SECRET
-AGENT_MODEL=aigateway/MiniMax/MiniMax-M2.7
-OPENAI_BASE_URL=<self-hosted gateway>
-OPENAI_API_KEY=<gateway key>
-CONTROL_PLANE_URL=<public HTTPS URL for sandbox callbacks>
-AGENT_RUN_WORKER=1   # default — API + worker in one process
-DEFAULT_REVIEW_MODE=agentic  # or legacy per-repo via repo_flags table
-```
 
-## Testing tiers
-
-- **Default** (`make test`): no external services; API tests use throwaway SQLite. Covers webhook verification, bundle→task mapping, harness bus translation, config/model routing, VCS webhook parsing, and full FastAPI round-trips.
-- **Live** (`make test-live`): reads `agent/.env`; each test self-skips if its required keys are absent. Tests LLM reachability, E2B sandbox create/stop, and OpenCode harness boot.
+Key `bridge.*` events: `session_idle` (parent done), `subagent_idle` (subagent done), `subagent_step_count` (spinning check), `inactivity_timeout` (no SSE for 120 s), `prompt_max_duration_exceeded` (hard wall-clock limit), `progress` (60 s heartbeat with elapsed + step counts).
 
 ## Web app (`web/`)
 
 Next.js 16 App Router, React 19, Tailwind 4. Pages: `/` (redirect), `/sessions/[id]` (run detail + live event log), `/chat` (agent chat), `/settings`. API client in `web/lib/api.ts` talks to the controller at `localhost:8080`. Types in `web/lib/types.ts` mirror the controller's Pydantic models.
+
+## End-to-end testing workflow
+
+For testing controller-sandbox integration without external dependencies:
+
+```bash
+# 1. Ensure controller is running (with any env overrides for testing)
+make up
+# Or with a short watchdog for faster failure detection:
+BRIDGE_SSE_INACTIVITY_TIMEOUT=30 make up
+
+# 2. Create a test run via the API (example: subagent-heavy workload)
+curl -sS -X POST http://localhost:8080/runs \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "repo":"oadtq/warp",
+    "prompt":"Spawn multiple subagents to explore this repo in parallel. Ask one subagent to inspect Rust project structure, one to inspect package/build/test configuration, one to inspect UI/frontend structure, and one to summarize agent/automation conventions. Then merge their observations into a concise report. Do not modify files.",
+    "bundle":"general_agent",
+    "provider":"github",
+    "host":"github.com"
+  }'
+# Returns: {"id":"...","status":"queued",...}
+
+# 3. Poll for completion (run_id from previous step)
+RUN_ID=<run_id>
+# Watch live events:
+curl -N localhost:8080/runs/$RUN_ID/stream
+# Or poll status via database:
+docker compose exec -T db psql -U coreview -d coreview_agent \
+  -c "SELECT id, status, updated_at FROM runs WHERE id='$RUN_ID';"
+```
+
+**Key events to monitor:**
+- `bridge.run_start` — bridge initialized, SSE watchdog armed
+- `bridge.subagent_start` — subagent spawned
+- `bridge.parent_done_via_step_finish` — parent session completed
+- `bridge.inactivity_timeout` — watchdog fired (indicates stuck session)
+- `status` + `done` — terminal state reached
+
+**Timeout overrides for testing:**
+- `BRIDGE_SSE_INACTIVITY_TIMEOUT` — seconds of SSE silence before watchdog aborts (default: 120)
+- `BRIDGE_SSE_INACTIVITY_TIMEOUT_MIN` — clamp minimum (5)
+- `BRIDGE_SSE_INACTIVITY_TIMEOUT_MAX` — clamp maximum (3600)
+
+## Notices
+
+- **`Dockerfile.sandbox` changes require `make sandbox-template`** — the E2B template is a baked image. Controller-only changes just need a restart.

@@ -18,7 +18,6 @@ from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from core.config import get_settings
 from core.state import get_session
 from core.state import repo as runs
 from core.types import RunStatus

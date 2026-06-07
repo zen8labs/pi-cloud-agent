@@ -1,4 +1,4 @@
-// OpenCode config for the pr_review bundle (OpenCode 1.14.41).
+// OpenCode config for the pr_review bundle (OpenCode 1.16.2).
 //
 // The in-sandbox supervisor parses this file, injects the concrete
 // provider/model resolved from AGENT_MODEL, and hands the result to OpenCode

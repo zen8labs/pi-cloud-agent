@@ -208,12 +208,73 @@ def test_internal_status_done_publishes_done_event(client):
     run_id = r.headers["X-CoReview-Run"]
     token = _run_token(client, run_id)
 
-    ok = client.post(
-        f"/internal/runs/{run_id}/status",
-        json={"status": "done", "detail": "finished"},
-        headers={"Authorization": f"Bearer {token}"},
+    raw = _post_status_and_collect_bus_events(
+        client,
+        run_id,
+        token,
+        {"status": "done", "detail": "finished"},
+        expected_count=2,
     )
-    assert ok.status_code == 200
+
+    assert [e["type"] for e in raw] == ["status", "done"]
+
+
+def test_internal_status_error_publishes_done_event(client):
+    body = json.dumps(_pr_payload()).encode()
+    r = client.post(
+        "/webhooks/github",
+        content=body,
+        headers={"x-github-event": "pull_request", "x-hub-signature-256": _gh_sig(body)},
+    )
+    run_id = r.headers["X-CoReview-Run"]
+    token = _run_token(client, run_id)
+
+    raw = _post_status_and_collect_bus_events(
+        client,
+        run_id,
+        token,
+        {"status": "error", "detail": "bridge failed"},
+        expected_count=3,
+    )
+
+    assert [e["type"] for e in raw] == ["status", "error", "done"]
+    assert raw[1]["data"]["message"] == "bridge failed"
+    assert raw[2]["data"]["status"] == "error"
+
+
+def _post_status_and_collect_bus_events(
+    client,
+    run_id: str,
+    token: str,
+    payload: dict,
+    expected_count: int,
+) -> list[dict]:
+    import asyncio
+
+    from core.orchestrator.bus import event_bus
+
+    q = event_bus.subscribe(run_id)
+
+    async def collect():
+        events = []
+        for _ in range(expected_count):
+            events.append(await asyncio.wait_for(q.get(), timeout=2.0))
+        return events
+
+    loop = asyncio.new_event_loop()
+    try:
+        waiter = loop.create_task(collect())
+        loop.run_until_complete(asyncio.sleep(0.05))
+        ok = client.post(
+            f"/internal/runs/{run_id}/status",
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert ok.status_code == 200
+        return loop.run_until_complete(waiter)
+    finally:
+        event_bus.unsubscribe(run_id, q)
+        loop.close()
 
 
 def _run_token(client, run_id: str) -> str:

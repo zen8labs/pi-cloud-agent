@@ -95,7 +95,7 @@ Below instructions are for running the agent with docker.
 
 ## E2B setup
 
-The agent runs each review inside an [E2B](https://e2b.dev) sandbox — a Firecracker microVM built from `Dockerfile.sandbox` (OpenCode `1.14.41` + our `runtime/` + `bundles/`). Set this up once.
+The agent runs each review inside an [E2B](https://e2b.dev) sandbox — a Firecracker microVM built from `Dockerfile.sandbox` (OpenCode `1.16.2` + our `runtime/` + `bundles/`). Set this up once.
 
 ### 1. Account + API key
 
@@ -137,8 +137,8 @@ E2B's infrastructure is open source (`e2b-dev/infra`, Terraform). To move off Pa
 > `../pr-agent`. Set `OPENAI_BASE_URL` to your gateway and `OPENAI_API_KEY` to its
 > key — these are used by both the controller LLM service and the in-sandbox
 > OpenCode harness (the runtime injects them as an OpenCode `openai` provider
-> with the gateway `baseURL`). OpenCode is pinned to `1.14.41` (the last build
-> before an SSE change the bridge depends on); keep the pin.
+> with the gateway `baseURL`). OpenCode is pinned to `1.16.2` (1.14.42–1.15.x broke the SSE endpoint;
+> 1.16.2 restores it and fixes the subagent hang); keep the pin.
 
 ## How to test
 
@@ -326,7 +326,7 @@ Tracked bugs to fix before the relevant scale-out. Unchecked = open; this list i
 
 This is a working MVP, ported faithfully from the proven `ref/background-agents` OpenCode integration. The seams compile, import, and pass smoke tests. Remaining items need validation on a first live run:
 
-- **OpenCode `1.14.41`** (`runtime/bridge.py`, `runtime/entrypoint.py`, `bundles/pr_review/opencode/opencode.jsonc`): the session/`/event`-SSE/prompt driving and config are ported against this exact pin (the version the reference proved out). Keep the pin; if you upgrade OpenCode, re-validate the bridge SSE path. Subagent agent-file frontmatter (`mode: subagent`) should be confirmed on first run (bodies still load as agent prompts regardless).
+- **OpenCode `1.16.2`** (`runtime/bridge.py`, `runtime/entrypoint.py`, `bundles/pr_review/opencode/opencode.jsonc`): the session/`/event`-SSE/prompt driving and config are validated against this pin. Keep the pin; if you upgrade OpenCode, re-validate the full bridge SSE path (parent idle, subagent idle, parent idle after subagent). Subagent agent-file frontmatter (`mode: subagent`) should be confirmed on first run (bodies still load as agent prompts regardless).
 - **`report_finding` tool** (`bundles/pr_review/tools/report_finding.js`): now an `@opencode-ai/plugin` `tool()` (the reference's proven pattern), posting to `/internal/runs/{id}/findings` — not an MCP server.
 - **E2B SDK specifics** (`core/sandbox/e2b_provider.py`): confirm `connect`/resume parameter names and pause semantics against the installed `e2b` version.
 - **Bitbucket inline comments** (`core/vcs/bitbucket.py`): anchor `to`/`from` placement is best-effort; verify against a real repo. GitLab/Bitbucket post per-comment (no bundled review like GitHub).

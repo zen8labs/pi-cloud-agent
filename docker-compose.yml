@@ -35,6 +35,7 @@ services:
     environment:
       # Override the .env DB host so the container reaches the compose service.
       DATABASE_URL: postgresql+asyncpg://coreview:coreview@db:5432/coreview_agent
+      BRIDGE_SSE_INACTIVITY_TIMEOUT: ${BRIDGE_SSE_INACTIVITY_TIMEOUT:-}
     ports:
       - "8080:8080"
     depends_on:

@@ -62,7 +62,7 @@ def test_github_webhook_bad_signature_raises():
 
     body = b'{"action":"opened"}'
     headers = {"x-github-event": "pull_request", "x-hub-signature-256": "sha256=deadbeef"}
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError):
         get_vcs_provider("github").verify_and_parse_webhook(headers, body)
 
 

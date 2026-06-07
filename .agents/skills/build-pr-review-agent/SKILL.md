@@ -38,10 +38,11 @@ non-root), **supervisor+bridge** (in-sandbox glue that dials the controller
   regardless, so language unification buys little.
 - **Sandbox: E2B** (Firecracker microVMs; PaaS now, self-host later). Provider is
   swappable behind a contract (Modal/Daytona/Docker also fit).
-- **Harness: OpenCode, server-first, pinned `1.14.41`.** Don't build a bespoke
+- **Harness: OpenCode, server-first, pinned `1.16.2`.** Don't build a bespoke
   agent loop — drive a real one. Server-first = drivable from any controller; open
-  source = the agent can read its own runtime. Pin the version (an SSE change
-  after 1.14.41 breaks the bridge). Keep it swappable behind an adapter.
+  source = the agent can read its own runtime. Pin the version (1.14.42–1.15.x
+  broke the SSE endpoint; 1.16.2 fixes both SSE and the subagent hang). Keep it
+  swappable behind an adapter.
 - **State: Postgres** (runs, events, findings, flags) — replaces the reference's
   Cloudflare Durable Objects with VPC-native pieces.
 - **Tools: MCP** so behavioral logic is portable across harnesses; only prompt

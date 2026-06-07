@@ -2,7 +2,7 @@
 
 Skips unless `E2B_API_KEY` and `E2B_TEMPLATE` are set (the custom template must be
 built — see README "E2B setup"). Proves our sandbox image actually ships a
-working OpenCode `1.14.41` and that the runtime package is importable, and
+working OpenCode `1.16.2` and that the runtime package is importable, and
 optionally that OpenCode can answer a one-line prompt against the configured
 MiniMax gateway.
 """
@@ -41,7 +41,7 @@ async def test_template_ships_opencode_and_runtime():
     sandbox = await _make_sandbox()
     try:
         ver = await sandbox.commands.run("opencode --version")
-        assert "1.14.41" in (ver.stdout + ver.stderr), f"unexpected opencode version: {ver.stdout!r}"
+        assert "1.16.2" in (ver.stdout + ver.stderr), f"unexpected opencode version: {ver.stdout!r}"
         imp = await sandbox.commands.run("cd /app && python -c 'import runtime, bundles; print(\"import-ok\")'")
         assert "import-ok" in imp.stdout
     finally:

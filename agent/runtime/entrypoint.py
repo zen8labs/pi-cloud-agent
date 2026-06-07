@@ -2,7 +2,7 @@
 """Sandbox supervisor — PID 1 inside the E2B sandbox.
 
 A faithful, headless-review port of the reference ``sandbox_runtime.entrypoint``
-(a proven OpenCode 1.14.41 integration), retargeted to our run-oriented HTTP
+(originally written against OpenCode 1.14.41, upgraded to 1.16.2), retargeted to our run-oriented HTTP
 controller and stripped of everything irrelevant to a one-shot PR review
 (code-server, ttyd, tunnels, agent-browser, slack, multiplayer, spawn/cancel
 tools). Responsibilities, in order:
@@ -359,25 +359,23 @@ class SandboxSupervisor:
         # Point the harness at the self-hosted gateway. Routing depends on the
         # provider prefix in AGENT_MODEL (see _inject_gateway_provider).
         self._inject_gateway_provider(config)
+
+        # Diagnostic: log the final config (redact the API key).
+        import copy
+        debug_config = copy.deepcopy(config)
+        for prov in debug_config.get("provider", {}).values():
+            if isinstance(prov.get("options"), dict):
+                prov["options"].pop("apiKey", None)
+        self.log.info("opencode.config_built", config=debug_config)
+
         return config
 
     def _inject_gateway_provider(self, config: dict) -> None:
         """Wire the configured gateway URL into the OpenCode provider block.
 
-        Mirrors the working local opencode.json shape exactly:
-          "provider": {
-            "<provider_id>": {
-              "npm": "@ai-sdk/openai-compatible",
-              "name": "<provider_id>",
-              "options": { "baseURL": ..., "apiKey": ... },
-              "models": { "<model_path>": { "name": "<model_path>" } }
-            }
-          }
-
-        AGENT_MODEL 'aigateway/MiniMax/MiniMax-M2.7' → provider_id='aigateway',
-        model_path='MiniMax/MiniMax-M2.7'. The full slash-containing path is used
-        as the models dict key — that is what OpenCode passes to the AI SDK and
-        therefore what the gateway receives as the API model name.
+        Custom gateway providers use ``@ai-sdk/openai-compatible``. Preserve the
+        full model path from AGENT_MODEL so the gateway receives model names like
+        ``MiniMax/MiniMax-M2.7`` rather than the shortened leaf name.
         """
         base_url = os.environ.get("OPENAI_BASE_URL", "").strip()
         api_key = os.environ.get("OPENAI_API_KEY", "").strip()
@@ -386,18 +384,20 @@ class SandboxSupervisor:
         provider_id, _, model_path = self.agent_model.partition("/")
         if not model_path:
             return
-        config["model"] = self.agent_model
-        config["small_model"] = self.agent_model
+        model_key = model_path
+        config["model"] = f"{provider_id}/{model_key}"
+        config["small_model"] = f"{provider_id}/{model_key}"
         providers = config.setdefault("provider", {})
         provider_cfg = providers.setdefault(provider_id, {})
-        provider_cfg["npm"] = "@ai-sdk/openai-compatible"
+        if provider_id not in {"anthropic", "openai", "google"}:
+            provider_cfg["npm"] = "@ai-sdk/openai-compatible"
         provider_cfg.setdefault("name", provider_id)
         options = provider_cfg.setdefault("options", {})
         options["baseURL"] = base_url
         if api_key:
             options["apiKey"] = api_key
         models = provider_cfg.setdefault("models", {})
-        models.setdefault(model_path, {"name": model_path})
+        models.setdefault(model_key, {"name": model_path})
 
     def _stage_opencode_assets(self, workdir: Path) -> None:
         """Stage tools, skills, subagents, and plugin deps into ``.opencode/``.
@@ -441,9 +441,13 @@ class SandboxSupervisor:
         if subagents_src.is_dir():
             agent_dest = opencode_dir / "agent"
             agent_dest.mkdir(parents=True, exist_ok=True)
+            staged = []
             for md in subagents_src.glob("*.md"):
                 shutil.copy(md, agent_dest / md.name)
-            self.log.info("opencode.subagents_staged", path=str(agent_dest))
+                staged.append(md.name)
+            self.log.info("opencode.subagents_staged", path=str(agent_dest), files=staged)
+        else:
+            self.log.info("opencode.subagents_none", bundle=self.bundle)
 
         # --- Pre-staged @opencode-ai/plugin deps -----------------------------
         # Gives OpenCode a lockfile in sync with the declared deps so its
@@ -527,8 +531,7 @@ class SandboxSupervisor:
     async def _wait_for_health(self) -> None:
         """Poll OpenCode's health endpoint until ready, or raise on timeout.
 
-        Uses ``/global/health`` — the route the reference health check polls for
-        OpenCode 1.14.41.
+        Uses ``/global/health`` — the route confirmed working for OpenCode 1.16.2.
         """
         health_url = f"http://localhost:{OPENCODE_PORT}/global/health"
         start = time.time()

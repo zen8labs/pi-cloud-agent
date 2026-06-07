@@ -1,4 +1,4 @@
-// OpenCode config for the general_agent bundle (OpenCode 1.14.41).
+// OpenCode config for the general_agent bundle (OpenCode 1.16.2).
 //
 // Mirrors the pr_review config but with full write access: this is a coding
 // agent that may edit files, run commands, and iterate — not a read-only

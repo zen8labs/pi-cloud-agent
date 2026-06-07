@@ -13,6 +13,7 @@ boot env, (2) hands back a `Session`, and (3) consumes the bus stream in
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import AsyncIterator
 
 from core.bundles import Bundle
@@ -44,6 +45,10 @@ class OpenCodeAdapter(HarnessAdapter):
             "AGENT_MODEL": model.model,
             "AGENT_FALLBACK_MODELS": ",".join(model.fallbacks),
         }
+        if os.environ.get("BRIDGE_SSE_INACTIVITY_TIMEOUT"):
+            env["BRIDGE_SSE_INACTIVITY_TIMEOUT"] = os.environ[
+                "BRIDGE_SSE_INACTIVITY_TIMEOUT"
+            ]
         # A free-form task (e.g. the general_agent chat session) carries the
         # user's prompt in `inputs`; surface it to the supervisor so it can build
         # the initial prompt. pr_review leaves this empty and drives off its skill.
