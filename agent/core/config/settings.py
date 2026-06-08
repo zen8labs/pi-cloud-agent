@@ -50,10 +50,16 @@ class Settings(BaseSettings):
     ai_timeout: int = Field(120, alias="AI_TIMEOUT")
     llm_max_tokens: int = Field(32000, alias="LLM_MAX_TOKENS")
 
-    # OpenAI-compatible gateway (the self-hosted MiniMax endpoint). Empty base_url
-    # falls back to the provider's default (api.openai.com) — set it for MiniMax.
-    openai_base_url: str = Field("", alias="OPENAI_BASE_URL")
+    # Internal AI gateway (e.g. self-hosted MiniMax over an OpenAI-compatible API).
+    aigateway_base_url: str = Field("", alias="AIGATEWAY_BASE_URL")
+    aigateway_api_key: str = Field("", alias="AIGATEWAY_API_KEY")
+
+    # Official OpenAI API — or any OpenAI-compatible service (Cerebras, etc.).
+    # Leave OPENAI_BASE_URL empty to hit api.openai.com; set it to redirect to
+    # another compatible endpoint (e.g. https://api.cerebras.ai/v1).
     openai_api_key: str = Field("", alias="OPENAI_API_KEY")
+    openai_base_url: str = Field("", alias="OPENAI_BASE_URL")
+
     anthropic_api_key: str = Field("", alias="ANTHROPIC_API_KEY")
 
     # rollout

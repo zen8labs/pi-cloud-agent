@@ -27,6 +27,7 @@ async def create_run(
     pr_number: int | None,
     head_sha: str | None,
     trigger: dict,
+    model: str | None = None,
 ) -> Run:
     run = Run(
         bundle=bundle,
@@ -35,6 +36,7 @@ async def create_run(
         pr_number=pr_number,
         head_sha=head_sha,
         trigger=trigger,
+        model=model,
         status=RunStatus.queued.value,
     )
     db.add(run)

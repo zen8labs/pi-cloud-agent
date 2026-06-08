@@ -144,7 +144,8 @@ export default function SessionPage() {
         <aside className="hidden w-72 shrink-0 overflow-y-auto border-l border-[var(--color-line)] bg-[var(--color-surface)] px-5 py-6 lg:block">
           <Section title="Details">
             <Row label="Status" value={run ? <StatusBadge status={run.status} /> : "—"} />
-            <Row label="Bundle" value={run?.bundle ?? "—"} mono />
+            <Row label="Agent" value={run?.bundle ?? "—"} mono />
+            <Row label="Model" value={run?.model ?? "—"} mono />
             <Row label="Repo" value={run?.repo ?? "—"} mono />
             <Row label="Provider" value={run?.provider ?? "—"} />
             <Row label="Run ID" value={run ? run.id.slice(0, 8) : "—"} mono />
@@ -376,3 +377,4 @@ function Row({
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + "…" : s;
 }
+

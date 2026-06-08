@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
-import type { AppConfig } from "@/lib/types";
+import type { AppConfig, ModelOption } from "@/lib/types";
 import { ChatComposer } from "@/components/ChatComposer";
 
 export default function ChatPage() {
@@ -23,6 +23,7 @@ function ChatInner() {
   const [repo, setRepo] = useState(params.get("repo") || "");
   const [customRepo, setCustomRepo] = useState("");
   const [bundle, setBundle] = useState(params.get("bundle") || "general_agent");
+  const [model, setModel] = useState<string>("");
   const [prNumber, setPrNumber] = useState("");
   const [prompt, setPrompt] = useState("");
   const [branches, setBranches] = useState<string[]>([]);
@@ -32,7 +33,11 @@ function ChatInner() {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     api.listRepos().then(setRepos).catch(() => setRepos([]));
-    api.getConfig().then(setConfig).catch(() => setConfig(null));
+    api.getConfig().then((cfg) => {
+      setConfig(cfg);
+      // Pre-select the default model once the config is loaded.
+      setModel((prev) => prev || cfg.default_model);
+    }).catch(() => setConfig(null));
   }, []);
 
   // Default the repo to the first configured one once loaded.
@@ -89,6 +94,7 @@ function ChatInner() {
         prompt: isReview ? prompt.trim() || "Review this pull request." : prompt.trim(),
         branch: branch || null,
         pr_number: isReview ? Number(prNumber) : null,
+        model: model || null,
       });
       router.push(`/sessions/${run.id}`);
     } catch (e) {
@@ -169,6 +175,22 @@ function ChatInner() {
             className="w-20 rounded-lg border border-[var(--color-line-strong)] bg-[var(--color-surface)] px-3 py-1.5 text-sm focus:border-[var(--color-accent)] focus:outline-none"
           />
         )}
+
+        {/* Model selector — shown whenever at least one model is available. */}
+        {config && (config.available_models ?? []).length > 0 && (
+          <select
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            title="Model for this session"
+            className="rounded-lg border border-[var(--color-line-strong)] bg-[var(--color-surface)] px-3 py-1.5 text-sm focus:border-[var(--color-accent)] focus:outline-none"
+          >
+            {(config.available_models ?? []).map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       <ChatComposer
@@ -180,7 +202,7 @@ function ChatInner() {
             ? "Optional note for the reviewer (defaults to a full review)…"
             : "Describe the task — e.g. “What is this repo about?”"
         }
-        model={config?.model}
+        model={config?.available_models?.find((m) => m.id === model)?.label ?? config?.model}
         submitLabel="Start"
         submitting={submitting}
         disabled={!effectiveRepo}

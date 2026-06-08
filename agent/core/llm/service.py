@@ -51,12 +51,26 @@ class LLMService:
         spec = s.model_spec()
         self.model = model or spec.model
         self.fallbacks = fallbacks if fallbacks is not None else spec.fallbacks
-        # Empty base_url ⇒ provider default (api.openai.com). Set it for MiniMax.
-        self.api_base = api_base if api_base is not None else (s.openai_base_url or None)
-        self.api_key = api_key if api_key is not None else (s.openai_api_key or None)
         self.timeout = timeout if timeout is not None else s.ai_timeout
         self.max_tokens = max_tokens if max_tokens is not None else s.llm_max_tokens
         self.temperature = temperature if temperature is not None else spec.temperature
+
+        # Pick gateway vs. native OpenAI vars based on the model's provider prefix.
+        provider = self.model.partition("/")[0]
+        if api_base is not None:
+            self.api_base = api_base
+        elif provider == "aigateway":
+            self.api_base = s.aigateway_base_url or None
+        else:
+            # openai/* (official or compatible) — base_url is optional.
+            self.api_base = s.openai_base_url or None
+
+        if api_key is not None:
+            self.api_key = api_key
+        elif provider == "aigateway":
+            self.api_key = s.aigateway_api_key or None
+        else:
+            self.api_key = s.openai_api_key or None
 
     # LiteLLM's own provider prefixes — don't rewrite these.
     _LITELLM_PROVIDERS = frozenset(

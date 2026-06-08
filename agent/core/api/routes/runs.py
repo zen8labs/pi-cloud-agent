@@ -37,6 +37,9 @@ class CreateRunIn(BaseModel):
     # default branch (so we don't assume `main` on a `master`-only repo).
     branch: str | None = None
     pr_number: int | None = None
+    # Model override for this session (e.g. "openai/gpt-5.4-mini").
+    # None → orchestrator falls back to the global default, then AGENT_MODEL env.
+    model: str | None = None
 
 _TERMINAL = {RunStatus.succeeded.value, RunStatus.failed.value, RunStatus.cancelled.value}
 
@@ -46,6 +49,7 @@ def _run_dict(run) -> dict:
         "id": run.id,
         "status": run.status,
         "bundle": run.bundle,
+        "model": run.model,
         "provider": run.provider,
         "repo": run.repo_full_name,
         "pr_number": run.pr_number,
@@ -111,6 +115,7 @@ async def create_run(body: CreateRunIn):
             pr_number=body.pr_number,
             head_sha=None,
             trigger=trigger,
+            model=body.model or None,
         )
         return _run_dict(run)
 

@@ -11,6 +11,7 @@ export interface RunSummary {
   id: string;
   status: RunStatus;
   bundle: string;
+  model: string | null;
   provider: string;
   repo: string;
   pr_number: number | null;
@@ -39,8 +40,15 @@ export interface AgentEvent {
   at: string;
 }
 
+export interface ModelOption {
+  id: string;
+  label: string;
+}
+
 export interface AppConfig {
   model: string;
+  available_models: ModelOption[];
+  default_model: string;
   bundles: string[];
   default_bundle: string;
 }

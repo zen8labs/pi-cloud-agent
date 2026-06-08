@@ -13,7 +13,10 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from core.api.routes.meta import configured_repos
+from core.config.global_settings import get_global_setting, set_global_setting
 from core.config.repo_settings import get_all_pr_review_branches, set_pr_review_branch
+from core.config import get_settings
+from core.llm.registry import available_models
 from core.state import get_session
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -49,3 +52,34 @@ async def set_repo_branch(body: RepoBranchIn):
     async with get_session() as db:
         await set_pr_review_branch(db, body.provider, body.repo, body.branch.strip())
     return {"repo": body.repo, "branch": body.branch.strip()}
+
+
+class DefaultModelIn(BaseModel):
+    model: str = Field(..., min_length=1)
+
+
+@router.get("/default-model")
+async def get_default_model():
+    """Current default model for headless tasks (PR review).
+
+    Returns the DB-persisted value when set, otherwise the AGENT_MODEL env var.
+    Also returns the full list of available models for the settings UI selector.
+    """
+    s = get_settings()
+    async with get_session() as db:
+        model = await get_global_setting(db, "default_model")
+    if not model:
+        model = s.agent_model
+    models = available_models()
+    return {
+        "model": model,
+        "available_models": [{"id": m.id, "label": m.label} for m in models],
+    }
+
+
+@router.put("/default-model")
+async def set_default_model(body: DefaultModelIn):
+    """Persist the default model for headless tasks without a controller restart."""
+    async with get_session() as db:
+        await set_global_setting(db, "default_model", body.model)
+    return {"model": body.model}

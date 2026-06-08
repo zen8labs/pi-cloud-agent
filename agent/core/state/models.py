@@ -51,6 +51,9 @@ class Run(Base):
     auth_token: Mapped[str] = mapped_column(String(64), default=lambda: uuid.uuid4().hex)
     provider_object_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
+    # Per-run model override (e.g. "openai/gpt-5.4-mini"). None → global default.
+    model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Worker claim coordination (FOR UPDATE SKIP LOCKED) + lease expiry.
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -120,6 +123,23 @@ class RepoSetting(Base):
     provider: Mapped[str] = mapped_column(String(32))
     full_name: Mapped[str] = mapped_column(String(255))
     pr_review_branch: Mapped[str] = mapped_column(String(255), default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
+class GlobalSetting(Base):
+    """Key-value store for global application settings (e.g. default_model).
+
+    Written by the /settings API and read by the orchestrator. Prefer this over
+    env-var-only config when the value needs to be changeable from the UI at
+    runtime without a controller restart.
+    """
+
+    __tablename__ = "global_settings"
+
+    key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
     )

@@ -10,6 +10,9 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from core.config import get_settings
+from core.config.global_settings import get_global_setting
+from core.llm.registry import available_models
+from core.state import get_session
 
 router = APIRouter(tags=["meta"])
 
@@ -71,10 +74,18 @@ async def list_repos():
 
 @router.get("/config")
 async def get_config():
-    """Non-secret defaults the dashboard surfaces (model, available bundles)."""
+    """Non-secret defaults the dashboard surfaces (available models, bundles)."""
     s = get_settings()
+    models = available_models()
+    async with get_session() as db:
+        default_model = await get_global_setting(db, "default_model")
+    # Fall back to AGENT_MODEL env var when no DB default is set.
+    if not default_model:
+        default_model = s.agent_model
     return {
-        "model": s.agent_model,
+        "model": default_model,
+        "available_models": [{"id": m.id, "label": m.label} for m in models],
+        "default_model": default_model,
         "bundles": ["general_agent", "pr_review"],
         "default_bundle": "general_agent",
     }

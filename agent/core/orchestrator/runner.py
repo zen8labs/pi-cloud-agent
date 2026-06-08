@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from core.bundles import get_bundle
 from core.config import get_settings
+from core.config.global_settings import get_global_setting
 from core.harness import EventType, get_harness_adapter
 from core.harness.base import Session
 from core.logger import bind_correlation, get_logger
@@ -22,7 +23,7 @@ from core.sandbox import (
 from core.state import get_session
 from core.state import repo as runs
 from core.state.models import Run
-from core.types import CorrelationContext, RunLimits, RunStatus, TaskSpec
+from core.types import CorrelationContext, ModelSpec, RunLimits, RunStatus, TaskSpec
 from core.vcs import get_vcs_provider
 
 log = get_logger("orchestrator")
@@ -47,7 +48,12 @@ async def execute_run(run: Run) -> None:
             max_tokens=task.limits.max_tokens,
         ),
     )
-    model = settings.model_spec()
+    # Model resolution: per-run override → global DB default → AGENT_MODEL env var.
+    model_id = run.model
+    if not model_id:
+        async with get_session() as db:
+            model_id = await get_global_setting(db, "default_model")
+    model = _model_spec(model_id)
     adapter = get_harness_adapter()
     sandbox_provider = get_sandbox_provider()
     vcs = get_vcs_provider(run.provider)
@@ -72,7 +78,7 @@ async def execute_run(run: Run) -> None:
             timeout_seconds=settings.sandbox_timeout_seconds,
             egress_allowlist=settings.egress_allowlist(),
             env=runtime_env,
-            secret_env=_llm_provider_keys(),
+            secret_env=_llm_provider_keys(model.model),
             correlation=corr,
         )
         created = await sandbox_provider.create_sandbox(create_cfg)
@@ -123,29 +129,63 @@ async def execute_run(run: Run) -> None:
                 log.warning("sandbox stop failed", extra={"run_id": run.id})
 
 
-def _llm_provider_keys() -> dict[str, str]:
-    """LLM provider config the in-sandbox harness needs to call the model.
+def _model_spec(model_id: str | None) -> ModelSpec:
+    """Build a ModelSpec for the given model id, falling back to settings."""
+    s = get_settings()
+    if not model_id:
+        return s.model_spec()
+    return ModelSpec(model=model_id, fallbacks=[], temperature=s.agent_temperature)
 
-    Includes the OpenAI-compatible gateway (self-hosted MiniMax) base_url + key,
-    plus any provider keys present in the environment. These genuinely enter the
-    sandbox (the agent runs there). Mitigations: egress allowlist; per-run
-    ephemeral sandbox. Planned hardening: a controller-side LLM proxy so keys
-    never leave the trust boundary.
+
+def _llm_provider_keys(model_id: str) -> dict[str, str]:
+    """LLM provider env vars the in-sandbox harness needs to call the model.
+
+    The key set is model-aware so that native openai/* models don't receive
+    OPENAI_BASE_URL (which would redirect them to the internal gateway):
+      - aigateway/*  → gateway base_url + gateway api_key (OPENAI_*)
+      - openai/*     → official OPENAI_OFFICIAL_API_KEY injected as OPENAI_API_KEY,
+                       no OPENAI_BASE_URL so @ai-sdk/openai hits api.openai.com
+      - anthropic/*  → ANTHROPIC_API_KEY
+      - everything   → any other provider keys present in the environment
+
+    These keys genuinely enter the sandbox. Mitigations: egress allowlist;
+    per-run ephemeral sandbox. Planned hardening: controller-side LLM proxy.
     """
     import os
 
     s = get_settings()
+    provider = model_id.partition("/")[0]
     out: dict[str, str] = {}
-    if s.openai_base_url:
-        out["OPENAI_BASE_URL"] = s.openai_base_url
-    if s.openai_api_key:
-        out["OPENAI_API_KEY"] = s.openai_api_key
+
+    if provider == "aigateway":
+        # Internal gateway (e.g. self-hosted MiniMax). Injected as OPENAI_* so
+        # OpenCode's _inject_gateway_provider wires the aigateway provider block.
+        if s.aigateway_base_url:
+            out["OPENAI_BASE_URL"] = s.aigateway_base_url
+        if s.aigateway_api_key:
+            out["OPENAI_API_KEY"] = s.aigateway_api_key
+    elif provider == "openai":
+        # Official OpenAI or any OpenAI-compatible endpoint (Cerebras etc.).
+        # OPENAI_BASE_URL is optional — omitting it hits api.openai.com.
+        if s.openai_api_key:
+            out["OPENAI_API_KEY"] = s.openai_api_key
+        if s.openai_base_url:
+            out["OPENAI_BASE_URL"] = s.openai_base_url
+    else:
+        # Unknown provider prefix — fall back to gateway vars if configured.
+        if s.aigateway_base_url:
+            out["OPENAI_BASE_URL"] = s.aigateway_base_url
+        if s.aigateway_api_key:
+            out["OPENAI_API_KEY"] = s.aigateway_api_key
+
     if s.anthropic_api_key:
         out["ANTHROPIC_API_KEY"] = s.anthropic_api_key
-    # Pass through anything else already in the environment.
-    for var in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"):
+
+    # Pass through any other provider keys present in the process environment.
+    for var in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"):
         if var not in out and os.environ.get(var):
             out[var] = os.environ[var]
+
     return out
 
 

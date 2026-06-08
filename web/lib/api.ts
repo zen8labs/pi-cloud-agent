@@ -1,7 +1,22 @@
-import type { AgentEvent, AppConfig, RepoBranch, RunDetail, RunSummary } from "./types";
+import type { AgentEvent, AppConfig, ModelOption, RepoBranch, RunDetail, RunSummary } from "./types";
 
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") || "http://localhost:8080";
+
+// Module-level TTL cache for slow/rarely-changing endpoints (repo list, config).
+// Survives component remounts; clears automatically after TTL_MS.
+// Permission/repo changes are reflected within TTL_MS without a page reload.
+const _cache = new Map<string, { data: unknown; ts: number }>();
+const TTL_MS = 2 * 60 * 1000; // 2 minutes
+
+function withCache<T>(key: string, fetch: () => Promise<T>): Promise<T> {
+  const entry = _cache.get(key);
+  if (entry && Date.now() - entry.ts < TTL_MS) return Promise.resolve(entry.data as T);
+  return fetch().then((data) => {
+    _cache.set(key, { data, ts: Date.now() });
+    return data;
+  });
+}
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -42,16 +57,27 @@ export const api = {
     bundle?: string;
     branch?: string | null;
     pr_number?: number | null;
+    model?: string | null;
   }) => req<RunSummary>(`/runs`, { method: "POST", body: JSON.stringify(body) }),
 
-  listRepos: () => req<{ repos: string[] }>(`/repos`).then((r) => r.repos),
+  listRepos: () =>
+    withCache("repos", () => req<{ repos: string[] }>(`/repos`).then((r) => r.repos)),
 
   listBranches: (repo: string) =>
     req<{ branches: string[]; default: string | null }>(
       `/repos/${repo}/branches`,
     ),
 
-  getConfig: () => req<AppConfig>(`/config`),
+  getConfig: () => withCache("config", () => req<AppConfig>(`/config`)),
+
+  getDefaultModel: () =>
+    req<{ model: string; available_models: ModelOption[] }>(`/settings/default-model`),
+
+  setDefaultModel: (model: string) =>
+    req<{ model: string }>(`/settings/default-model`, {
+      method: "PUT",
+      body: JSON.stringify({ model }),
+    }),
 
   listRepoBranches: () =>
     req<{ source: string; repos: RepoBranch[] }>(`/settings/repo-branches`).then(
