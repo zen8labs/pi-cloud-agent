@@ -23,26 +23,14 @@ export function absoluteTime(iso: string): string {
   });
 }
 
-export const STATUS_META: Record<RunStatus, { label: string; dot: string; chip: string }> = {
-  queued: { label: "Queued", dot: "bg-amber-400", chip: "bg-amber-50 text-amber-700" },
-  provisioning: {
-    label: "Provisioning",
-    dot: "bg-sky-400",
-    chip: "bg-sky-50 text-sky-700",
-  },
-  running: { label: "Running", dot: "bg-blue-500", chip: "bg-blue-50 text-blue-700" },
-  publishing: {
-    label: "Publishing",
-    dot: "bg-violet-500",
-    chip: "bg-violet-50 text-violet-700",
-  },
-  succeeded: {
-    label: "Succeeded",
-    dot: "bg-emerald-500",
-    chip: "bg-emerald-50 text-emerald-700",
-  },
-  failed: { label: "Failed", dot: "bg-red-500", chip: "bg-red-50 text-red-700" },
-  cancelled: { label: "Cancelled", dot: "bg-stone-400", chip: "bg-stone-100 text-stone-600" },
+export const STATUS_LABELS: Record<RunStatus, string> = {
+  queued: "Queued",
+  provisioning: "Provisioning",
+  running: "Running",
+  publishing: "Publishing",
+  succeeded: "Succeeded",
+  failed: "Failed",
+  cancelled: "Cancelled",
 };
 
 export const ACTIVE_STATUSES: RunStatus[] = [

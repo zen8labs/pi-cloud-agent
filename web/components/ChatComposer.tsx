@@ -51,6 +51,7 @@ export function ChatComposer({
     <div className="composer-shell">
       <div
         className={`composer-box ${disabled ? "composer-box--disabled" : ""}`}
+        style={{ background: "var(--color-surface)", borderColor: "var(--color-line-strong)" }}
       >
         <textarea
           ref={textareaRef}
@@ -61,13 +62,16 @@ export function ChatComposer({
           disabled={disabled || submitting}
           placeholder={placeholder}
           className="composer-input"
+          style={{ color: "var(--color-ink)", caretColor: "var(--color-accent)" }}
         />
         <div className="composer-toolbar">
           <span className="composer-hint">
-            {model ? (
-              <span className="font-mono">{model}</span>
+            {submitting ? (
+              "running…"
+            ) : model ? (
+              model
             ) : (
-              "Shift+Enter for newline"
+              "shift+enter for newline"
             )}
           </span>
           <button
@@ -78,7 +82,7 @@ export function ChatComposer({
             aria-label={submitLabel}
           >
             {submitting ? (
-              <span className="text-xs">…</span>
+              <span className="font-mono text-[10px]">…</span>
             ) : (
               <SendIcon />
             )}
@@ -91,7 +95,7 @@ export function ChatComposer({
 
 function SendIcon() {
   return (
-    <svg viewBox="0 0 16 16" fill="none" className="h-4 w-4" aria-hidden>
+    <svg viewBox="0 0 16 16" fill="none" className="h-3.5 w-3.5" aria-hidden>
       <path
         d="M8 12V4M8 4L4.5 7.5M8 4l3.5 3.5"
         stroke="currentColor"

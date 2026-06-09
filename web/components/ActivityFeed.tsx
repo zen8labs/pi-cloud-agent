@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentEvent, RunStatus } from "@/lib/types";
-import { STATUS_META } from "@/lib/format";
+import { STATUS_LABELS } from "@/lib/format";
 import { MarkdownMessage } from "@/components/MarkdownMessage";
 
 /* ── Subagent session model ──────────────────────────────────────────────── */
@@ -35,7 +35,7 @@ export function extractSubagents(events: AgentEvent[]): SubagentSession[] {
   return Array.from(sessions.values());
 }
 
-/* ── Fold the flat event log into renderable blocks ──────────────────────── */
+/* ── Block types ─────────────────────────────────────────────────────────── */
 
 type ToolBlock = {
   kind: "tool";
@@ -66,7 +66,6 @@ function foldEvents(
   const toolByCall = new Map<string, ToolBlock>();
 
   for (const e of events) {
-    // ── Subagent event routing ───────────────────────────────────────────
     if (e.type === "subagent_event") {
       const d = e.data || {};
       const sid = String(d.subagent_session_id ?? "");
@@ -74,16 +73,13 @@ function foldEvents(
       if (innerType === "start" || innerType === "done") continue;
 
       if (selectedSubagentId) {
-        // In subagent view: only show this subagent's events.
         if (sid !== selectedSubagentId) continue;
         foldInnerEvent(innerType, d, blocks, toolByCall, showLogs);
       }
-      // In main view: task tool_calls already represent the subagent — skip inner events.
       continue;
     }
 
-    // ── Main session events ──────────────────────────────────────────────
-    if (selectedSubagentId) continue; // main-session events hidden in subagent view
+    if (selectedSubagentId) continue;
 
     const d = e.data || {};
     switch (e.type) {
@@ -243,19 +239,13 @@ function logLabel(text: string): string {
 function toolSummary(tool: string, args: Record<string, unknown>): string {
   const a = args as Record<string, string>;
   switch (tool) {
-    case "read":
-      return a.filePath || a.path || "";
+    case "read": return a.filePath || a.path || "";
     case "edit":
-    case "write":
-      return a.filePath || a.path || "";
-    case "bash":
-      return a.command || a.cmd || "";
-    case "grep":
-      return a.pattern ? `"${a.pattern}"` : "";
-    case "glob":
-      return a.pattern || "";
-    case "list":
-      return a.path || "";
+    case "write": return a.filePath || a.path || "";
+    case "bash": return a.command || a.cmd || "";
+    case "grep": return a.pattern ? `"${a.pattern}"` : "";
+    case "glob": return a.pattern || "";
+    case "list": return a.path || "";
     default: {
       const first = Object.values(args)[0];
       return typeof first === "string" ? first : "";
@@ -301,8 +291,10 @@ export function ActivityFeed({
 
   if (blocks.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-[var(--color-faint)]">
-        {active ? "Waiting for the agent to start…" : "No activity recorded."}
+      <div className="flex h-full items-center justify-center py-20">
+        <p className="font-mono text-[11px] uppercase tracking-[0.1em] text-[var(--color-faint)]">
+          {active ? "waiting for agent…" : "no activity recorded"}
+        </p>
       </div>
     );
   }
@@ -337,32 +329,42 @@ function BlockView({ block }: { block: Block }) {
     case "log":
       return <CollapsibleLog text={block.text} />;
     case "status": {
-      const meta = STATUS_META[block.status] ?? STATUS_META.queued;
+      const k = block.status as string;
       return (
-        <div className="flex items-center justify-center gap-2 py-1">
-          <span className="h-px w-8 bg-[var(--color-line)]" />
-          <span className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--color-faint)]">
-            <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
-            {meta.label}
+        <div className="flex items-center gap-3 py-1.5">
+          <span className="h-px flex-1 bg-[var(--color-line)]" />
+          <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wide text-[var(--color-faint)]">
+            <span
+              className="h-1.5 w-1.5 rounded-full"
+              style={{ background: `var(--status-${k}-dot)` }}
+            />
+            {STATUS_LABELS[block.status] ?? block.status}
             {block.error ? ` — ${block.error}` : ""}
           </span>
-          <span className="h-px w-8 bg-[var(--color-line)]" />
+          <span className="h-px flex-1 bg-[var(--color-line)]" />
         </div>
       );
     }
     case "finding": {
-      const icon =
-        block.severity === "blocker" ? "🛑" : block.severity === "warning" ? "⚠️" : "💡";
+      const severity = block.severity;
+      const severityColor =
+        severity === "blocker"
+          ? "border-red-500/40 text-red-400"
+          : severity === "warning"
+          ? "border-amber-500/40 text-amber-400"
+          : "border-[var(--color-line-strong)] text-[var(--color-muted)]";
+      const severityMark =
+        severity === "blocker" ? "!!" : severity === "warning" ? "!" : "·";
+
       return (
-        <div className="activity-card mb-2 px-3.5 py-2.5">
-          <div className="flex items-start gap-2 text-sm">
-            <span>{icon}</span>
+        <div className={`activity-card mb-2 border-l-2 px-3.5 py-2.5 ${severityColor}`}>
+          <div className="flex items-start gap-2">
+            <span className="mt-px shrink-0 font-mono text-[11px]">{severityMark}</span>
             <div>
-              <div className="font-medium">{block.title}</div>
+              <div className="text-[13px] font-medium text-[var(--color-ink)]">{block.title}</div>
               {block.file && (
-                <div className="mt-0.5 font-mono text-[11px] text-[var(--color-faint)]">
-                  {block.file}
-                  {block.line != null ? `:${block.line}` : ""}
+                <div className="mt-0.5 font-mono text-[10px] text-[var(--color-faint)]">
+                  {block.file}{block.line != null ? `:${block.line}` : ""}
                 </div>
               )}
             </div>
@@ -372,7 +374,7 @@ function BlockView({ block }: { block: Block }) {
     }
     case "error":
       return (
-        <div className="mb-2 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-700">
+        <div className="mb-2 border border-red-500/30 bg-red-500/8 px-3.5 py-2.5 font-mono text-[12px] text-red-400">
           {block.text}
         </div>
       );
@@ -419,21 +421,27 @@ function ToolRow({ block }: { block: ToolBlock }) {
 
   return (
     <div className="activity-row">
-      <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+      <span className="flex h-3 w-3 shrink-0 items-center justify-center">
         {failed ? (
-          <span className="text-red-500">✕</span>
+          <span className="font-mono text-[10px] text-red-400">✕</span>
         ) : done ? (
-          <span className="text-emerald-500">✓</span>
+          <span className="font-mono text-[10px] text-emerald-400">✓</span>
         ) : (
-          <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-[var(--color-accent)]" />
+          <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-[var(--color-blue)]" />
         )}
       </span>
-      <span className="font-medium text-[var(--color-ink)]">{verb}</span>
+      <span className="font-mono text-[11px] font-medium text-[var(--color-muted)] uppercase tracking-wide">
+        {verb}
+      </span>
       {summary && (
         <code className="activity-row-code">{summary}</code>
       )}
-      {failed && <span className="text-xs text-red-500">failed</span>}
-      {running && <span className="text-[11px] text-[var(--color-faint)]">running…</span>}
+      {running && (
+        <span className="font-mono text-[10px] text-[var(--color-faint)]">running…</span>
+      )}
+      {failed && (
+        <span className="font-mono text-[10px] text-red-400">failed</span>
+      )}
     </div>
   );
 }
@@ -449,20 +457,28 @@ function TaskRow({ block }: { block: ToolBlock }) {
   const running = !done && !failed;
 
   return (
-    <div className="activity-row activity-row--task">
-      <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+    <div className="activity-row" style={{ borderLeft: "2px solid var(--color-blue)" }}>
+      <span className="flex h-3 w-3 shrink-0 items-center justify-center">
         {failed ? (
-          <span className="text-red-500">✕</span>
+          <span className="font-mono text-[10px] text-red-400">✕</span>
         ) : done ? (
-          <span className="text-emerald-500">✓</span>
+          <span className="font-mono text-[10px] text-emerald-400">✓</span>
         ) : (
-          <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-[var(--color-accent)]" />
+          <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-[var(--color-blue)]" />
         )}
       </span>
-      <span className="font-medium text-[var(--color-ink)]">task</span>
-      {desc && <span className="activity-row-code truncate max-w-xs">{desc}</span>}
-      {running && <span className="text-[11px] text-[var(--color-faint)]">running…</span>}
-      {failed && <span className="text-xs text-red-500">failed</span>}
+      <span className="font-mono text-[11px] font-medium text-[var(--color-blue)] uppercase tracking-wide">
+        task
+      </span>
+      {desc && (
+        <span className="activity-row-code max-w-xs truncate">{desc}</span>
+      )}
+      {running && (
+        <span className="font-mono text-[10px] text-[var(--color-faint)]">running…</span>
+      )}
+      {failed && (
+        <span className="font-mono text-[10px] text-red-400">failed</span>
+      )}
     </div>
   );
 }
@@ -488,13 +504,13 @@ function Chevron({ open }: { open: boolean }) {
 
 function Working() {
   return (
-    <div className="activity-row text-[var(--color-faint)]">
-      <span className="flex gap-1">
-        <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-[var(--color-faint)]" />
-        <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-[var(--color-faint)] [animation-delay:0.2s]" />
-        <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-[var(--color-faint)] [animation-delay:0.4s]" />
+    <div className="activity-row">
+      <span className="flex items-center gap-1">
+        <span className="h-1 w-1 animate-pulse-dot rounded-full bg-[var(--color-faint)]" />
+        <span className="h-1 w-1 animate-pulse-dot rounded-full bg-[var(--color-faint)] [animation-delay:0.2s]" />
+        <span className="h-1 w-1 animate-pulse-dot rounded-full bg-[var(--color-faint)] [animation-delay:0.4s]" />
       </span>
-      working…
+      <span className="font-mono text-[10px] text-[var(--color-faint)]">working…</span>
     </div>
   );
 }

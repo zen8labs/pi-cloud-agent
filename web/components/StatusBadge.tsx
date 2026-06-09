@@ -1,15 +1,33 @@
-import { STATUS_META, ACTIVE_STATUSES } from "@/lib/format";
+import { ACTIVE_STATUSES } from "@/lib/format";
 import type { RunStatus } from "@/lib/types";
 
+const STATUS_LABEL: Record<RunStatus, string> = {
+  queued: "Queued",
+  provisioning: "Provisioning",
+  running: "Running",
+  publishing: "Publishing",
+  succeeded: "Succeeded",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+
 export function StatusBadge({ status }: { status: RunStatus }) {
-  const meta = STATUS_META[status] ?? STATUS_META.queued;
   const active = ACTIVE_STATUSES.includes(status);
+  const k = status;
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${meta.chip}`}
+      className="inline-flex items-center gap-1.5 px-2 py-0.5 font-mono text-[10px] font-medium uppercase tracking-wider"
+      style={{
+        color: `var(--status-${k}-fg)`,
+        background: `var(--status-${k}-bg)`,
+        border: `1px solid var(--status-${k}-border)`,
+      }}
     >
-      <span className={`h-1.5 w-1.5 rounded-full ${meta.dot} ${active ? "animate-pulse-dot" : ""}`} />
-      {meta.label}
+      <span
+        className={`h-1.5 w-1.5 shrink-0 rounded-full ${active ? "animate-pulse-dot" : ""}`}
+        style={{ background: `var(--status-${k}-dot)` }}
+      />
+      {STATUS_LABEL[status] ?? status}
     </span>
   );
 }

@@ -53,10 +53,21 @@ export interface AppConfig {
   default_bundle: string;
 }
 
+export interface RepoTriggers {
+  /** Auto-review when a PR is opened or reopened. */
+  opened: boolean;
+  /** Auto-review when new commits are pushed to an open PR (synchronize). */
+  synchronize: boolean;
+  /** Auto-review on a `/review` PR comment. */
+  comment: boolean;
+}
+
 export interface RepoBranch {
   repo: string;
   /** Pinned PR-review branch; empty string means "use the repo default". */
   branch: string;
+  /** Which webhook events auto-start a review for this repo. */
+  triggers: RepoTriggers;
 }
 
 export const TERMINAL: RunStatus[] = ["succeeded", "failed", "cancelled"];

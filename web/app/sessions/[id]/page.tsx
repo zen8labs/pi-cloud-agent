@@ -44,74 +44,82 @@ export default function SessionPage() {
       : null;
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-screen flex-col" style={{ background: "var(--color-canvas)" }}>
       {/* Header */}
-      <header className="flex items-center gap-3 border-b border-[var(--color-line)] bg-[var(--color-surface)] px-6 py-3.5">
+      <header className="flex items-center gap-3 border-b border-[var(--color-line-strong)] bg-[var(--color-surface)] px-5 py-3">
         <Link
           href="/"
-          className="text-sm text-[var(--color-faint)] transition-colors hover:text-[var(--color-ink)]"
+          className="flex h-7 w-7 items-center justify-center border border-[var(--color-line-strong)] text-[var(--color-faint)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-accent)]"
+          title="Back to sessions"
         >
-          ←
+          <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10 12L6 8l4-4" />
+          </svg>
         </Link>
+
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-sm font-semibold">
-            {run ? (run.prompt ? truncate(run.prompt, 70) : `${run.bundle} · ${run.repo}`) : "Session"}
+          <h1 className="truncate text-[13px] font-semibold text-[var(--color-ink)]">
+            {run ? (run.prompt ? truncate(run.prompt, 72) : `${run.bundle} · ${run.repo}`) : "Session"}
           </h1>
           {run && (
-            <p className="truncate text-xs text-[var(--color-faint)]">
+            <p className="truncate font-mono text-[10px] text-[var(--color-faint)]">
               {run.repo}
               {run.pr_number != null ? ` · PR #${run.pr_number}` : ""}
+              {" · "}
+              {run.id.slice(0, 8)}
             </p>
           )}
         </div>
-        <button
-          onClick={() => setShowLogs((v) => !v)}
-          className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-            showLogs
-              ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
-              : "border-[var(--color-line-strong)] text-[var(--color-muted)] hover:bg-[var(--color-canvas)]"
-          }`}
-          title="Show raw OpenCode server logs"
-        >
-          {showLogs ? "Hide logs" : "Show logs"}
-        </button>
-        {run && <StatusBadge status={run.status} />}
-        {active && (
+
+        <div className="flex items-center gap-2">
           <button
-            onClick={onCancel}
-            disabled={cancelling}
-            className="rounded-lg border border-[var(--color-line-strong)] px-3 py-1.5 text-xs font-medium text-[var(--color-muted)] transition-colors hover:bg-[var(--color-canvas)] disabled:opacity-50"
+            onClick={() => setShowLogs((v) => !v)}
+            className={`border px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide transition-colors ${
+              showLogs
+                ? "border-[var(--color-accent)]/40 bg-[var(--color-accent)]/8 text-[var(--color-accent)]"
+                : "border-[var(--color-line-strong)] text-[var(--color-faint)] hover:text-[var(--color-muted)]"
+            }`}
           >
-            {cancelling ? "Cancelling…" : "Cancel"}
+            {showLogs ? "Hide Logs" : "Logs"}
           </button>
-        )}
+
+          {active && (
+            <button
+              onClick={onCancel}
+              disabled={cancelling}
+              className="border border-red-500/30 px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-red-400 transition-colors hover:bg-red-500/8 disabled:opacity-40"
+            >
+              {cancelling ? "Stopping…" : "Cancel"}
+            </button>
+          )}
+
+          {run && <StatusBadge status={run.status} />}
+        </div>
       </header>
 
       <div className="flex min-h-0 flex-1">
         {/* Activity timeline */}
         <div className="flex min-w-0 flex-1 flex-col">
           {selectedSubagentId && (
-            <div className="flex items-center gap-2 border-b border-[var(--color-line)] bg-[var(--color-canvas)] px-4 py-2 text-xs text-[var(--color-muted)]">
+            <div className="flex items-center gap-2 border-b border-[var(--color-line)] bg-[var(--color-surface)] px-5 py-2">
               <button
                 onClick={() => setSelectedSubagentId(null)}
-                className="font-medium text-[var(--color-accent)] hover:underline"
+                className="font-mono text-[11px] text-[var(--color-accent)] hover:underline"
               >
-                ← Main session
+                ← main
               </button>
-              <span>/</span>
-              <span className="truncate font-medium text-[var(--color-ink)]">
-                {subagents.find((s) => s.sessionId === selectedSubagentId)?.description ??
-                  "Subagent"}
+              <span className="text-[var(--color-faint)]">/</span>
+              <span className="truncate font-mono text-[11px] text-[var(--color-ink)]">
+                {subagents.find((s) => s.sessionId === selectedSubagentId)?.description ?? "subagent"}
               </span>
             </div>
           )}
+
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="conversation-shell">
               {error && !run ? (
-                <div className="mt-10">
-                  <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                    {error}
-                  </div>
+                <div className="mt-10 border border-red-500/30 bg-red-500/8 px-4 py-3 font-mono text-xs text-red-400">
+                  ERROR: {error}
                 </div>
               ) : (
                 <ActivityFeed
@@ -141,7 +149,7 @@ export default function SessionPage() {
         </div>
 
         {/* Metadata sidebar */}
-        <aside className="hidden w-72 shrink-0 overflow-y-auto border-l border-[var(--color-line)] bg-[var(--color-surface)] px-5 py-6 lg:block">
+        <aside className="hidden w-64 shrink-0 overflow-y-auto border-l border-[var(--color-line-strong)] bg-[var(--color-surface)] lg:block">
           <Section title="Details">
             <Row label="Status" value={run ? <StatusBadge status={run.status} /> : "—"} />
             <Row label="Agent" value={run?.bundle ?? "—"} mono />
@@ -154,53 +162,50 @@ export default function SessionPage() {
 
           {subagents.length > 0 && (
             <Section title={`Subagents (${subagents.length})`}>
-              <ul className="flex flex-col gap-1">
+              <div className="flex flex-col gap-px">
                 {selectedSubagentId && (
-                  <li>
-                    <button
-                      onClick={() => setSelectedSubagentId(null)}
-                      className="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-left text-xs text-[var(--color-accent)] hover:bg-[var(--color-canvas)]"
-                    >
-                      ← Main session
-                    </button>
-                  </li>
+                  <button
+                    onClick={() => setSelectedSubagentId(null)}
+                    className="flex w-full items-center gap-1.5 px-3 py-2 text-left font-mono text-[11px] text-[var(--color-accent)] hover:bg-[var(--color-surface-2)]"
+                  >
+                    ← main session
+                  </button>
                 )}
                 {subagents.map((sa) => (
-                  <li key={sa.sessionId}>
-                    <button
-                      onClick={() =>
-                        setSelectedSubagentId(
-                          selectedSubagentId === sa.sessionId ? null : sa.sessionId,
-                        )
-                      }
-                      className={`flex w-full items-center gap-2 rounded px-1.5 py-1.5 text-left text-xs transition-colors ${
-                        selectedSubagentId === sa.sessionId
-                          ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
-                          : "text-[var(--color-ink)] hover:bg-[var(--color-canvas)]"
-                      }`}
-                    >
-                      <span className="mt-px flex h-3 w-3 shrink-0 items-center justify-center">
-                        {sa.status === "done" ? (
-                          <span className="text-emerald-500">✓</span>
-                        ) : (
-                          <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-[var(--color-accent)]" />
-                        )}
-                      </span>
-                      <span className="truncate">{sa.description}</span>
-                    </button>
-                  </li>
+                  <button
+                    key={sa.sessionId}
+                    onClick={() =>
+                      setSelectedSubagentId(
+                        selectedSubagentId === sa.sessionId ? null : sa.sessionId,
+                      )
+                    }
+                    className={`flex w-full items-center gap-2 px-3 py-2 text-left font-mono text-[11px] transition-colors ${
+                      selectedSubagentId === sa.sessionId
+                        ? "bg-[var(--color-accent)]/8 text-[var(--color-accent)] border-l border-[var(--color-accent)]"
+                        : "text-[var(--color-muted)] hover:bg-[var(--color-surface-2)]"
+                    }`}
+                  >
+                    <span className="shrink-0">
+                      {sa.status === "done" ? (
+                        <span className="text-emerald-400">✓</span>
+                      ) : (
+                        <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-[var(--color-blue)]" />
+                      )}
+                    </span>
+                    <span className="truncate">{sa.description}</span>
+                  </button>
                 ))}
-              </ul>
+              </div>
             </Section>
           )}
 
           {prUrl && (
-            <Section title="Pull request">
+            <Section title="Pull Request">
               <a
                 href={prUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="text-sm font-medium text-[var(--color-accent)] hover:underline"
+                className="font-mono text-[11px] text-[var(--color-blue)] hover:underline"
               >
                 #{run!.pr_number} on GitHub ↗
               </a>
@@ -209,47 +214,48 @@ export default function SessionPage() {
 
           {run && run.findings.length > 0 && (
             <Section title={`Findings (${run.findings.length})`}>
-              <ul className="flex flex-col gap-2">
+              <div className="flex flex-col gap-1.5">
                 {run.findings.map((f, i) => (
-                  <li key={i} className="text-xs">
-                    <div className="flex items-center gap-1.5">
-                      <span>
-                        {f.severity === "blocker" ? "🛑" : f.severity === "warning" ? "⚠️" : "💡"}
+                  <div key={i} className="border border-[var(--color-line)] bg-[var(--color-surface-2)] px-2.5 py-2">
+                    <div className="flex items-start gap-1.5">
+                      <span className="mt-px shrink-0 font-mono text-[10px]">
+                        {f.severity === "blocker" ? "!!" : f.severity === "warning" ? "!" : "·"}
                       </span>
-                      <span className="font-medium">{f.title}</span>
+                      <div>
+                        <div className="text-[12px] font-medium text-[var(--color-ink)]">{f.title}</div>
+                        {f.file && (
+                          <div className="mt-0.5 font-mono text-[10px] text-[var(--color-faint)]">
+                            {f.file}{f.line != null ? `:${f.line}` : ""}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <div className="ml-5 font-mono text-[11px] text-[var(--color-faint)]">
-                      {f.file}
-                      {f.line != null ? `:${f.line}` : ""}
-                      {f.published ? " · published" : f.grounded ? " · grounded" : ""}
-                    </div>
-                  </li>
+                  </div>
                 ))}
-              </ul>
+              </div>
             </Section>
           )}
 
           {run?.error && (
             <Section title="Error">
-              <p className="rounded-md bg-red-50 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-red-700">
+              <pre className="border border-red-500/30 bg-red-500/8 px-2.5 py-2 font-mono text-[10px] leading-relaxed text-red-400 whitespace-pre-wrap break-words">
                 {run.error}
-              </p>
+              </pre>
             </Section>
           )}
 
-          <Section title="Raw stream">
+          <Section title="Raw Stream">
             <a
               href={`${API_BASE}/runs/${id}/stream`}
               target="_blank"
               rel="noreferrer"
-              className="font-mono text-[11px] text-[var(--color-accent)] hover:underline"
+              className="font-mono text-[10px] text-[var(--color-blue)] hover:underline"
             >
               GET /runs/{id.slice(0, 8)}…/stream ↗
             </a>
           </Section>
         </aside>
       </div>
-
     </div>
   );
 }
@@ -259,7 +265,6 @@ function buildFollowUpPrompt(
   previousEvents: AgentEvent[],
   newPrompt: string,
 ): string {
-  // Collect assistant response text from token events
   let assistantText = "";
   for (const e of previousEvents) {
     if (e.type === "token") {
@@ -309,11 +314,7 @@ function SessionComposer({
     setError(null);
     try {
       const fullPrompt = buildFollowUpPrompt(previousPrompt, previousEvents, prompt.trim());
-      const run = await api.createRun({
-        repo,
-        bundle,
-        prompt: fullPrompt,
-      });
+      const run = await api.createRun({ repo, bundle, prompt: fullPrompt });
       router.push(`/sessions/${run.id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -327,18 +328,14 @@ function SessionComposer({
         value={prompt}
         onChange={setPrompt}
         onSubmit={submit}
-        placeholder={
-          active
-            ? "Waiting for the agent to finish…"
-            : `Message ${repo}…`
-        }
+        placeholder={active ? "Waiting for agent to finish…" : `Follow up on ${repo}…`}
         model={config?.model}
         submitLabel="Start session"
         submitting={submitting}
         disabled={active}
       />
       {error && (
-        <p className="mt-2 text-center text-xs text-red-600">{error}</p>
+        <p className="mt-2 font-mono text-[11px] text-red-400">{error}</p>
       )}
     </div>
   );
@@ -346,8 +343,8 @@ function SessionComposer({
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="mb-6">
-      <h3 className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--color-faint)]">
+    <div className="border-b border-[var(--color-line)] px-4 py-4 last:border-b-0">
+      <h3 className="mb-3 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--color-faint)]">
         {title}
       </h3>
       {children}
@@ -355,19 +352,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Row({
-  label,
-  value,
-  mono,
-}: {
-  label: string;
-  value: React.ReactNode;
-  mono?: boolean;
-}) {
+function Row({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
-    <div className="flex items-center justify-between gap-3 py-1 text-xs">
-      <span className="text-[var(--color-faint)]">{label}</span>
-      <span className={`truncate text-right text-[var(--color-ink)] ${mono ? "font-mono" : ""}`}>
+    <div className="flex items-center justify-between gap-3 py-1.5">
+      <span className="text-[11px] text-[var(--color-faint)]">{label}</span>
+      <span className={`truncate text-right text-[11px] text-[var(--color-ink)] ${mono ? "font-mono" : ""}`}>
         {value}
       </span>
     </div>
@@ -377,4 +366,3 @@ function Row({
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + "…" : s;
 }
-

@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
-import type { AppConfig, ModelOption } from "@/lib/types";
+import type { AppConfig } from "@/lib/types";
 import { ChatComposer } from "@/components/ChatComposer";
 
 export default function ChatPage() {
@@ -31,50 +31,36 @@ function ChatInner() {
   const [branchesLoading, setBranchesLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
     api.listRepos().then(setRepos).catch(() => setRepos([]));
     api.getConfig().then((cfg) => {
       setConfig(cfg);
-      // Pre-select the default model once the config is loaded.
       setModel((prev) => prev || cfg.default_model);
     }).catch(() => setConfig(null));
   }, []);
 
-  // Default the repo to the first configured one once loaded.
   useEffect(() => {
     if (!repo && repos.length) setRepo(repos[0]);
   }, [repos, repo]);
 
   const effectiveRepo = repo === "__custom__" ? customRepo.trim() : repo;
 
-  // Pull the repo's branches so the user can pick one; default to the repo's
-  // real default branch (so we never assume `main` on a `master`-only repo).
   useEffect(() => {
     if (!effectiveRepo || !effectiveRepo.includes("/")) {
-      setBranches([]);
-      setBranch("");
-      return;
+      setBranches([]); setBranch(""); return;
     }
     let cancelled = false;
     setBranchesLoading(true);
-    api
-      .listBranches(effectiveRepo)
+    api.listBranches(effectiveRepo)
       .then(({ branches, default: def }) => {
         if (cancelled) return;
         setBranches(branches);
         setBranch(def || branches[0] || "");
       })
-      .catch(() => {
-        if (cancelled) return;
-        setBranches([]);
-        setBranch("");
-      })
-      .finally(() => {
-        if (!cancelled) setBranchesLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+      .catch(() => { if (!cancelled) { setBranches([]); setBranch(""); } })
+      .finally(() => { if (!cancelled) setBranchesLoading(false); });
+    return () => { cancelled = true; };
   }, [effectiveRepo]);
 
   const isReview = bundle === "pr_review";
@@ -104,116 +90,161 @@ function ChatInner() {
   };
 
   return (
-    <div className="conversation-shell flex h-screen flex-col justify-center pb-8">
-      <div className="mb-8 text-center">
-        <h1 className="text-2xl font-semibold tracking-tight">Start a session</h1>
-        <p className="mt-1.5 text-sm text-[var(--color-muted)]">
-          Pick a repo and tell the agent what to do. It runs in a fresh sandbox.
-        </p>
+    <div className="flex h-screen flex-col" style={{ background: "var(--color-canvas)" }}>
+      {/* Page header */}
+      <div className="border-b border-[var(--color-line-strong)] bg-[var(--color-surface)] px-8 py-4">
+        <h1 className="text-lg font-semibold text-[var(--color-ink)]">New Session</h1>
       </div>
 
-      {/* Repo + bundle selectors */}
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <select
-          value={repo}
-          onChange={(e) => setRepo(e.target.value)}
-          className="rounded-lg border border-[var(--color-line-strong)] bg-[var(--color-surface)] px-3 py-1.5 text-sm focus:border-[var(--color-accent)] focus:outline-none"
-        >
-          {repos.length === 0 && <option value="">No repos configured</option>}
-          {repos.map((r) => (
-            <option key={r} value={r}>
-              {r}
-            </option>
-          ))}
-          <option value="__custom__">Custom repo…</option>
-        </select>
+      <div className="flex flex-1 items-start justify-center overflow-y-auto py-10" style={{ background: "var(--color-canvas)" }}>
+        <div className="w-full max-w-xl px-8">
 
-        {repo === "__custom__" && (
-          <input
-            value={customRepo}
-            onChange={(e) => setCustomRepo(e.target.value)}
-            placeholder="owner/name"
-            className="rounded-lg border border-[var(--color-line-strong)] bg-[var(--color-surface)] px-3 py-1.5 font-mono text-sm focus:border-[var(--color-accent)] focus:outline-none"
-          />
-        )}
+          {/* Config panel */}
+          <div className="mb-6 border border-[var(--color-line-strong)] bg-[var(--color-surface)]">
+            <div className="border-b border-[var(--color-line)] px-5 py-2.5">
+              <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--color-faint)]">
+                Configuration
+              </p>
+            </div>
 
-        <select
-          value={bundle}
-          onChange={(e) => setBundle(e.target.value)}
-          className="rounded-lg border border-[var(--color-line-strong)] bg-[var(--color-surface)] px-3 py-1.5 text-sm focus:border-[var(--color-accent)] focus:outline-none"
-        >
-          <option value="general_agent">Agent task</option>
-          <option value="pr_review">PR review</option>
-        </select>
+            <div className="divide-y divide-[var(--color-line)]">
+              {/* Repository */}
+              <div className="flex items-center justify-between gap-4 px-5 py-3">
+                <label className="text-[13px] font-medium text-[var(--color-muted)]">Repository</label>
+                <div className="flex items-center gap-2">
+                  <SelectField value={repo} onChange={(v) => setRepo(v)} className="w-52">
+                    {repos.length === 0 && <option value="">No repos configured</option>}
+                    {repos.map((r) => <option key={r} value={r}>{r}</option>)}
+                    <option value="__custom__">Custom…</option>
+                  </SelectField>
+                  {repo === "__custom__" && (
+                    <input
+                      value={customRepo}
+                      onChange={(e) => setCustomRepo(e.target.value)}
+                      placeholder="owner/repo"
+                      style={{ background: "var(--color-surface)", color: "var(--color-ink)", borderColor: "var(--color-line-strong)" }}
+                      className="w-36 border px-3 py-2 font-mono text-[12px] placeholder:text-[var(--color-faint)] focus:outline-none focus:border-[var(--color-accent)]"
+                    />
+                  )}
+                </div>
+              </div>
 
-        {/* Branch selector — PR review derives its branch from the PR itself. */}
-        {!isReview && (
-          <select
-            value={branch}
-            onChange={(e) => setBranch(e.target.value)}
-            disabled={branchesLoading || branches.length === 0}
-            title="Branch to clone"
-            className="max-w-[14rem] rounded-lg border border-[var(--color-line-strong)] bg-[var(--color-surface)] px-3 py-1.5 font-mono text-sm focus:border-[var(--color-accent)] focus:outline-none disabled:opacity-60"
-          >
-            {branchesLoading && <option value="">Loading branches…</option>}
-            {!branchesLoading && branches.length === 0 && (
-              <option value="">{branch || "default branch"}</option>
-            )}
-            {branches.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
-        )}
+              {/* Task type */}
+              <div className="flex items-center justify-between gap-4 px-5 py-3">
+                <label className="text-[13px] font-medium text-[var(--color-muted)]">Task type</label>
+                <SelectField value={bundle} onChange={(v) => setBundle(v)} className="w-40">
+                  <option value="general_agent">Agent task</option>
+                  <option value="pr_review">PR review</option>
+                </SelectField>
+              </div>
 
-        {isReview && (
-          <input
-            value={prNumber}
-            onChange={(e) => setPrNumber(e.target.value.replace(/[^0-9]/g, ""))}
-            placeholder="PR #"
-            className="w-20 rounded-lg border border-[var(--color-line-strong)] bg-[var(--color-surface)] px-3 py-1.5 text-sm focus:border-[var(--color-accent)] focus:outline-none"
-          />
-        )}
+              {/* Branch OR PR number */}
+              {!isReview ? (
+                <div className="flex items-center justify-between gap-4 px-5 py-3">
+                  <label className="text-[13px] font-medium text-[var(--color-muted)]">Branch</label>
+                  {/* Fixed width wrapper prevents layout shift when options load */}
+                  <SelectField
+                    value={branch}
+                    onChange={(v) => setBranch(v)}
+                    disabled={branchesLoading || branches.length === 0}
+                    className="w-52"
+                  >
+                    {branchesLoading && <option value="">Loading…</option>}
+                    {!branchesLoading && branches.length === 0 && (
+                      <option value="">{branch || "default"}</option>
+                    )}
+                    {branches.map((b) => <option key={b} value={b}>{b}</option>)}
+                  </SelectField>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-4 px-5 py-3">
+                  <label className="text-[13px] font-medium text-[var(--color-muted)]">PR number</label>
+                  <input
+                    value={prNumber}
+                    onChange={(e) => setPrNumber(e.target.value.replace(/[^0-9]/g, ""))}
+                    placeholder="#"
+                    style={{ background: "var(--color-surface)", color: "var(--color-ink)", borderColor: "var(--color-line-strong)" }}
+                    className="w-24 border px-3 py-2 font-mono text-[12px] placeholder:text-[var(--color-faint)] focus:outline-none focus:border-[var(--color-accent)]"
+                  />
+                </div>
+              )}
 
-        {/* Model selector — shown whenever at least one model is available. */}
-        {config && (config.available_models ?? []).length > 0 && (
-          <select
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            title="Model for this session"
-            className="rounded-lg border border-[var(--color-line-strong)] bg-[var(--color-surface)] px-3 py-1.5 text-sm focus:border-[var(--color-accent)] focus:outline-none"
-          >
-            {(config.available_models ?? []).map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
+              {/* Model */}
+              {config && (config.available_models ?? []).length > 0 && (
+                <div className="flex items-center justify-between gap-4 px-5 py-3">
+                  <label className="text-[13px] font-medium text-[var(--color-muted)]">Model</label>
+                  <SelectField value={model} onChange={(v) => setModel(v)} className="w-52">
+                    {(config.available_models ?? []).map((m) => (
+                      <option key={m.id} value={m.id}>{m.label}</option>
+                    ))}
+                  </SelectField>
+                </div>
+              )}
+            </div>
+          </div>
 
-      <ChatComposer
-        value={prompt}
-        onChange={setPrompt}
-        onSubmit={submit}
-        placeholder={
-          isReview
-            ? "Optional note for the reviewer (defaults to a full review)…"
-            : "Describe the task — e.g. “What is this repo about?”"
-        }
-        model={config?.available_models?.find((m) => m.id === model)?.label ?? config?.model}
-        submitLabel="Start"
-        submitting={submitting}
-        disabled={!effectiveRepo}
-        autoFocus
-      />
+          {/* Prompt */}
+          <div className="mb-4">
+            <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--color-faint)]">
+              {isReview ? "Reviewer note (optional)" : "Task prompt"}
+            </p>
+            <ChatComposer
+              value={prompt}
+              onChange={setPrompt}
+              onSubmit={submit}
+              placeholder={
+                isReview
+                  ? "Optional note for the reviewer…"
+                  : `Describe the task — e.g. "What is this repo about?"`
+              }
+              model={config?.available_models?.find((m) => m.id === model)?.label ?? config?.model}
+              submitLabel="Start"
+              submitting={submitting}
+              disabled={!effectiveRepo}
+              autoFocus
+            />
+          </div>
 
-      {error && (
-        <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
+          {error && (
+            <div className="border border-red-500/30 bg-red-500/8 px-4 py-3 font-mono text-[12px] text-red-400">
+              ERROR: {error}
+            </div>
+          )}
         </div>
-      )}
+      </div>
+    </div>
+  );
+}
+
+function SelectField({
+  value,
+  onChange,
+  disabled,
+  className = "",
+  children,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  disabled?: boolean;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={`relative ${className}`}>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        style={{ background: "var(--color-surface)", color: "var(--color-ink)", borderColor: "var(--color-line-strong)" }}
+        className="w-full appearance-none border px-3 py-2 pr-8 font-mono text-[12px] focus:outline-none focus:border-[var(--color-accent)] disabled:opacity-40"
+      >
+        {children}
+      </select>
+      <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--color-faint)]">
+        <svg viewBox="0 0 10 6" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="M1 1l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </span>
     </div>
   );
 }

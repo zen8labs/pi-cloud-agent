@@ -1,4 +1,4 @@
-import type { AgentEvent, AppConfig, ModelOption, RepoBranch, RunDetail, RunSummary } from "./types";
+import type { AgentEvent, AppConfig, ModelOption, RepoBranch, RepoTriggers, RunDetail, RunSummary } from "./types";
 
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") || "http://localhost:8080";
@@ -88,6 +88,12 @@ export const api = {
     req<{ repo: string; branch: string }>(`/settings/repo-branches`, {
       method: "PUT",
       body: JSON.stringify({ repo, branch }),
+    }),
+
+  setRepoTriggers: (repo: string, triggers: RepoTriggers) =>
+    req<{ repo: string; triggers: RepoTriggers }>(`/settings/repo-triggers`, {
+      method: "PUT",
+      body: JSON.stringify({ repo, ...triggers }),
     }),
 };
 
