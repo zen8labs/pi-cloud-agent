@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     DateTime,
     ForeignKey,
     Integer,
@@ -123,6 +124,11 @@ class RepoSetting(Base):
     provider: Mapped[str] = mapped_column(String(32))
     full_name: Mapped[str] = mapped_column(String(255))
     pr_review_branch: Mapped[str] = mapped_column(String(255), default="")
+    # Per-repo webhook trigger toggles (default on). When a toggle is off, the
+    # matching webhook event no longer auto-starts a PR review for that repo.
+    trigger_on_opened: Mapped[bool] = mapped_column(Boolean, default=True)
+    trigger_on_synchronize: Mapped[bool] = mapped_column(Boolean, default=True)
+    trigger_on_comment: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
     )

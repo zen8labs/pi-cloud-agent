@@ -1,10 +1,11 @@
 """Dashboard settings the web `/settings` page reads and writes.
 
-Currently the per-repo PR-review branch (which branch the PR agent clones for
-each connected repo; empty = the repo's real default branch).
+Per-repo PR-review config: which branch the agent clones, and which webhook
+events auto-start a review.
 
-  * GET /settings/repo-branches  — every connected repo + its pinned branch ("")
+  * GET /settings/repo-branches  — every connected repo + pinned branch + triggers
   * PUT /settings/repo-branches  — pin (or clear) one repo's branch
+  * PUT /settings/repo-triggers  — set a repo's opened/synchronize/comment toggles
 """
 
 from __future__ import annotations
@@ -13,9 +14,14 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from core.api.routes.meta import configured_repos
-from core.config.global_settings import get_global_setting, set_global_setting
-from core.config.repo_settings import get_all_pr_review_branches, set_pr_review_branch
 from core.config import get_settings
+from core.config.global_settings import get_global_setting, set_global_setting
+from core.config.repo_settings import (
+    get_all_pr_review_branches,
+    get_all_triggers,
+    set_pr_review_branch,
+    set_triggers,
+)
 from core.llm.registry import available_models
 from core.state import get_session
 
@@ -39,10 +45,50 @@ async def list_repo_branches():
     repos, source = await configured_repos()
     async with get_session() as db:
         overrides = await get_all_pr_review_branches(db)
-    ordered = list(repos) + [r for r in sorted(overrides) if r not in repos]
+        triggers = await get_all_triggers(db)
+    extra = sorted(set(overrides) | set(triggers))
+    ordered = list(repos) + [r for r in extra if r not in repos]
+    default_triggers = {"opened": True, "synchronize": True, "comment": True}
     return {
         "source": source,
-        "repos": [{"repo": r, "branch": overrides.get(r, "")} for r in ordered],
+        "repos": [
+            {
+                "repo": r,
+                "branch": overrides.get(r, ""),
+                "triggers": triggers.get(r, default_triggers),
+            }
+            for r in ordered
+        ],
+    }
+
+
+class RepoTriggersIn(BaseModel):
+    repo: str = Field(..., description="owner/name")
+    provider: str = "github"
+    opened: bool = True
+    synchronize: bool = True
+    comment: bool = True
+
+
+@router.put("/repo-triggers")
+async def set_repo_triggers(body: RepoTriggersIn):
+    """Set which webhook events auto-start a PR review for one repo."""
+    async with get_session() as db:
+        await set_triggers(
+            db,
+            body.provider,
+            body.repo,
+            opened=body.opened,
+            synchronize=body.synchronize,
+            comment=body.comment,
+        )
+    return {
+        "repo": body.repo,
+        "triggers": {
+            "opened": body.opened,
+            "synchronize": body.synchronize,
+            "comment": body.comment,
+        },
     }
 
 

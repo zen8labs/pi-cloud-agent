@@ -9,7 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from core.config.flags import resolve_review_mode
-from core.config.repo_settings import get_pr_review_branch
+from core.config.repo_settings import get_pr_review_branch, is_trigger_enabled
 from core.logger import get_logger
 from core.state import get_session
 from core.state import repo as runs
@@ -60,6 +60,17 @@ async def receive_webhook(provider: str, request: Request) -> Response:
             # Legacy path is handled by the standalone ../pr-agent deployment.
             log.info("routing to legacy", extra={"repo": parsed.repo.full_name})
             return Response(status_code=202, headers={"X-CoReview-Route": "legacy"})
+
+        # Per-repo trigger toggle: a repo can disable auto-reviews for a given
+        # webhook kind (opened / synchronize / comment) from the settings page.
+        if not await is_trigger_enabled(db, provider, parsed.repo.full_name, parsed.kind):
+            log.info(
+                "trigger disabled",
+                extra={"repo": parsed.repo.full_name, "kind": parsed.kind.value},
+            )
+            return Response(
+                status_code=204, headers={"X-CoReview-Route": "trigger-disabled"}
+            )
 
         # Per-repo dashboard override for the branch auto-started reviews fall
         # back to when the event carries no branch of its own ("" = repo default).

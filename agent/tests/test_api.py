@@ -111,6 +111,57 @@ def test_repo_branch_setting_round_trips(client):
     assert by_repo.get("octo/repo", "") == ""
 
 
+def test_repo_triggers_round_trip(client):
+    # Default: every event triggers a review.
+    repos = client.get("/settings/repo-branches").json()["repos"]
+    by_repo = {x["repo"]: x["triggers"] for x in repos}
+    assert by_repo.get("octo/repo", {}).get("synchronize", True) is True
+
+    # Disable synchronize; persists and reads back.
+    r = client.put(
+        "/settings/repo-triggers",
+        json={"repo": "octo/repo", "opened": True, "synchronize": False, "comment": True},
+    )
+    assert r.status_code == 200
+    assert r.json()["triggers"]["synchronize"] is False
+    repos = client.get("/settings/repo-branches").json()["repos"]
+    by_repo = {x["repo"]: x["triggers"] for x in repos}
+    assert by_repo["octo/repo"]["synchronize"] is False
+    assert by_repo["octo/repo"]["opened"] is True
+
+
+def test_webhook_synchronize_skipped_when_trigger_disabled(client):
+    # synchronize disabled for octo/repo by the round-trip test above.
+    client.put(
+        "/settings/repo-triggers",
+        json={"repo": "octo/repo", "opened": True, "synchronize": False, "comment": True},
+    )
+    payload = _pr_payload()
+    payload["action"] = "synchronize"
+    body = json.dumps(payload).encode()
+    r = client.post(
+        "/webhooks/github",
+        content=body,
+        headers={"x-github-event": "pull_request", "x-hub-signature-256": _gh_sig(body)},
+    )
+    assert r.status_code == 204
+    assert r.headers.get("X-CoReview-Route") == "trigger-disabled"
+
+    # Re-enable → synchronize creates a run again.
+    client.put(
+        "/settings/repo-triggers",
+        json={"repo": "octo/repo", "opened": True, "synchronize": True, "comment": True},
+    )
+    body = json.dumps(payload).encode()
+    r = client.post(
+        "/webhooks/github",
+        content=body,
+        headers={"x-github-event": "pull_request", "x-hub-signature-256": _gh_sig(body)},
+    )
+    assert r.status_code == 202
+    assert r.headers.get("X-CoReview-Route") == "agentic"
+
+
 def test_branches_endpoint_renders_without_creds(client):
     # No GitHub creds in tests → best-effort empty result, never a 500.
     r = client.get("/repos/octo/repo/branches")
