@@ -4,12 +4,12 @@
 // provider/model resolved from AGENT_MODEL, and hands the result to OpenCode
 // inline via OPENCODE_CONFIG_CONTENT (the proven path the reference uses).
 //
-// Custom tools and subagents are NOT declared here: matching the reference,
-// the supervisor stages them into the workspace's `.opencode/` so OpenCode
-// auto-discovers them —
-//   * report_finding.js -> .opencode/tool/   (a tool() from @opencode-ai/plugin)
+// Subagents are NOT declared here: matching the reference, the supervisor
+// stages them into the workspace's `.opencode/` so OpenCode auto-discovers them —
 //   * reviewer.md/critic.md -> .opencode/agent/   (subagent prompt bodies)
 // so this file only carries model selection, permissions, and tool enablement.
+// The agent posts its review with the `gh` CLI via the built-in bash tool;
+// there is no plugin tool to declare.
 {
   "$schema": "https://opencode.ai/config.json",
 
@@ -28,8 +28,7 @@
 
   // --- Tools ---------------------------------------------------------------
   // Enable the built-in file/search/exec/edit tools the reviewer needs to pull
-  // surrounding context and run linters/tests. `edit` is allowed for throwaway
-  // scratch only; the review never pushes — findings flow via report_finding.
+  // surrounding context, run linters/tests, and post the review via `gh` (bash).
   "tools": {
     "read": true,
     "grep": true,

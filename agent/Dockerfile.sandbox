@@ -3,10 +3,10 @@
 # Runs as PID 1 inside an E2B sandbox. Ported from the reference image build
 # (packages/modal-infra/src/images/base.py and packages/daytona-infra/src/
 # toolchain.py), trimmed to what a headless PR review needs. It bakes in:
-#   * git + curl + bash (clone, controller calls, the .coreview/setup.sh hook),
+#   * git + gh (GitHub CLI) + curl + bash (clone, the agent's own PR comments /
+#     pushes via the baked SCM token, controller calls, the .coreview/setup.sh hook),
 #   * Node 22 + OpenCode 1.16.2 + @opencode-ai/plugin@1.16.2 + zod (the agent
-#     runtime the bridge drives, and the plugin deps the report_finding tool
-#     imports),
+#     runtime the bridge drives, and the plugin deps any bundle tools import),
 #   * pre-staged @opencode-ai/plugin deps in /app/opencode-deps so OpenCode's
 #     Npm.install() is a no-op at boot (avoids the slow arborist reify that
 #     would otherwise block the first prompt),
@@ -20,8 +20,10 @@
 #
 # The controller injects all run config via env at sandbox-create time (RUN_ID,
 # CONTROL_PLANE_URL, SANDBOX_AUTH_TOKEN, REPO_*, BUNDLE, AGENT_MODEL, LLM keys,
-# ...). No secret is baked into the image. Git auth is brokered on demand by
-# runtime.git_credential_helper against the controller's /git-credentials.
+# and a repo-scoped SCM_TOKEN). No secret is baked into the *image*; secrets
+# arrive per-run via env. The runtime configures git + gh to use SCM_TOKEN so
+# the agent clones, pushes, and posts PR comments itself (see README →
+# "Security model").
 
 FROM python:3.12-slim-bookworm
 
@@ -51,6 +53,21 @@ RUN apt-get update \
         ca-certificates \
         bash \
     && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# GitHub CLI (gh): the agent posts its own PR review comments / pushes with it,
+# authenticated by the per-run SCM_TOKEN (GH_TOKEN) the controller injects.
+# Installed from GitHub's official apt repo.
+# ---------------------------------------------------------------------------
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/* \
+    && gh --version
 
 # ---------------------------------------------------------------------------
 # Node 22 (the OpenCode runtime requirement, per the reference image build).

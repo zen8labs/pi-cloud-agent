@@ -48,24 +48,6 @@ OPENCODE_SESSION_ID_FILE = Path("/tmp/opencode-session-id")
 SETUP_SCRIPT_REL_PATH = ".coreview/setup.sh"
 
 # ---------------------------------------------------------------------------
-# Git credential helper cache (see git_credential_helper.py)
-# ---------------------------------------------------------------------------
-
-# 0600 cache so a token brokered for one git op is reused by the immediately
-# following op in the same clone/fetch without re-hitting the controller.
-# Under /tmp (1777) so the non-root sandbox user can create it. /run is a
-# root-owned runtime tmpfs the user can't mkdir into (Errno 13).
-SCM_CRED_CACHE_DIR = Path("/tmp/coreview")
-SCM_CRED_CACHE_FILE = SCM_CRED_CACHE_DIR / "scm-creds.json"
-SCM_CRED_LOCK_FILE = SCM_CRED_CACHE_DIR / "scm-creds.lock"
-
-# The controller's /git-credentials endpoint does not return an expiry, so we
-# cache for a short, conservative window. A single git operation fans out into
-# many helper invocations; this keeps them coherent without holding a token
-# long enough to outlive the controller-side mint TTL.
-SCM_CRED_LOCAL_TTL_SECONDS = 5 * 60
-
-# ---------------------------------------------------------------------------
 # Supervisor timeouts / backoff (seconds)
 # ---------------------------------------------------------------------------
 

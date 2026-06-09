@@ -1,9 +1,15 @@
 """The run lifecycle — the integration centerpiece.
 
-Ties together the seams: bundle → sandbox → harness → findings → publish.
-Knows nothing about *how* a review is performed (that's the bundle's skill); it
-only drives the generic state machine and the trust-boundary operations
-(provisioning, secret brokering, publishing).
+Ties together the seams: bundle → sandbox → harness. Knows nothing about *how* a
+task is performed (that's the bundle's skill), nor about *what* the agent does
+with its result. The controller's only jobs are provisioning the sandbox,
+brokering the secrets the agent needs (LLM keys + a scoped SCM token), and
+driving the generic run state machine.
+
+The agent inside the sandbox actuates its own outcomes — posting PR comments,
+pushing fixes, etc. — by calling tools / running commands against the VCS API
+with the baked SCM token. There is no controller-side publish step and no
+enforced structured-output contract; see README → "Security model".
 """
 
 from __future__ import annotations
@@ -65,9 +71,14 @@ async def execute_run(run: Run) -> None:
         #    the right harness/bundle/model.
         runtime_env = adapter.runtime_env(bundle, task, model)
 
-        # 2) Provision the sandbox. The bridge will dial CONTROL_PLANE_URL using
-        #    the per-run auth token; git creds are brokered on demand (never baked).
+        # 2) Provision the sandbox. The bridge dials CONTROL_PLANE_URL with the
+        #    per-run auth token. The SCM token is minted here (trusted side) and
+        #    baked into the sandbox env: the agent uses it directly for git auth
+        #    and to actuate outcomes (e.g. `gh` PR comments). It is repo-scoped
+        #    and short-lived (~1h). See README → "Security model".
         await _set(run.id, RunStatus.provisioning)
+        secret_env = _llm_provider_keys(model.model)
+        secret_env.update(await _scm_token_env(vcs, run))
         create_cfg = CreateSandboxConfig(
             run_id=run.id,
             session_id=run.session_id,
@@ -78,7 +89,7 @@ async def execute_run(run: Run) -> None:
             timeout_seconds=settings.sandbox_timeout_seconds,
             egress_allowlist=settings.egress_allowlist(),
             env=runtime_env,
-            secret_env=_llm_provider_keys(model.model),
+            secret_env=secret_env,
             correlation=corr,
         )
         created = await sandbox_provider.create_sandbox(create_cfg)
@@ -96,10 +107,8 @@ async def execute_run(run: Run) -> None:
             if event.type is EventType.error:
                 raise RuntimeError(event.data.get("message", "harness error"))
 
-        # 4) Publish grounded findings back to the PR.
-        await _set(run.id, RunStatus.publishing)
-        await _publish(vcs, task, run.id)
-
+        # 4) Done. The agent already actuated its own outcomes inside the
+        #    sandbox (PR comments, pushes, …) — there is no publish step.
         await _set(run.id, RunStatus.succeeded)
         log.info("run succeeded", extra={"run_id": run.id})
     except SandboxProviderError as e:
@@ -189,45 +198,51 @@ def _llm_provider_keys(model_id: str) -> dict[str, str]:
     return out
 
 
-async def _publish(vcs, task: TaskSpec, run_id: str) -> None:
-    """Read grounded findings and post them. Only grounded findings are sent."""
-    from core.vcs.types import InlineComment
+async def _scm_token_env(vcs, run: Run) -> dict[str, str]:
+    """Mint a scoped SCM token and shape it into the sandbox's secret env.
 
-    async with get_session() as db:
-        run = await runs.get_run(db, run_id)
-        if run is None or run.pr_number is None:
-            return
-        grounded = [f for f in run.findings if f.grounded and f.line]
-        comments = [
-            InlineComment(file=f.file, line=f.line, body=_format_comment(f)) for f in grounded
-        ]
-        if comments:
-            await vcs.publish_inline_comments(task.repo, run.pr_number, comments)
-        summary = _format_summary(run.findings)
-        if summary:
-            await vcs.publish_summary(task.repo, run.pr_number, summary)
-        for f in grounded:
-            f.published = True
-        await db.commit()
+    Baked (not brokered) so the agent can authenticate git ops *and* drive the
+    VCS API directly (e.g. `gh` to post PR comments). The token is repo-scoped
+    and short-lived (~1h, GitHub App installation token). We expose it under
+    several names so both git and the provider CLIs pick it up without the
+    bundle having to know which is in play:
 
+      * ``SCM_TOKEN`` / ``SCM_TOKEN_USERNAME`` — the runtime's git credential
+        helper reads these (see runtime/entrypoint.py).
+      * provider-native names — ``GITHUB_TOKEN`` + ``GH_TOKEN`` for GitHub so
+        ``gh`` works with zero config; ``GITLAB_TOKEN`` / ``BITBUCKET_TOKEN``
+        otherwise.
 
-def _format_comment(f) -> str:
-    sev = {"blocker": "🛑", "warning": "⚠️", "nit": "💡"}.get(f.severity, "•")
-    out = f"{sev} **{f.title}**\n\n{f.body}"
-    if f.evidence:
-        out += f"\n\n<sub>evidence: {f.evidence}</sub>"
-    return out
+    TODO(security): downscope the token's *permissions* (not just repo) once we
+    accept external/fork PRs. Today it carries the App's full grant — fine for
+    internal repos, see README → "Security model".
+    """
+    try:
+        token = await vcs.mint_clone_token(run.repo_full_name)
+    except Exception as e:  # noqa: BLE001 — a missing token shouldn't kill provisioning
+        log.warning(
+            "scm token mint failed; sandbox will have no git auth",
+            extra={"run_id": run.id, "error": str(e)},
+        )
+        return {}
 
-
-def _format_summary(findings) -> str:
-    grounded = [f for f in findings if f.grounded]
-    if not grounded:
-        return "✅ CoReview agent found no blocking issues."
-    counts: dict[str, int] = {}
-    for f in grounded:
-        counts[f.severity] = counts.get(f.severity, 0) + 1
-    parts = ", ".join(f"{n} {sev}" for sev, n in sorted(counts.items()))
-    return f"### CoReview agent\n\nPosted {len(grounded)} grounded finding(s): {parts}."
+    env: dict[str, str] = {"SCM_TOKEN": token}
+    if run.provider == "github":
+        env["SCM_TOKEN_USERNAME"] = "x-access-token"
+        env["GITHUB_TOKEN"] = token
+        env["GH_TOKEN"] = token
+        host = getattr(run, "repo_host", "") or "github.com"
+        if host and host != "github.com":
+            env["GH_HOST"] = host
+    elif run.provider == "gitlab":
+        env["SCM_TOKEN_USERNAME"] = "oauth2"
+        env["GITLAB_TOKEN"] = token
+    elif run.provider == "bitbucket":
+        env["SCM_TOKEN_USERNAME"] = "x-token-auth"
+        env["BITBUCKET_TOKEN"] = token
+    else:
+        env["SCM_TOKEN_USERNAME"] = "x-access-token"
+    return env
 
 
 # ── small DB helpers (own their own session) ─────────────────────────────────

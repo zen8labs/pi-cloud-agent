@@ -171,7 +171,7 @@ def test_branches_endpoint_renders_without_creds(client):
     assert body["default"] is None
 
 
-def test_internal_findings_auth(client):
+def test_internal_endpoint_auth(client):
     # create a run to get a valid token
     body = json.dumps(_pr_payload()).encode()
     r = client.post(
@@ -181,35 +181,26 @@ def test_internal_findings_auth(client):
     )
     run_id = r.headers["X-CoReview-Run"]
 
-    finding = {
-        "file": "a.py",
-        "line": 3,
-        "severity": "warning",
-        "title": "x",
-        "body": "y",
-        "evidence": "line 3 reads ...",
-    }
+    event = {"type": "log", "data": {"event": "hello"}}
     # wrong token → 403
     bad = client.post(
-        f"/internal/runs/{run_id}/findings",
-        json=finding,
+        f"/internal/runs/{run_id}/events",
+        json=event,
         headers={"Authorization": "Bearer wrong"},
     )
     assert bad.status_code == 403
 
     # missing header → 422 (required header)
-    assert client.post(f"/internal/runs/{run_id}/findings", json=finding).status_code == 422
+    assert client.post(f"/internal/runs/{run_id}/events", json=event).status_code == 422
 
-    # correct token → stored + grounded (evidence present), then visible on the run
+    # correct token → accepted
     token = _run_token(client, run_id)
     ok = client.post(
-        f"/internal/runs/{run_id}/findings",
-        json=finding,
+        f"/internal/runs/{run_id}/events",
+        json=event,
         headers={"Authorization": f"Bearer {token}"},
     )
-    assert ok.status_code == 200 and ok.json()["grounded"] is True
-    run = client.get(f"/runs/{run_id}").json()
-    assert any(f["file"] == "a.py" and f["grounded"] for f in run["findings"])
+    assert ok.status_code == 200
 
 
 def test_internal_events_publishes_to_bus(client):

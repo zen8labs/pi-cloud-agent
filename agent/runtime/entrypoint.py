@@ -7,22 +7,23 @@ controller and stripped of everything irrelevant to a one-shot PR review
 (code-server, ttyd, tunnels, agent-browser, slack, multiplayer, spawn/cancel
 tools). Responsibilities, in order:
 
-  1. Install the git credential-helper shim + configure git so every git op
-     authenticates via the controller's /git-credentials endpoint (no long-lived
-     token baked into the sandbox). Ported from the reference shim approach.
+  1. Configure git to authenticate with the SCM token baked into the sandbox
+     env (``SCM_TOKEN``) via a tiny inline credential helper — clone, fetch, and
+     push all work, and the agent can drive the VCS API (``gh``) with the same
+     token. No controller round-trip per git op.
   2. Clone the PR repo (``REPO_CLONE_URL``) and check out ``REPO_HEAD_SHA``.
   3. Run the repo's ``.coreview/setup.sh`` hook if present (non-fatal).
   4. Build the OpenCode config from the bundle's ``opencode.jsonc``: inject the
-     resolved provider/model, stage the ``report_finding`` plugin tool into
-     ``.opencode/tool/``, stage the skill + reviewer/critic subagents, and
-     pre-stage ``@opencode-ai/plugin`` deps into ``.opencode/`` (matching the
-     reference's ``_install_tools``). Pass the config inline via
-     ``OPENCODE_CONFIG_CONTENT`` — the same env the reference uses.
+     resolved provider/model, stage any bundle plugin tools into
+     ``.opencode/tool/``, stage the skill + subagents, and pre-stage
+     ``@opencode-ai/plugin`` deps into ``.opencode/``. Pass the config inline via
+     ``OPENCODE_CONFIG_CONTENT``.
   5. Start ``opencode serve --port 4096``, health-check ``/global/health``.
   6. Run the bridge in-process: it injects the initial prompt (the bundle's
-     ``skills/pr-review/SKILL.md`` body + a one-line "review PR #N"), forwards
-     OpenCode's SSE events to the controller, and posts ``{"status": "done"}``
-     when the session completes.
+     ``SKILL.md`` body + a one-line task pointer), forwards OpenCode's SSE events
+     to the controller, and posts ``{"status": "done"}`` when the session
+     completes. The agent actuates its own outcomes (PR comments, pushes) inside
+     the sandbox; nothing is published controller-side.
   7. Monitor OpenCode with backoff/restart; handle SIGTERM/SIGINT gracefully.
 
 Run as ``python -m runtime.entrypoint``.
@@ -62,16 +63,6 @@ from .constants import (
 from .log_config import attach_log_forwarder, configure_logging, get_logger
 
 configure_logging()
-
-# Git invokes this shim for every credential request; it delegates to our
-# Python helper module, which brokers a fresh per-request token from the
-# controller. Installed system-wide at boot (ported from the reference shim
-# approach in entrypoint._ensure_credential_helper_configured / the image build)
-# so it applies even before the first git op.
-GIT_CREDENTIAL_SHIM_PATH = Path("/usr/local/bin/coreview-git-credentials")
-GIT_CREDENTIAL_SHIM_BODY = (
-    "#!/bin/sh\nexec python3 -m runtime.git_credential_helper \"$@\"\n"
-)
 
 
 class SandboxSupervisor:
@@ -132,46 +123,45 @@ class SandboxSupervisor:
         _stdout, stderr = await proc.communicate()
         return proc.returncode or 0, self._redact_git_stderr(stderr.decode(errors="replace"))
 
-    def _install_credential_helper_shim(self) -> bool:
-        """Write the credential-helper shim to /usr/local/bin and make it exec.
-
-        Idempotent — re-applied every boot so a snapshot/old image gets patched.
-        Returns True if the shim is available for git to call. Ported from the
-        reference ``_ensure_credential_helper_configured``.
-        """
-        try:
-            if (
-                GIT_CREDENTIAL_SHIM_PATH.exists()
-                and GIT_CREDENTIAL_SHIM_PATH.read_text() == GIT_CREDENTIAL_SHIM_BODY
-            ):
-                return True
-            GIT_CREDENTIAL_SHIM_PATH.write_text(GIT_CREDENTIAL_SHIM_BODY)
-            GIT_CREDENTIAL_SHIM_PATH.chmod(0o755)
-            return True
-        except OSError as e:
-            self.log.warn("credential_helper.shim_write_failed", error=str(e))
-            return False
-
     async def configure_git_credentials(self) -> None:
-        """Point git at our credential helper for all https ops.
+        """Configure git to authenticate with the baked SCM token.
 
-        ``credential.useHttpPath=true`` includes the repo path in helper requests
-        so the controller can scope the minted token if it chooses. The remote
-        URL itself stays token-free — the helper supplies creds per request,
-        brokered from the controller's /git-credentials endpoint. Ported from the
-        reference: install the shim, then configure git globally to call it.
+        The controller mints a repo-scoped SCM token and injects it as
+        ``SCM_TOKEN`` (+ ``SCM_TOKEN_USERNAME``) into the sandbox env. We register
+        a tiny inline credential helper that echoes those env values, so
+        clone/fetch/push all authenticate without a token in any remote URL or
+        on-disk file — and the agent can hit the VCS API (``gh``) with the same
+        token. No controller round-trip per git op.
+
+        The token already lives in the sandbox env, so host-scoping the helper
+        would add no protection (anything in the sandbox can read ``SCM_TOKEN``
+        directly); the helper is intentionally unconditional.
         """
-        shim_available = self._install_credential_helper_shim()
+        token = os.environ.get("SCM_TOKEN", "")
+        if not token:
+            # Public repos still clone over https without auth; private clones
+            # will fail loudly at clone time, which is the right signal.
+            self.log.warn("git.no_scm_token")
+            return
 
-        configs: list[tuple[str, str]] = [("credential.useHttpPath", "true")]
-        if shim_available:
-            configs.insert(0, ("credential.helper", str(GIT_CREDENTIAL_SHIM_PATH)))
-
+        username = os.environ.get("SCM_TOKEN_USERNAME", "x-access-token")
+        # `!f() {...}; f` — git appends the operation and runs this via the shell;
+        # the function reads SCM_TOKEN/SCM_TOKEN_USERNAME from the inherited env
+        # at call time. store/erase ignore stdout, so echoing unconditionally is
+        # harmless.
+        helper = (
+            "!f() { printf 'username=%s\\npassword=%s\\n' "
+            f'"${{SCM_TOKEN_USERNAME:-{username}}}" "$SCM_TOKEN"; }}; f'
+        )
+        configs: list[tuple[str, str]] = [
+            ("credential.helper", helper),
+            ("credential.useHttpPath", "false"),
+        ]
         for key, value in configs:
             rc, stderr = await self._git("config", "--global", "--replace-all", key, value)
             if rc != 0:
                 self.log.warn("git.config_failed", config_key=key, stderr=stderr)
-        self.log.info("git.credentials_configured", shim_available=shim_available)
+        self.log.info("git.credentials_configured", username=username)
 
     async def _clone_with_fallback(self) -> bool:
         """Clone the repo at the requested branch, else the remote's default HEAD.
@@ -314,7 +304,7 @@ class SandboxSupervisor:
         return self._resolve_bundles_dir() / self.bundle / "opencode"
 
     def _bundle_tools_dir(self) -> Path:
-        """The bundle's baked ``tools/`` directory (holds report_finding.js)."""
+        """The bundle's baked ``tools/`` directory (optional OpenCode plugin tools)."""
         return self._resolve_bundles_dir() / self.bundle / "tools"
 
     @staticmethod
@@ -336,9 +326,8 @@ class SandboxSupervisor:
 
         AGENT_MODEL is LiteLLM-style ``provider/model`` which is exactly the
         ``provider/model`` form OpenCode's top-level ``model`` field expects, so
-        we set it verbatim. The bundle file declares tools, the report_finding
-        plugin enablement, and the reviewer/critic subagents; we only override
-        the concrete model values here so the file stays env-agnostic.
+        we set it verbatim. The bundle file declares tool enablement; we only
+        override the concrete model values here so the file stays env-agnostic.
         """
         config: dict = {"permission": {"*": {"*": "allow"}}}
         config_path = self._bundle_opencode_dir() / "opencode.jsonc"
@@ -403,7 +392,7 @@ class SandboxSupervisor:
         """Stage tools, skills, subagents, and plugin deps into ``.opencode/``.
 
         Mirrors the reference ``_install_tools`` / ``_install_skills``:
-          * report_finding.js  -> ``.opencode/tool/report_finding.js``
+          * tools/*.js         -> ``.opencode/tool/*.js`` (optional plugin tools)
           * skills/*           -> ``.opencode/skills/*``
           * subagents/*.md     -> ``.opencode/agent/*.md``  (OpenCode reads agent
             prompt bodies from ``.opencode/agent/``)
@@ -412,7 +401,7 @@ class SandboxSupervisor:
         """
         opencode_dir = workdir / ".opencode"
 
-        # --- Tools (the report_finding plugin tool) --------------------------
+        # --- Tools (optional bundle plugin tools) ----------------------------
         tools_src = self._bundle_tools_dir()
         if tools_src.is_dir():
             tool_dest = opencode_dir / "tool"

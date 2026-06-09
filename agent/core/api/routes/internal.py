@@ -1,9 +1,10 @@
-"""Internal callbacks the in-sandbox bridge + agent tools dial back to.
+"""Internal callbacks the in-sandbox bridge dials back to.
 
-Every endpoint is authenticated by the per-run bearer token (`Run.auth_token`),
-which is the *only* credential the sandbox holds. Real secrets (git tokens) are
-minted here, on the trusted side, and handed out narrowly (see ARCHITECTURE.md →
-"Trust boundary & secrets").
+Every endpoint is authenticated by the per-run bearer token (`Run.auth_token`).
+Scope is deliberately tiny — telemetry only: the bridge relays harness events
+and the terminal status here. Secrets (LLM keys + a scoped SCM token) are baked
+into the sandbox env at creation time (see core/orchestrator/runner.py), so the
+sandbox no longer brokers credentials back through the controller.
 """
 
 from __future__ import annotations
@@ -16,7 +17,6 @@ from core.orchestrator.bus import event_bus
 from core.state import get_session
 from core.state import repo as runs
 from core.state.models import Run
-from core.vcs import get_vcs_provider
 
 router = APIRouter(prefix="/internal/runs", tags=["internal"])
 log = get_logger("internal")
@@ -44,68 +44,6 @@ async def post_event(run_id: str, ev: EventIn, run: Run = Depends(_authed_run)):
         await runs.append_event(db, run_id, ev.type, ev.data)
     await event_bus.publish(run_id, {"type": ev.type, "data": ev.data})
     return {"ok": True}
-
-
-class FindingIn(BaseModel):
-    file: str
-    line: int | None = None
-    severity: str = "warning"  # blocker | warning | nit
-    title: str
-    body: str
-    evidence: str | None = None
-
-
-@router.post("/{run_id}/findings")
-async def post_finding(run_id: str, f: FindingIn, run: Run = Depends(_authed_run)):
-    # Our contract requires evidence; a finding with evidence is treated as
-    # grounded (the skill instructs the agent to only report verified findings).
-    grounded = bool(f.evidence and f.evidence.strip())
-    async with get_session() as db:
-        await runs.add_finding(
-            db,
-            run_id,
-            file=f.file,
-            line=f.line,
-            severity=f.severity,
-            title=f.title,
-            body=f.body,
-            evidence=f.evidence,
-            grounded=grounded,
-        )
-        # Also record it in the append-only event log so it streams live to the
-        # dashboard (the SSE feed reads run_events) and is replayable on resume,
-        # not just available as a separate findings query.
-        await runs.append_event(db, run_id, "finding", {**f.model_dump(), "grounded": grounded})
-    await event_bus.publish(run_id, {"type": "finding", "data": f.model_dump()})
-    return {"ok": True, "grounded": grounded}
-
-
-class GitCredentialIn(BaseModel):
-    # git's credential protocol fields the helper forwards.
-    protocol: str | None = None
-    host: str | None = None
-    path: str | None = None
-
-
-class GitCredentialOut(BaseModel):
-    username: str
-    password: str
-
-
-@router.post("/{run_id}/git-credentials", response_model=GitCredentialOut)
-async def git_credentials(
-    run_id: str, _req: GitCredentialIn, run: Run = Depends(_authed_run)
-) -> GitCredentialOut:
-    """Mint a fresh short-lived clone credential on demand.
-
-    Called by the sandbox's git credential helper for every git op, so no
-    long-lived token is ever stored in the sandbox.
-    """
-    vcs = get_vcs_provider(run.provider)
-    token = await vcs.mint_clone_token(run.repo_full_name)
-    username = "x-access-token" if run.provider == "github" else "oauth2"
-    log.info("brokered git credential", extra={"run_id": run_id})
-    return GitCredentialOut(username=username, password=token)
 
 
 class StatusIn(BaseModel):

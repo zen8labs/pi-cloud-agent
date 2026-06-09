@@ -22,7 +22,6 @@ from core.logger import get_logger
 from core.types import RepoRef
 from core.vcs.types import (
     DiffFile,
-    InlineComment,
     ParsedWebhook,
     PullRequest,
     WebhookKind,
@@ -171,50 +170,8 @@ class GitLabProvider:
             patch=change.get("diff") or None,
         )
 
-    # ── writes ───────────────────────────────────────────────────────────
-
-    async def publish_inline_comments(
-        self, repo: RepoRef, pr_number: int, comments: list[InlineComment]
-    ) -> None:
-        """Create one MR discussion per inline comment, pinned to diff_refs.
-
-        GitLab's Discussions API needs base/start/head SHAs to anchor a comment to
-        a diff line; we read them once from the MR's `diff_refs`.
-        """
-        if not comments:
-            return
-        base = f"{self._api_base}/projects/{_project_path(repo)}/merge_requests/{pr_number}"
-        async with httpx.AsyncClient(timeout=_TIMEOUT, headers=self._headers()) as client:
-            mr = (await client.get(base)).json()
-            diff_refs = mr.get("diff_refs") or {}
-            for c in comments:
-                position = {
-                    "position_type": "text",
-                    "base_sha": diff_refs.get("base_sha"),
-                    "start_sha": diff_refs.get("start_sha"),
-                    "head_sha": diff_refs.get("head_sha") or repo.head_sha,
-                    "new_path": c.file,
-                    "old_path": c.file,
-                    # LEFT comments anchor on the old line; RIGHT on the new line.
-                    ("old_line" if c.side == "LEFT" else "new_line"): c.line,
-                }
-                resp = await client.post(
-                    f"{base}/discussions", json={"body": c.body, "position": position}
-                )
-                if resp.status_code >= 400:
-                    # Best-effort per comment: a single un-anchorable line should
-                    # not abort the whole batch.
-                    log.warning(
-                        "gitlab discussion failed for %s:%s — %s %s",
-                        c.file, c.line, resp.status_code, resp.text,
-                    )
-
-    async def publish_summary(self, repo: RepoRef, pr_number: int, body: str) -> None:
-        """Post the summary as a top-level MR note."""
-        url = f"{self._api_base}/projects/{_project_path(repo)}/merge_requests/{pr_number}/notes"
-        async with httpx.AsyncClient(timeout=_TIMEOUT, headers=self._headers()) as client:
-            resp = await client.post(url, json={"body": body})
-            resp.raise_for_status()
+    # NOTE: No publish path — the agent posts MR comments itself from the
+    # sandbox using the baked SCM token (see core/orchestrator/runner.py).
 
     # ── helpers ──────────────────────────────────────────────────────────
 

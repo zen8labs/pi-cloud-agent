@@ -1,8 +1,12 @@
 """The pr_review capability bundle.
 
-Wires the portable pieces (MCP `report_finding` tool, output schema, task
-builder) to the per-harness prompt assets on disk. Registers itself at import
-time so the core can resolve it by name without importing bundles directly.
+Wires the task builder to the per-harness prompt assets on disk (the pr-review
+skill + reviewer/critic subagents). Registers itself at import time so the core
+can resolve it by name without importing bundles directly.
+
+There is no structured-output contract: the agent reads the diff, reviews it,
+and posts its own inline + summary PR comments via ``gh`` using the SCM token
+baked into the sandbox env. The controller never publishes on its behalf.
 """
 
 from __future__ import annotations
@@ -21,14 +25,11 @@ class PRReviewBundle(Bundle):
     name: str = "pr_review"
 
     def mcp_tools(self) -> list[McpToolServer]:
-        """No MCP servers.
+        """No MCP servers and no plugin tools.
 
-        ``report_finding`` is now an OpenCode plugin tool
-        (``tools/report_finding.js``, a ``tool()`` from ``@opencode-ai/plugin``)
-        staged into ``.opencode/tool/`` by the in-sandbox supervisor and loaded
-        directly by OpenCode — matching the reference's custom-tool pattern
-        (inspect-plugin.js + ``_install_tools``). It is therefore no longer a
-        launched stdio MCP server, so nothing is declared here.
+        The agent uses the harness's built-in bash/read/grep tools plus the
+        ``gh`` CLI (authenticated by the baked SCM token) to read the diff and
+        post review comments. There is no callback tool to declare.
         """
         return []
 

@@ -25,9 +25,9 @@ from core.types import TaskSpec
 class McpToolServer:
     """Declares an MCP tool server the sandbox runtime should expose to the agent.
 
-    `command`/`args` launch a stdio MCP server inside the sandbox. For our
-    callback-style tools (e.g. report_finding) the server is a thin shim that
-    POSTs to the controller using SANDBOX_AUTH_TOKEN.
+    `command`/`args` launch a stdio MCP server inside the sandbox. Bundles
+    declare these only when they need a custom tool; the built-in bundles use
+    the harness's built-in tools + CLIs (`gh`, `git`) instead.
     """
 
     name: str

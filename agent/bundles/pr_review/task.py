@@ -3,7 +3,7 @@
 The webhook layer normalizes a VCS event into a flat trigger dict; here we
 reconstruct the `RepoRef` and wrap it in a harness-agnostic `TaskSpec`. The
 `instructions` are deliberately thin — they just activate the bundle's
-pr-review skill; the real behaviour lives in the skill + MCP tools.
+pr-review skill; the real behaviour lives in the skill (which drives `gh`).
 """
 
 from __future__ import annotations

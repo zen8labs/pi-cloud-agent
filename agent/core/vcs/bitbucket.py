@@ -22,7 +22,6 @@ from core.logger import get_logger
 from core.types import RepoRef
 from core.vcs.types import (
     DiffFile,
-    InlineComment,
     ParsedWebhook,
     PullRequest,
     WebhookKind,
@@ -211,41 +210,8 @@ class BitbucketProvider:
                 buf.append(line)
         flush()
 
-    # ── writes ───────────────────────────────────────────────────────────
-
-    async def publish_inline_comments(
-        self, repo: RepoRef, pr_number: int, comments: list[InlineComment]
-    ) -> None:
-        """Post one PR comment per inline anchor (path + line).
-
-        TODO(integrator): Bitbucket anchors inline comments to a line number in
-        the *destination* (`inline.to`) or *source* (`inline.from`) file of the
-        diff, not to a commit SHA — so there is no head_sha pinning like GitHub.
-        We map side=="LEFT" → `from` and otherwise → `to`. If a line is outside
-        the diff Bitbucket rejects it (handled best-effort per comment). Verify
-        the to/from semantics against your repos before relying on placement.
-        """
-        if not comments:
-            return
-        url = f"{_API_BASE}/repositories/{repo.full_name}/pullrequests/{pr_number}/comments"
-        async with httpx.AsyncClient(timeout=_TIMEOUT, headers=self._headers()) as client:
-            for c in comments:
-                anchor = {"path": c.file}
-                anchor["from" if c.side == "LEFT" else "to"] = c.line
-                payload = {"content": {"raw": c.body}, "inline": anchor}
-                resp = await client.post(url, json=payload)
-                if resp.status_code >= 400:
-                    log.warning(
-                        "bitbucket inline comment failed for %s:%s — %s %s",
-                        c.file, c.line, resp.status_code, resp.text,
-                    )
-
-    async def publish_summary(self, repo: RepoRef, pr_number: int, body: str) -> None:
-        """Post the summary as a top-level (non-inline) PR comment."""
-        url = f"{_API_BASE}/repositories/{repo.full_name}/pullrequests/{pr_number}/comments"
-        async with httpx.AsyncClient(timeout=_TIMEOUT, headers=self._headers()) as client:
-            resp = await client.post(url, json={"content": {"raw": body}})
-            resp.raise_for_status()
+    # NOTE: No publish path — the agent posts PR comments itself from the
+    # sandbox using the baked SCM token (see core/orchestrator/runner.py).
 
     # ── helpers ──────────────────────────────────────────────────────────
 

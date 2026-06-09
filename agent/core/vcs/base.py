@@ -1,18 +1,19 @@
 """The VCS provider contract every backend implements.
 
-Deliberately small — only what a headless review run needs:
+Deliberately small — read + auth only. The agent actuates its own outcomes
+(comments, pushes) from inside the sandbox using the baked SCM token, so the
+controller-side provider never writes:
   * parse + verify webhooks,
-  * mint a short-lived clone credential (used by the sandbox git credential
-    helper, never persisted into the sandbox),
-  * fetch the PR (metadata + diff),
-  * publish inline + summary review comments.
+  * mint a short-lived, repo-scoped SCM token (baked into the sandbox env at
+    creation — see core/orchestrator/runner.py),
+  * fetch the PR (metadata + diff) to resolve coordinates before launch.
 """
 
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from core.vcs.types import InlineComment, ParsedWebhook, PullRequest
+from core.vcs.types import ParsedWebhook, PullRequest
 
 
 @runtime_checkable
@@ -35,12 +36,4 @@ class VCSProvider(Protocol):
         ...
 
     async def get_pull_request(self, repo, pr_number: int) -> PullRequest:  # repo: RepoRef
-        ...
-
-    async def publish_inline_comments(
-        self, repo, pr_number: int, comments: list[InlineComment]
-    ) -> None:
-        ...
-
-    async def publish_summary(self, repo, pr_number: int, body: str) -> None:
         ...

@@ -29,7 +29,6 @@ from core.logger import get_logger
 from core.types import RepoRef
 from core.vcs.types import (
     DiffFile,
-    InlineComment,
     ParsedWebhook,
     PullRequest,
     WebhookKind,
@@ -70,7 +69,7 @@ class GitHubProvider:
     def __init__(self) -> None:
         self._settings = get_settings()
         # Cache the installation token per repo full_name so back-to-back API
-        # calls (get_pull_request → publish_*) don't re-mint on every request.
+        # calls (e.g. get_pull_request → mint_clone_token) don't re-mint.
         self._token_cache: dict[str, tuple[str, float]] = {}
         self._token_lock = asyncio.Lock()
 
@@ -520,189 +519,10 @@ class GitHubProvider:
             page += 1
         return files
 
-    # ── writes ───────────────────────────────────────────────────────────
-
-    async def publish_inline_comments(
-        self, repo: RepoRef, pr_number: int, comments: list[InlineComment]
-    ) -> None:
-        """Post all inline comments as a single review anchored to head_sha.
-
-        Bundling into one review (vs. N comment calls) keeps the PR timeline
-        clean and matches pr-agent's `create_review`. GitHub rejects the whole
-        review with 422 if *any* comment's line isn't part of the diff, so on
-        422 we verify comments one-by-one and re-post only the valid ones,
-        surfacing the dropped anchors in a summary fallback so feedback isn't
-        silently lost.
-        """
-        if not comments:
-            return
-        if not repo.head_sha:
-            raise ValueError(
-                "cannot publish inline review without repo.head_sha "
-                "(enrich via get_pull_request first)"
-            )
-        headers = await self._api_headers(repo)
-        reviews_url = f"/repos/{repo.owner}/{repo.name}/pulls/{pr_number}/reviews"
-        payloads = [self._review_comment(c) for c in comments]
-
-        async with self._client(headers) as client:
-            try:
-                await self._create_review(client, reviews_url, repo.head_sha, payloads)
-                log.info(
-                    "published inline review %s#%s comments=%d",
-                    repo.full_name,
-                    pr_number,
-                    len(payloads),
-                )
-                return
-            except httpx.HTTPStatusError as exc:
-                if exc.response.status_code != 422:
-                    raise
-                log.warning(
-                    "inline review 422 for %s#%s; verifying comments individually: %s",
-                    repo.full_name,
-                    pr_number,
-                    exc.response.text,
-                )
-
-            # Fallback: keep only comments GitHub accepts as a (deleted) pending
-            # review, then post the survivors in one COMMENT review.
-            valid, invalid = await self._partition_valid(
-                client, reviews_url, repo.head_sha, payloads
-            )
-            if valid:
-                try:
-                    await self._create_review(
-                        client, reviews_url, repo.head_sha, valid
-                    )
-                    log.info(
-                        "published %d/%d inline comments after 422 fallback %s#%s",
-                        len(valid),
-                        len(payloads),
-                        repo.full_name,
-                        pr_number,
-                    )
-                except httpx.HTTPStatusError as exc:
-                    log.error(
-                        "inline review fallback still failed (%s); demoting all "
-                        "to summary: %s",
-                        exc.response.status_code,
-                        exc.response.text,
-                    )
-                    invalid = payloads
-
-            if invalid:
-                await self._demote_to_summary(
-                    client, repo, pr_number, invalid
-                )
-
-    def _review_comment(self, c: InlineComment) -> dict[str, Any]:
-        """Map our InlineComment onto a GitHub review-comment object.
-
-        `side` is RIGHT (new code) or LEFT (old); `line` is 1-based in the file
-        on that side. GitHub also accepts `start_line`/`start_side` for multi-line
-        anchors, but our contract is single-line.
-        """
-        side = c.side if c.side in ("RIGHT", "LEFT") else "RIGHT"
-        return {"path": c.file, "line": c.line, "side": side, "body": c.body}
-
-    async def _create_review(
-        self,
-        client: httpx.AsyncClient,
-        reviews_url: str,
-        head_sha: str,
-        comments: list[dict[str, Any]],
-    ) -> None:
-        """POST a single COMMENT review with the given anchored comments."""
-        resp = await client.post(
-            reviews_url,
-            json={
-                "commit_id": head_sha,
-                "event": "COMMENT",
-                "comments": comments,
-            },
-        )
-        resp.raise_for_status()
-
-    async def _partition_valid(
-        self,
-        client: httpx.AsyncClient,
-        reviews_url: str,
-        head_sha: str,
-        comments: list[dict[str, Any]],
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        """Split comments into (accepted, rejected) by probing each one.
-
-        Mirrors pr-agent: create a PENDING review (event omitted) holding a
-        single comment; if GitHub accepts it the anchor is valid — then delete
-        the pending review so it never surfaces. A small sleep avoids the
-        secondary rate limit.
-        """
-        valid: list[dict[str, Any]] = []
-        invalid: list[dict[str, Any]] = []
-        for comment in comments:
-            ok = await self._probe_comment(client, reviews_url, head_sha, comment)
-            (valid if ok else invalid).append(comment)
-            await asyncio.sleep(1)  # secondary-rate-limit guard
-        return valid, invalid
-
-    async def _probe_comment(
-        self,
-        client: httpx.AsyncClient,
-        reviews_url: str,
-        head_sha: str,
-        comment: dict[str, Any],
-    ) -> bool:
-        """Return True iff GitHub accepts `comment`'s anchor (via a pending review)."""
-        try:
-            resp = await client.post(
-                reviews_url,
-                # Omitting `event` leaves the review PENDING.
-                json={"commit_id": head_sha, "comments": [comment]},
-            )
-            if resp.status_code >= 400:
-                return False
-            pending_id = resp.json().get("id")
-        except httpx.HTTPError:
-            return False
-        if pending_id is not None:
-            try:
-                await client.delete(f"{reviews_url}/{pending_id}")
-            except httpx.HTTPError:
-                # Leaving a stray pending review is harmless and self-owned.
-                log.debug("failed to delete probe review %s", pending_id)
-        return True
-
-    async def _demote_to_summary(
-        self,
-        client: httpx.AsyncClient,
-        repo: RepoRef,
-        pr_number: int,
-        comments: list[dict[str, Any]],
-    ) -> None:
-        """Post un-anchorable comments as one issue comment so nothing is lost."""
-        lines = ["Some review comments could not be anchored to the diff:\n"]
-        for c in comments:
-            lines.append(f"- **`{c['path']}` line {c.get('line', '?')}**: {c['body']}")
-        body = "\n".join(lines)
-        url = f"/repos/{repo.owner}/{repo.name}/issues/{pr_number}/comments"
-        resp = await client.post(url, json={"body": body})
-        resp.raise_for_status()
-        log.info(
-            "demoted %d un-anchorable inline comments to summary %s#%s",
-            len(comments),
-            repo.full_name,
-            pr_number,
-        )
-
-    async def publish_summary(self, repo: RepoRef, pr_number: int, body: str) -> None:
-        """Post the review summary as a plain issue comment on the PR thread."""
-        headers = await self._api_headers(repo)
-        url = f"/repos/{repo.owner}/{repo.name}/issues/{pr_number}/comments"
-        async with self._client(headers) as client:
-            resp = await client.post(url, json={"body": body})
-            resp.raise_for_status()
-        log.info("published summary comment %s#%s", repo.full_name, pr_number)
+    # NOTE: There is no publish path. The controller mints a scoped SCM token
+    # and bakes it into the sandbox env (see core/orchestrator/runner.py); the
+    # agent posts its own PR comments / pushes via `gh` or the REST API. This
+    # provider stays read-only + auth (webhooks, PR fetch, token minting).
 
     # ── helpers ──────────────────────────────────────────────────────────
 

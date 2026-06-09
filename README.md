@@ -7,18 +7,20 @@ Agentic cloud-agent runtime for CoReview. A **minimal, task-agnostic core** (san
 ## Mental model
 
 ```
-webhook ─▶ core (FastAPI, trust boundary)
+webhook ─▶ core (FastAPI)
              ├─ verify + flag (legacy → pr-agent | agentic → here)
-             ├─ broker short-lived git token
+             ├─ mint a repo-scoped SCM token + bake it into the sandbox env
              └─ E2B sandbox ─▶ OpenCode harness ─▶ pr-review bundle
-                                  (split → reviewers → critic → report_finding)
-           ◀─ findings JSON ─ publish inline + summary comments via core/vcs
+                                  (split → reviewers → critic)
+                                     └─ posts its own PR review via `gh`
+           ◀─ telemetry only (events + terminal status); no publish step
 ```
 
-- **Core is task-agnostic.** It knows about sandboxes, VCS, a harness, and runs — not about "PR review."
-- **Bundles are the specialization.** A bundle = portable **MCP tools** + a task builder + an output schema + per-harness **skill/subagent** prompt files.
-- **Harness is swappable.** OpenCode today, behind a `HarnessAdapter` so pi-agent / Claude Agent SDK can drop in later. Behavioral logic stays in MCP tools so it ports for free; only prompt assets are harness-specific.
-- **Secrets never enter the sandbox.** The sandbox runs untrusted PR code.
+- **Core is task-agnostic.** It knows about sandboxes, VCS, a harness, and runs — not about "PR review." It launches the agent with context and gets out of the way.
+- **The agent actuates its own outcomes.** It posts PR comments, pushes fixes, etc. by calling tools / running commands (`gh`, `git`, the VCS API) with the baked SCM token. There is **no structured-output contract** and no controller-side publish step — if a call fails, the agent observes the error and retries.
+- **Bundles are the specialization.** A bundle = a task builder + per-harness **skill/subagent** prompt files (+ optional plugin tools). Adding a new agent vertical is a new bundle, no core changes.
+- **Harness is swappable.** OpenCode today, behind a `HarnessAdapter` so pi-agent / Claude Agent SDK can drop in later. Behavioral logic lives in skill prompts; only prompt assets are harness-specific.
+- **Security model:** the SCM token is baked into the sandbox env. See [Security model](#security-model) for the trade-off and when to revisit it.
 
 ## Layout
 
@@ -31,13 +33,13 @@ agent/
     harness/     HarnessAdapter contract + opencode adapter  [+ pi/claude later]
     llm/         controller-side LLM service (LiteLLM → MiniMax gateway)
     config/      settings, model routing (pr-agent style), repo flags
-    state/       Postgres: runs, run_events, findings, repo_flags (+ claim logic)
+    state/       Postgres: runs, run_events, repo_flags (+ claim logic)
     orchestrator/ run lifecycle (runner) · worker · in-proc event bus
     bundles.py   bundle registry/loader
   bundles/
-    pr_review/   bundle.py · task.py · schema.py · tools/report_finding (opencode plugin)
+    pr_review/   bundle.py · task.py
                  opencode/{opencode.jsonc, skills/, subagents/}
-  runtime/       in-sandbox supervisor (entrypoint) · bridge · git-cred-helper · constants · log-config
+  runtime/       in-sandbox supervisor (entrypoint) · bridge · constants · log-config
   tests/         unit + API integration tests; opt-in live tier (E2B, MiniMax)
   Dockerfile           controller image (FastAPI + worker)
   Dockerfile.sandbox   sandbox image (OpenCode + runtime) → E2B template
@@ -54,7 +56,38 @@ agent/
 - **State:** **Postgres** for runs/events/results. **No Cloudflare Durable Objects** 
 - **VCS:** GitHub primary; GitLab + Bitbucket day 0; Azure DevOps later.
 - **Model routing:** follow pr-agent (LiteLLM, config/DB-driven); the controller picks the model and injects it into the harness's provider config.
-- **Tools:** MCP, so they're portable across harnesses.
+- **Tools:** the agent uses the harness's built-in tools + CLIs (`gh`, `git`); bundles add plugin tools only when needed.
+
+## Security model
+
+> ⚠️ **Deliberate trade-off — read before pointing this at untrusted PRs.**
+
+The controller mints a **repo-scoped, short-lived (~1h) SCM token** and **bakes it
+into the sandbox env** (`SCM_TOKEN`, plus `GH_TOKEN`/`GITHUB_TOKEN` for `gh`). The
+agent uses it to clone, push, and post its own PR comments. This is what makes the
+agent versatile and the wrapper thin — but it means a write-capable token lives in
+the sandbox for the whole run.
+
+The sandbox also runs the PR author's code. So the exfiltration risk is real **only
+when both** of these hold:
+
+1. the PR author is **untrusted** (a fork / external contributor), **and**
+2. the agent **executes** that PR's code (build / `npm install` / tests) — a
+   malicious `postinstall` or test hook could read `SCM_TOKEN` and ship it out.
+
+It is **safe** when either is false:
+
+- **Internal repos only** — authors already have write access; a leaked
+  repo-scoped token gains them nothing. ✅
+- **Pure static review** — the agent only reads files and never runs PR code, so
+  no attacker code executes. ✅
+
+**Current posture:** the token carries the GitHub App's full grant (repo-scoped but
+not permission-scoped), and the token lives in env for the run. This is accepted for
+now. **Tripwire — revisit before accepting external/fork PRs whose code we execute.**
+Planned hardening when that day comes: per-call token brokering with permission
+downscoping (`contents:read` for clone, `pull_requests:write` only for the comment
+step) and/or mint→use→revoke. See `core/orchestrator/runner.py::_scm_token_env`.
 
 ## Prerequisites (target)
 
@@ -209,12 +242,12 @@ If you chose **Only select repositories** during installation in step 2.8, make 
 Open a PR on the test repo (or comment `/review` on an existing one). Then watch:
 
 ```bash
-# the controller logs show: run queued → provisioning → running → publishing
+# the controller logs show: run queued → provisioning → running → succeeded
 # poll run status (the X-CoReview-Run header on the webhook 202 gives the id):
 curl localhost:8080/runs/<run_id> | jq
 ```
 
-A successful run posts inline + summary comments back on the PR. To keep a repo on the **legacy** `../pr-agent` reviewer during rollout, insert a `repo_flags` row (`provider, full_name, review_mode='legacy'`); default is `agentic`.
+A successful run has the **agent itself** post inline + summary comments back on the PR (via `gh`, using the baked SCM token — the controller no longer publishes). To keep a repo on the **legacy** `../pr-agent` reviewer during rollout, insert a `repo_flags` row (`provider, full_name, review_mode='legacy'`); default is `agentic`.
 
 ### 7. Access the web app
 

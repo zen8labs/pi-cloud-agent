@@ -35,10 +35,25 @@ async def init_db() -> None:
     assert _engine is not None
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # Column additions for pre-existing tables (no Alembic yet).
-        await conn.execute(
-            text("ALTER TABLE runs ADD COLUMN IF NOT EXISTS model VARCHAR(255)")
-        )
+        # Column additions for pre-existing tables (no Alembic yet). This is a
+        # Postgres-only convenience: `ADD COLUMN IF NOT EXISTS` is Postgres
+        # syntax, and on a fresh DB `create_all` already added the column, so
+        # other dialects (e.g. SQLite in tests) neither need nor support it.
+        if conn.dialect.name == "postgresql":
+            await conn.execute(
+                text("ALTER TABLE runs ADD COLUMN IF NOT EXISTS model VARCHAR(255)")
+            )
+            for col in (
+                "trigger_on_opened",
+                "trigger_on_synchronize",
+                "trigger_on_comment",
+            ):
+                await conn.execute(
+                    text(
+                        f"ALTER TABLE repo_settings ADD COLUMN IF NOT EXISTS "
+                        f"{col} BOOLEAN NOT NULL DEFAULT TRUE"
+                    )
+                )
 
 
 @asynccontextmanager
