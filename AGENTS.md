@@ -53,7 +53,7 @@ The system has **four roles across two trust zones**:
 
 3. **Supervisor** (`runtime/entrypoint.py`, PID-1 in sandbox): clones the repo, starts OpenCode, drives the review via the bridge, forwards logs to the controller as events.
 
-4. **Bridge** (`runtime/bridge.py`, in-sandbox): creates an OpenCode session, opens `/event` SSE stream *before* injecting the prompt, translates parts into controller events, POSTs terminal `{status: done}`. **Outbound-only** — the controller never dials into the sandbox.
+4. **Bridge** (`runtime/bridge.py`, in-sandbox): runs the task with one **synchronous** `POST /session/{id}/message` (blocks until the whole run incl. subagents completes — its return is the authoritative `done`/`error`), while a **separate best-effort task** streams `/event` SSE progress (tokens, tool calls, subagents) to the controller as telemetry. **Outbound-only** — the controller never dials into the sandbox.
 
 **Request lifecycle:** webhook → verify → create `Run` (Postgres) → 202 → worker claims run (`FOR UPDATE SKIP LOCKED`) → create E2B sandbox → supervisor boots → bridge drives OpenCode → `report_finding` tool POSTs findings to `/internal/runs/{id}/findings` → controller publishes to VCS → sandbox stopped.
 
@@ -112,7 +112,7 @@ docker compose exec db psql -U coreview -d coreview_agent -c \
   "SELECT seq, type, data->>'event', created_at FROM run_events WHERE run_id='$RUN_ID' ORDER BY seq;"
 ```
 
-Key `bridge.*` events: `session_idle` (parent done), `subagent_idle` (subagent done), `subagent_step_count` (spinning check), `inactivity_timeout` (no SSE for 120 s), `prompt_max_duration_exceeded` (hard wall-clock limit), `progress` (60 s heartbeat with elapsed + step counts).
+Key `bridge.*` events: `run_start` (bridge up), `review_complete` (sync `/message` returned ⇒ run done), `subagent_start`/`subagent_idle` (subagent telemetry labels), `subagent_step_count` (spinning check), `inactivity_timeout` (no SSE telemetry for 120 s ⇒ session aborted), `prompt_timeout` (sync call exceeded the wall-clock read timeout), `progress` (60 s heartbeat with elapsed + per-subagent step counts), `telemetry_error` (SSE pump hiccup — non-fatal).
 
 ## Web app (`web/`)
 
@@ -150,10 +150,10 @@ docker compose exec -T db psql -U coreview -d coreview_agent \
 ```
 
 **Key events to monitor:**
-- `bridge.run_start` — bridge initialized, SSE watchdog armed
-- `bridge.subagent_start` — subagent spawned
-- `bridge.parent_done_via_step_finish` — parent session completed
-- `bridge.inactivity_timeout` — watchdog fired (indicates stuck session)
+- `bridge.run_start` — bridge initialized, telemetry pump + inactivity watchdog armed
+- `bridge.subagent_start` / `bridge.subagent_idle` — subagent spawned / finished (telemetry labels)
+- `bridge.review_complete` — synchronous `/message` returned ⇒ run finished
+- `bridge.inactivity_timeout` — watchdog fired (no telemetry for the window ⇒ session aborted)
 - `status` + `done` — terminal state reached
 
 **Timeout overrides for testing:**

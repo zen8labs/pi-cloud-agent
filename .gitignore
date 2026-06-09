@@ -9,3 +9,6 @@ __pycache__/
 
 # AIHub auto-generated history
 .specstory/
+
+# Reference code to support architecture design
+references/

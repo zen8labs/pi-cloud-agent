@@ -216,13 +216,20 @@ Everything under `runtime/` runs **inside** the sandbox and ships in a *differen
    invisible — this is the primary debug surface).
 7. Monitor OpenCode with backoff/restart; handle SIGTERM/SIGINT gracefully.
 
-**Bridge** (`runtime/bridge.py`): creates an OpenCode session, opens the `/event` SSE stream *before* injecting the prompt (or the first events are missed), posts the prompt with a monotonically-ascending `messageID`, translates OpenCode message-parts into controller events, and posts a terminal `{status: done}` when the session goes idle. Findings do **not** flow through the bridge — the `report_finding` tool POSTs them straight to the internal API.
+**Bridge** (`runtime/bridge.py`): **control flow is request/response, telemetry is a separate stream.** The bridge creates an OpenCode session and runs the task with one synchronous `POST /session/{id}/message`, which blocks until the whole prompt loop — *including every subagent* — completes and returns the final assistant message; that response is the authoritative completion signal (`done` / `info.error` / read-timeout). Concurrently, a best-effort background task subscribes to the `/event` SSE stream and forwards live progress (tokens, tool calls, subagent activity) as controller events for the dashboard — it never decides when the run is over, so a dropped or stalled event can't orphan a run. Findings do **not** flow through the bridge — the `report_finding` tool POSTs them straight to the internal API.
+
+> **Why request/response.** An earlier design used the fire-and-forget `prompt_async`
+> endpoint and *inferred* completion from the event stream (`session.idle` /
+> `step_finish` reason). That inference broke with subagents — the parent's terminal
+> signal never arrived as expected — and runs hung as `Running` forever. Driving the
+> synchronous `/message` endpoint makes completion an awaited return value instead of
+> a heuristic, and the only timeout that governs control flow is that one request's
+> wall-clock read timeout.
 
 > **The OpenCode pin is load-bearing.** OpenCode is pinned to **1.16.2**
 > everywhere (`Dockerfile.sandbox`, the bridge, `opencode.jsonc`). Versions 1.14.42–1.15.x
-> broke the `/event` SSE endpoint (zero streamed events); 1.16.2 restores it and
-> fixes a subagent hang where the parent session never fired `session.idle` after a
-> subagent completed. If you bump OpenCode, re-validate the full bridge SSE path.
+> broke the `/event` SSE endpoint (zero streamed events); 1.16.2 restores it. If you
+> bump OpenCode, re-validate both the synchronous `/message` call and the SSE telemetry path.
 
 **Model wiring.** `AGENT_MODEL` uses a `provider/model` form, e.g. `aigateway/MiniMax/MiniMax-M2.7`. The custom `aigateway/` prefix tells the supervisor to wire OpenCode's provider block to the self-hosted OpenAI-compatible gateway (`@ai-sdk/openai-compatible` + `OPENAI_BASE_URL`/`OPENAI_API_KEY`). The same `AGENT_MODEL` is reused by the controller-side LLM service, which rewrites the `aigateway/` prefix to LiteLLM's `openai/` when calling the gateway directly ([§9](#9-capability-bundles) keeps tools portable; model routing is shared so the controller and the in-sandbox agent always agree on the model).
 
