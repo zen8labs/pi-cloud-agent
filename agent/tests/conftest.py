@@ -3,7 +3,7 @@
 Two tiers:
   * **unit / integration (default):** no external services. The API tier runs on
     a throwaway SQLite DB so endpoints are exercised without Postgres.
-  * **live (opt-in):** real calls to the MiniMax gateway, E2B, and OpenCode.
+  * **live (opt-in):** real calls to the MiniMax gateway, E2B, and Pi.
     Each live test self-skips unless the relevant credential env is set.
 
 We set DB + worker env before loading ``agent/.env`` so unit tests keep SQLite and

@@ -6,7 +6,7 @@ the self-hosted **MiniMax** model served over an OpenAI-compatible gateway
 The custom `aigateway/` prefix is rewritten to LiteLLM's `openai/` form by
 `_litellm_model` when this service calls the gateway directly.
 
-In the agentic design the *review* LLM work happens inside the OpenCode sandbox,
+In the agentic design the *review* LLM work happens inside the Pi sandbox,
 so the controller doesn't call this on the hot path. It exists as:
   * the single source of truth for model/gateway config (also injected into the
     sandbox so the harness uses the same model), and
@@ -81,7 +81,7 @@ class LLMService:
     def _litellm_model(self, model: str) -> str:
         """Normalize AGENT_MODEL for litellm.
 
-        AGENT_MODEL uses a custom prefix (e.g. 'aigateway/') for OpenCode's
+        AGENT_MODEL uses a custom prefix (e.g. 'aigateway/') for the sandbox
         provider wiring. LiteLLM only understands 'openai/' for OpenAI-compatible
         gateways. When api_base is set, rewrite any non-litellm prefix to 'openai/'.
         """

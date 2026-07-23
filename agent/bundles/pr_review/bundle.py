@@ -1,7 +1,6 @@
 """The pr_review capability bundle.
 
-Wires the task builder to the per-harness prompt assets on disk (the pr-review
-skill + reviewer/critic subagents). Registers itself at import time so the core
+Wires the task builder to the per-harness prompt assets on disk. Registers itself at import time so the core
 can resolve it by name without importing bundles directly.
 
 There is no structured-output contract: the agent reads the diff, reviews it,
@@ -34,7 +33,7 @@ class PRReviewBundle(Bundle):
         return []
 
     def harness_assets(self, harness: str) -> Path:
-        """Directory of prompt assets for `harness` (e.g. the `opencode/` dir)."""
+        """Directory of prompt assets for `harness`."""
         return Path(__file__).parent / harness
 
     def build_task(self, trigger: dict[str, Any]) -> TaskSpec:

@@ -1,28 +1,21 @@
-"""Live harness/OpenCode tests (opt-in).
-
-Skips unless `E2B_API_KEY` and `E2B_TEMPLATE` are set (the custom template must be
-built — see README "E2B setup"). Proves our sandbox image actually ships a
-working OpenCode `1.16.2` and that the runtime package is importable, and
-optionally that OpenCode can answer a one-line prompt against the configured
-MiniMax gateway.
-"""
+"""Opt-in E2B and real Netmind/Minimax harness checks."""
 
 from __future__ import annotations
 
 import os
+import shlex
 from pathlib import Path
 
 import pytest
 from dotenv import load_dotenv
 
-# Load .env so the tests can run without manually exporting variables.
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 pytestmark = [
     pytest.mark.live,
     pytest.mark.skipif(
         not (os.environ.get("E2B_API_KEY") and os.environ.get("E2B_TEMPLATE")),
-        reason="live harness test — set E2B_API_KEY + E2B_TEMPLATE (build the template first)",
+        reason="set E2B_API_KEY and E2B_TEMPLATE, then build the sandbox template",
     ),
 ]
 
@@ -37,66 +30,99 @@ async def _make_sandbox(envs: dict | None = None):
     )
 
 
-async def test_template_ships_opencode_and_runtime():
+async def test_template_ships_pi_and_runtime():
     sandbox = await _make_sandbox()
     try:
-        ver = await sandbox.commands.run("opencode --version")
-        assert "1.16.2" in (ver.stdout + ver.stderr), f"unexpected opencode version: {ver.stdout!r}"
-        imp = await sandbox.commands.run("cd /app && python -c 'import runtime, bundles; print(\"import-ok\")'")
-        assert "import-ok" in imp.stdout
+        command = (
+            "cd /app && node --input-type=module -e "
+            + shlex.quote(
+                "import { createAgentSession } from "
+                "'@earendil-works/pi-coding-agent'; "
+                "console.log(typeof createAgentSession)"
+            )
+        )
+        pi = await sandbox.commands.run(command)
+        assert "function" in pi.stdout
+
+        imports = await sandbox.commands.run(
+            "cd /app && python -c 'import runtime, bundles; print(\"import-ok\")'"
+        )
+        assert "import-ok" in imports.stdout
     finally:
         await sandbox.kill()
 
 
-@pytest.mark.live
 @pytest.mark.skipif(
-    not os.environ.get("OPENAI_BASE_URL"),
-    reason="needs OPENAI_BASE_URL + OPENAI_API_KEY to drive OpenCode against MiniMax",
+    not (os.environ.get("AIGATEWAY_BASE_URL") and os.environ.get("AIGATEWAY_API_KEY")),
+    reason="needs AIGATEWAY_BASE_URL and AIGATEWAY_API_KEY",
 )
-async def test_opencode_answers_prompt_live():
-    """Start OpenCode in the sandbox, send a trivial prompt, expect a reply.
-
-    This is a focused harness check (not a full review): it boots `opencode serve`
-    with the MiniMax gateway configured via @ai-sdk/openai-compatible and asks for
-    a one-word answer.
-    """
-    import json
-
-    agent_model = os.environ.get("AGENT_MODEL", "aigateway/MiniMax/MiniMax-M2.7")
-    base_url = os.environ["OPENAI_BASE_URL"]
-    api_key = os.environ.get("OPENAI_API_KEY", "")
-
-    provider_id, _, model_path = agent_model.partition("/")
-    # Mirror the working local opencode.json shape exactly: custom provider with
-    # @ai-sdk/openai-compatible, full slash-containing model path as the dict key
-    # (that is what OpenCode sends to the API as the model name).
-    config = {
-        "model": agent_model,
-        "provider": {
-            provider_id: {
-                "npm": "@ai-sdk/openai-compatible",
-                "name": provider_id,
-                "options": {"baseURL": base_url, "apiKey": api_key},
-                "models": {model_path: {"name": model_path}},
-            }
-        },
-    }
+async def test_pi_answers_with_netmind_minimax():
+    model_reference = os.environ.get(
+        "AGENT_MODEL", "aigateway/MiniMax/MiniMax-M2.7"
+    )
+    provider, model_id = model_reference.split("/", 1)
     envs = {
-        "OPENAI_BASE_URL": base_url,
-        "OPENAI_API_KEY": api_key,
-        "AGENT_MODEL": agent_model,
+        "OPENAI_BASE_URL": os.environ["AIGATEWAY_BASE_URL"],
+        "OPENAI_API_KEY": os.environ["AIGATEWAY_API_KEY"],
     }
+    script = f"""
+import {{
+  createAgentSession, ModelRuntime, SessionManager, SettingsManager
+}} from "@earendil-works/pi-coding-agent";
+const modelRuntime = await ModelRuntime.create({{
+  modelsPath: null,
+  allowModelNetwork: false
+}});
+modelRuntime.registerProvider({provider!r}, {{
+  name: {provider!r},
+  baseUrl: process.env.OPENAI_BASE_URL,
+  apiKey: "$OPENAI_API_KEY",
+  api: "openai-completions",
+  models: [{{
+    id: {model_id!r},
+    name: {model_id!r},
+    reasoning: true,
+    input: ["text"],
+    cost: {{ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }},
+    contextWindow: 196608,
+    maxTokens: 1024,
+    compat: {{
+      supportsDeveloperRole: false,
+      supportsReasoningEffort: false,
+      maxTokensField: "max_tokens"
+    }}
+  }}]
+}});
+const model = modelRuntime.getModel({provider!r}, {model_id!r});
+if (!model) throw new Error("model registration failed");
+const {{ session }} = await createAgentSession({{
+  cwd: "/tmp",
+  model,
+  thinkingLevel: "medium",
+  modelRuntime,
+  sessionManager: SessionManager.inMemory(),
+  settingsManager: SettingsManager.inMemory({{
+    compaction: {{ enabled: false }},
+    retry: {{ enabled: false }}
+  }})
+}});
+session.subscribe((event) => {{
+  if (event.type === "message_update" &&
+      event.assistantMessageEvent.type === "text_delta") {{
+    process.stdout.write(event.assistantMessageEvent.delta);
+  }}
+}});
+await session.prompt("Reply with exactly: pong");
+session.dispose();
+"""
+
     sandbox = await _make_sandbox(envs)
     try:
-        # `opencode run` executes a single prompt headlessly and prints the reply.
-        # --print-logs is for `opencode serve`; omit it here so the LLM response
-        # goes to stdout instead of being swallowed by the log formatter.
-        config_json = json.dumps(config).replace("'", "'\\''")
-        cmd = (
-            f"cd /app && OPENCODE_CONFIG_CONTENT='{config_json}' "
-            "opencode run 'Reply with exactly: pong' 2>&1 | tail -40"
+        command = (
+            "cd /app && node --input-type=module -e " + shlex.quote(script)
         )
-        out = await sandbox.commands.run(cmd, timeout=120)
-        assert "pong" in (out.stdout + out.stderr).lower()
+        result = await sandbox.commands.run(command, timeout=180)
+        assert result.exit_code == 0, result.stderr
+        assert "pong" in result.stdout.lower()
     finally:
         await sandbox.kill()

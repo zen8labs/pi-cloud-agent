@@ -4,7 +4,7 @@ A manual chat session normalizes to a flat trigger dict (repo coordinates + the
 user's free-form ``user_prompt``). Unlike pr_review there is usually no PR, so
 base/head SHAs are optional — the supervisor clones the repo's default-branch
 tip when ``head_sha`` is empty. The user's prompt is carried in ``inputs`` so the
-OpenCode adapter can surface it to the in-sandbox supervisor as ``USER_PROMPT``.
+The harness adapter surfaces it to the in-sandbox supervisor as ``USER_PROMPT``.
 """
 
 from __future__ import annotations

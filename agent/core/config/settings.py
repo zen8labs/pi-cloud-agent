@@ -37,13 +37,9 @@ class Settings(BaseSettings):
     sandbox_egress_allowlist: str = Field("", alias="SANDBOX_EGRESS_ALLOWLIST")
     run_wall_clock_seconds: int = Field(3600, alias="RUN_WALL_CLOCK_SECONDS")
 
-    # harness / model — defaults to the self-hosted MiniMax served over an
-    # OpenAI-compatible gateway. AGENT_MODEL uses a custom "aigateway/" provider
-    # prefix: the in-sandbox supervisor maps it to OpenCode's @ai-sdk/openai-compatible
-    # provider, and the controller LLM service rewrites it to LiteLLM's "openai/" form
-    # (see core/llm/service.py::_litellm_model). The same id + gateway are shared by
-    # both the controller-side LLM service and the in-sandbox OpenCode harness.
-    harness: str = Field("opencode", alias="HARNESS")
+    # harness / model — defaults to Pi with the self-hosted MiniMax model served
+    # over an OpenAI-compatible gateway.
+    harness: str = Field("pi", alias="HARNESS")
     agent_model: str = Field("aigateway/MiniMax/MiniMax-M2.7", alias="AGENT_MODEL")
     agent_fallback_models: str = Field("", alias="AGENT_FALLBACK_MODELS")
     agent_temperature: float = Field(0.2, alias="AGENT_TEMPERATURE")

@@ -61,31 +61,17 @@ directory. These environment variables are set:
    (`A...B` shows what the PR branch added relative to the merge base — the right
    frame for "introduced by this PR".)
 
-2. **Split into independent review units** — typically one file, or one cohesive
-   change spanning a few files. Review units independently.
+2. **Review cohesive units.** Work through one file or one connected change at
+   a time. Read surrounding code and callers, then run the narrowest relevant
+   tests or linters. Cover correctness, security, cross-file contracts, and
+   concrete structural regressions.
 
-3. **Review each unit with the `reviewer` subagent.** It reads the surrounding
-   code (not just the hunk), pulls the callers/contracts the change affects, runs
-   any present linters/tests, and produces *candidate* findings with evidence.
-   Cover at least: correctness (off-by-one, null handling, wrong conditionals,
-   error-handling gaps, resource leaks, broken control flow); security
-   (injection, missing authz, unsafe deserialization, secret exposure, SSRF,
-   unvalidated input across a trust boundary); cross-file breakage (signature
-   changes that break callers, renamed/removed symbols still referenced,
-   schema/migration mismatch); and structural quality regressions (new tangled
-   special cases, wrong-layer feature leakage, needless wrappers, or a file-size
-   jump that makes the changed code materially harder to maintain). The reviewer
-   must also record why each candidate is not one of the common false-positive
-   magnets above.
+3. **Challenge every candidate.** Re-open the cited lines or re-run the cited
+   command. Drop anything you cannot verify, anything pre-existing, and
+   anything that is merely defensive hardening or style. If multiple comments
+   share one root cause, keep only the strongest one.
 
-4. **Verify each candidate with the `critic` subagent.** It re-opens the cited
-   lines and/or re-runs the cited command and **DROPS any finding it cannot
-   independently verify**, any finding that turns out to be pre-existing, and
-   any candidate whose impact is only defensive hardening or stylistic cleanup.
-   Speculative ("might"/"could") findings are rejected here. If multiple
-   comments share one root cause, keep only the strongest one.
-
-5. **Calibrate before posting.** Sort surviving findings by impact and keep only
+4. **Calibrate before posting.** Sort surviving findings by impact and keep only
    blocker/warning findings. Drop all nits. If no finding clears the bar, post a
    clean review. Before posting each comment, answer:
 
@@ -94,7 +80,7 @@ directory. These environment variables are set:
    - What command, local precedent, documentation, or read range proves it?
    - What is the smallest concrete fix?
 
-6. **Post one review.** Collect the findings that survive the critic and submit
+5. **Post one review.** Collect the findings that survive verification and submit
    them as a *single* PR review with inline comments anchored to the diff (this
    produces the "Code Review" summary box + one comment per line). Write the
    payload to a file and submit it:
@@ -127,7 +113,7 @@ directory. These environment variables are set:
      or `⚠️` warning (should fix). Do not post nits.
    - Always include an `evidence:` footnote.
 
-7. **Handle rejections (closed loop).** GitHub returns **422** and rejects the
+6. **Handle rejections (closed loop).** GitHub returns **422** and rejects the
    *whole* review if **any** comment's line isn't part of the diff. If that
    happens, read the error, then for each offending comment either:
    - re-open the file and correct `line`/`side` to a line that is actually in the
@@ -138,6 +124,6 @@ directory. These environment variables are set:
    Then resubmit. Repeat until the review posts successfully. Confirm success
    (HTTP 200 and a review id in the response) before finishing.
 
-8. **Finish.** A clean PR is a valid outcome — post a review with an empty
+7. **Finish.** A clean PR is a valid outcome — post a review with an empty
    `comments` array and a one-line `body` saying it looks good. When the review
    has posted successfully, stop.

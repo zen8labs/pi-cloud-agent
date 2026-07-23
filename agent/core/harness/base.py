@@ -1,6 +1,6 @@
 """Harness adapter contract.
 
-A harness is the managed agent runtime (OpenCode today) that runs *inside* the
+A harness is the managed agent runtime that runs *inside* the
 sandbox and drives the actual tool-calling loop. The controller never reaches
 into the sandbox; instead the in-sandbox supervisor/bridge dials the controller
 outbound (see ARCHITECTURE.md → "Trust boundary & secrets" and "The sandbox
@@ -49,7 +49,7 @@ class Session:
     run_id: str
     session_id: str
     sandbox: SandboxHandle
-    harness_session_id: str | None = None  # e.g. OpenCode's session id
+    harness_session_id: str | None = None
 
 
 @runtime_checkable

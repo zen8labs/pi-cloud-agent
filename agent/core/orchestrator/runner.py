@@ -168,7 +168,7 @@ def _llm_provider_keys(model_id: str) -> dict[str, str]:
 
     if provider == "aigateway":
         # Internal gateway (e.g. self-hosted MiniMax). Injected as OPENAI_* so
-        # OpenCode's _inject_gateway_provider wires the aigateway provider block.
+        # Pi receives the gateway as an OpenAI-compatible model provider.
         if s.aigateway_base_url:
             out["OPENAI_BASE_URL"] = s.aigateway_base_url
         if s.aigateway_api_key:

@@ -1,7 +1,7 @@
 """Live VCS test (opt-in): mint a clone token and actually clone the repo.
 
 Covers the credential path the sandbox's git credential helper brokers, isolated
-from E2B / OpenCode — the piece `test_harness_live.py` does NOT exercise.
+from E2B / Pi — the piece `test_harness_live.py` does NOT exercise.
 
 Skips unless a GitHub credential and a `TEST_REPO` are configured. `.env` is
 loaded by conftest, so `make test-live` picks these up automatically.

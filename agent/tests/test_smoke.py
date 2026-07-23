@@ -94,7 +94,7 @@ def test_harness_run_maps_bus_events_to_events():
     from core.sandbox.provider import SandboxHandle
     from core.types import RepoRef, RunLimits, TaskSpec
 
-    adapter = get_harness_adapter("opencode")
+    adapter = get_harness_adapter("pi")
     handle = SandboxHandle(sandbox_id="s", provider_object_id="p", status="running")
     session = Session(run_id="run1", session_id="s", sandbox=handle)
     repo = RepoRef("github", "github.com", "o", "r", "u", "main", "b", "h", "feat", 1)

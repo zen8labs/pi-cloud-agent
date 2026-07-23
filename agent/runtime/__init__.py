@@ -7,10 +7,10 @@ Durable-Object WebSocket transport to our FastAPI HTTP controller.
 Modules:
     constants               -- ports, timeouts, on-disk paths, repo-hook path.
     log_config              -- JSON logging to stderr.
-    bridge                  -- OpenCode event subscription + HTTP forwarding.
-    entrypoint              -- supervisor: clone, start OpenCode, drive the agent.
+pi-runner.mjs           -- embedded Pi SDK loop + event forwarding.
+entrypoint              -- supervisor: clone, configure, and run Pi once.
 """
 
 from __future__ import annotations
 
-__all__ = ["constants", "log_config", "bridge", "entrypoint"]
+__all__ = ["constants", "log_config", "entrypoint"]

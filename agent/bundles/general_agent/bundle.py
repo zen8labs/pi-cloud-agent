@@ -1,9 +1,8 @@
 """The general_agent capability bundle.
 
 A free-form coding agent: takes a user prompt and works the repo checkout
-directly. It contributes only a skill + opencode config (no report_finding tool
-and no critic/reviewer subagents — there are no grounded findings to publish; the
-agent's work is surfaced live as events). Registers itself at import time.
+directly. It needs no harness-specific assets: the user's prompt is sufficient.
+The agent's work is surfaced live as events. Registers itself at import time.
 """
 
 from __future__ import annotations
@@ -28,7 +27,7 @@ class GeneralAgentBundle(Bundle):
         return []
 
     def harness_assets(self, harness: str) -> Path:
-        """Directory of prompt assets for `harness` (e.g. the `opencode/` dir)."""
+        """Directory of prompt assets for `harness`."""
         return Path(__file__).parent / harness
 
     def build_task(self, trigger: dict[str, Any]) -> TaskSpec:

@@ -36,11 +36,11 @@ def test_build_env_layers_secrets_and_controller_keys():
         template="coreview-agent",
         timeout_seconds=600,
         egress_allowlist=["github.com", "pypi.org"],
-        env={"HARNESS": "opencode", "BUNDLE": "pr_review"},
+        env={"HARNESS": "pi", "BUNDLE": "pr_review"},
         secret_env={"OPENAI_API_KEY": "sek"},
     )
     env = _build_env(cfg)
-    assert env["HARNESS"] == "opencode"
+    assert env["HARNESS"] == "pi"
     assert env["OPENAI_API_KEY"] == "sek"
     assert env["CONTROL_PLANE_URL"] == "https://agent.example.com"
     assert env["RUN_ID"] == "run-1"
