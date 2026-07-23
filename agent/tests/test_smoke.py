@@ -1,12 +1,11 @@
 """Smoke tests that need neither network nor a database.
 
-They exercise the seams most likely to drift: webhook verification/parsing, the
-bundle's trigger→task mapping, and the harness adapter's bus→Event translation.
+They exercise the seams most likely to drift: webhook verification/parsing and
+the profile's trigger-to-task mapping.
 """
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import hmac
 import json
@@ -66,8 +65,8 @@ def test_github_webhook_bad_signature_raises():
         get_vcs_provider("github").verify_and_parse_webhook(headers, body)
 
 
-def test_pr_review_bundle_build_task():
-    from core.bundles import get_bundle
+def test_pr_review_profile_build_task():
+    from core.profiles import get_profile
 
     trig = dict(
         provider="github",
@@ -81,41 +80,7 @@ def test_pr_review_bundle_build_task():
         head_branch="feat",
         pr_number=7,
     )
-    task = get_bundle("pr_review").build_task(trig)
-    assert task.bundle == "pr_review"
+    task = get_profile("pr_review").build_task(trig)
+    assert task.profile == "pr_review"
     assert task.repo.full_name == "octo/repo"
     assert task.repo.head_sha == "h"
-
-
-def test_harness_run_maps_bus_events_to_events():
-    from core.harness import get_harness_adapter
-    from core.harness.base import EventType, Session
-    from core.orchestrator.bus import event_bus
-    from core.sandbox.provider import SandboxHandle
-    from core.types import RepoRef, RunLimits, TaskSpec
-
-    adapter = get_harness_adapter("pi")
-    handle = SandboxHandle(sandbox_id="s", provider_object_id="p", status="running")
-    session = Session(run_id="run1", session_id="s", sandbox=handle)
-    repo = RepoRef("github", "github.com", "o", "r", "u", "main", "b", "h", "feat", 1)
-    task = TaskSpec(bundle="pr_review", instructions="x", repo=repo, limits=RunLimits())
-
-    async def drive():
-        collected = []
-        gen = adapter.run(session, task)
-
-        async def feed():
-            await asyncio.sleep(0.05)
-            await event_bus.publish("run1", {"type": "finding", "data": {"file": "a.py"}})
-            await event_bus.publish("run1", {"type": "done", "data": {}})
-
-        feeder = asyncio.create_task(feed())
-        async for ev in gen:
-            collected.append(ev)
-        await feeder
-        return collected
-
-    events = asyncio.run(drive())
-    types = [e.type for e in events]
-    assert EventType.finding in types
-    assert types[-1] is EventType.done

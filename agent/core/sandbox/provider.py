@@ -34,8 +34,8 @@ class CreateSandboxConfig:
     run_id: str
     session_id: str
     repo: RepoRef
-    control_plane_url: str  # where the in-sandbox bridge dials back
-    sandbox_auth_token: str  # per-run bearer the bridge/tools use on callbacks
+    control_plane_url: str  # where the in-sandbox runtime dials back
+    sandbox_auth_token: str  # per-run bearer used on callbacks
     template: str
     timeout_seconds: int
     egress_allowlist: list[str] = field(default_factory=list)

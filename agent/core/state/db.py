@@ -41,6 +41,24 @@ async def init_db() -> None:
         # other dialects (e.g. SQLite in tests) neither need nor support it.
         if conn.dialect.name == "postgresql":
             await conn.execute(
+                text(
+                    """
+                    DO $$
+                    BEGIN
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'runs' AND column_name = 'bundle'
+                        ) AND NOT EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'runs' AND column_name = 'profile'
+                        ) THEN
+                            ALTER TABLE runs RENAME COLUMN bundle TO profile;
+                        END IF;
+                    END $$;
+                    """
+                )
+            )
+            await conn.execute(
                 text("ALTER TABLE runs ADD COLUMN IF NOT EXISTS model VARCHAR(255)")
             )
             for col in (

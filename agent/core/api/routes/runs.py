@@ -30,7 +30,7 @@ class CreateRunIn(BaseModel):
 
     repo: str = Field(..., description="owner/name")
     prompt: str = Field(..., min_length=1)
-    bundle: str = "general_agent"
+    profile: str = "general_agent"
     provider: str = "github"
     host: str = "github.com"
     # Branch to clone. When omitted, the controller resolves the repo's real
@@ -48,7 +48,7 @@ def _run_dict(run) -> dict:
     return {
         "id": run.id,
         "status": run.status,
-        "bundle": run.bundle,
+        "profile": run.profile,
         "model": run.model,
         "provider": run.provider,
         "repo": run.repo_full_name,
@@ -70,7 +70,7 @@ async def create_run(body: CreateRunIn):
     """Queue a manual agent session (the worker picks it up like a webhook run).
 
     Builds the same flat trigger the webhook layer produces, plus the free-form
-    `user_prompt` the general_agent bundle threads through to the sandbox. No
+    `user_prompt` the general_agent profile threads through to the sandbox. No
     base/head SHA is supplied — the sandbox clones the repo's default-branch tip.
     """
     if "/" not in body.repo:
@@ -109,7 +109,7 @@ async def create_run(body: CreateRunIn):
     async with get_session() as db:
         run = await runs.create_run(
             db,
-            bundle=body.bundle,
+            profile=body.profile,
             provider=body.provider,
             repo_full_name=body.repo,
             pr_number=body.pr_number,

@@ -20,10 +20,10 @@ test-live:
 	cd agent && pytest -q -m live
 
 lint:
-	cd agent && ruff check core bundles runtime
+	cd agent && ruff check core profiles runtime
 
 compile:  ## fast syntax check without deps
-	cd agent && python -m py_compile $$(find core bundles runtime -name '*.py')
+	cd agent && python -m py_compile $$(find core profiles runtime -name '*.py')
 
 up:  ## bring up Postgres + controller via docker compose
 	docker compose up --build
@@ -32,7 +32,7 @@ down:
 	docker compose down
 
 sandbox-template:  ## build/publish the E2B sandbox template from Dockerfile.sandbox
-	cd agent && e2b template build -c "python -m runtime.entrypoint" -d Dockerfile.sandbox --name coreview-agent
+	cd agent && e2b template build -c "sleep infinity" -d Dockerfile.sandbox --name coreview-agent
 
 web-dev:  ## run the web app locally
 	cd web && npm run dev

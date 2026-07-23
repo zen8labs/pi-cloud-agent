@@ -142,11 +142,10 @@ class E2BSandboxProvider:
                 "Failed to create E2B sandbox", exc, status=_status_from_exc(exc)
             ) from exc
 
-        # IMPORTANT: on E2B the template `start_cmd` runs at *build/snapshot*
-        # time, not per-create — and our supervisor is a per-run task that needs
-        # RUN_ID/CONTROL_PLANE_URL/REPO_* (only known at create). So we launch it
-        # explicitly here, in the background, with the run's env. cwd=/app so the
-        # `runtime`/`bundles` packages resolve.
+        # The template's harmless `sleep infinity` start command keeps the base
+        # sandbox alive. The per-run supervisor needs env known only at create,
+        # so launch it explicitly in the background. cwd=/app makes the
+        # `runtime` and `profiles` packages importable.
         try:
             await sandbox.commands.run(
                 "python -m runtime.entrypoint",

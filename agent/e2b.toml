@@ -13,7 +13,7 @@
 team_id = "f7d8c71b-1bc4-445c-a9dd-427bab858ee4"
 memory_mb = 4_096
 cpu_count = 4
-start_cmd = "python -m runtime.entrypoint"
+start_cmd = "sleep infinity"
 dockerfile = "Dockerfile.sandbox"
 template_name = "coreview-agent"
 template_id = "7fgnza6amhmt4hnsild0"

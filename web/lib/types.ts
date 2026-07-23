@@ -10,7 +10,7 @@ export type RunStatus =
 export interface RunSummary {
   id: string;
   status: RunStatus;
-  bundle: string;
+  profile: string;
   model: string | null;
   provider: string;
   repo: string;
@@ -49,8 +49,8 @@ export interface AppConfig {
   model: string;
   available_models: ModelOption[];
   default_model: string;
-  bundles: string[];
-  default_bundle: string;
+  profiles: string[];
+  default_profile: string;
 }
 
 export interface RepoTriggers {

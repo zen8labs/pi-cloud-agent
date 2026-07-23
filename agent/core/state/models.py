@@ -39,7 +39,7 @@ class Run(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     session_id: Mapped[str] = mapped_column(String(36), default=_uuid, index=True)
-    bundle: Mapped[str] = mapped_column(String(64))
+    profile: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
 
     provider: Mapped[str] = mapped_column(String(32))

@@ -3,7 +3,7 @@ name: pr-review
 description: Review a pull request and post grounded, PR-introduced findings as inline GitHub review comments.
 ---
 
-# PR Review
+# PR Review Profile
 
 You are reviewing a single pull request and **posting your review yourself** via
 the `gh` CLI. There is no reporting tool and no hidden publishing step: whatever

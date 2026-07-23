@@ -1,3 +1,5 @@
-from core.llm.service import LLMService, get_llm_service
+"""Model metadata used by the controller and dashboard."""
 
-__all__ = ["LLMService", "get_llm_service"]
+from core.llm.registry import ModelEntry, all_models, available_models, get_model
+
+__all__ = ["ModelEntry", "all_models", "available_models", "get_model"]

@@ -13,11 +13,11 @@ COPY pyproject.toml ./
 RUN pip install --no-cache-dir \
       "fastapi>=0.115" "uvicorn[standard]>=0.30" "httpx>=0.27" "pydantic>=2.7" \
       "pydantic-settings>=2.3" "sqlalchemy>=2.0" "asyncpg>=0.29" "alembic>=1.13" \
-      "e2b>=1.0" "litellm>=1.40" "python-json-logger>=2.0" "tenacity>=8.3" \
+      "e2b>=1.0" "python-json-logger>=2.0" \
       "PyJWT>=2.8" "cryptography>=42.0"
 
 COPY core ./core
-COPY bundles ./bundles
+COPY profiles ./profiles
 COPY runtime ./runtime
 
 EXPOSE 8080

@@ -59,7 +59,7 @@ export default function SessionPage() {
 
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-[13px] font-semibold text-[var(--color-ink)]">
-            {run ? (run.prompt ? truncate(run.prompt, 72) : `${run.bundle} · ${run.repo}`) : "Session"}
+            {run ? (run.prompt ? truncate(run.prompt, 72) : `${run.profile} · ${run.repo}`) : "Session"}
           </h1>
           {run && (
             <p className="truncate font-mono text-[10px] text-[var(--color-faint)]">
@@ -138,7 +138,7 @@ export default function SessionPage() {
               <div className="conversation-shell pb-4">
                 <SessionComposer
                   repo={run.repo}
-                  bundle={run.bundle}
+                  profile={run.profile}
                   active={active}
                   previousPrompt={run.prompt}
                   previousEvents={events}
@@ -152,7 +152,7 @@ export default function SessionPage() {
         <aside className="hidden w-64 shrink-0 overflow-y-auto border-l border-[var(--color-line-strong)] bg-[var(--color-surface)] lg:block">
           <Section title="Details">
             <Row label="Status" value={run ? <StatusBadge status={run.status} /> : "—"} />
-            <Row label="Agent" value={run?.bundle ?? "—"} mono />
+            <Row label="Profile" value={run?.profile ?? "—"} mono />
             <Row label="Model" value={run?.model ?? "—"} mono />
             <Row label="Repo" value={run?.repo ?? "—"} mono />
             <Row label="Provider" value={run?.provider ?? "—"} />
@@ -287,13 +287,13 @@ function buildFollowUpPrompt(
 
 function SessionComposer({
   repo,
-  bundle,
+  profile,
   active,
   previousPrompt,
   previousEvents,
 }: {
   repo: string;
-  bundle: string;
+  profile: string;
   active: boolean;
   previousPrompt: string | null;
   previousEvents: AgentEvent[];
@@ -314,7 +314,7 @@ function SessionComposer({
     setError(null);
     try {
       const fullPrompt = buildFollowUpPrompt(previousPrompt, previousEvents, prompt.trim());
-      const run = await api.createRun({ repo, bundle, prompt: fullPrompt });
+      const run = await api.createRun({ repo, profile, prompt: fullPrompt });
       router.push(`/sessions/${run.id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

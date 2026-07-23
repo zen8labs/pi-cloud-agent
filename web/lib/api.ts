@@ -54,7 +54,7 @@ export const api = {
   createRun: (body: {
     repo: string;
     prompt: string;
-    bundle?: string;
+    profile?: string;
     branch?: string | null;
     pr_number?: number | null;
     model?: string | null;

@@ -1,7 +1,7 @@
 [project]
 name = "coreview-agent"
 version = "0.1.0"
-description = "Agentic cloud-agent runtime for CoReview (sandbox + VCS + harness + bundles)"
+description = "Minimal cloud-agent runtime for CoReview (sandbox + VCS + Pi + profiles)"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
@@ -14,9 +14,7 @@ dependencies = [
     "asyncpg>=0.29",
     "alembic>=1.13",
     "e2b>=1.0",
-    "litellm>=1.40",
     "python-json-logger>=2.0",
-    "tenacity>=8.3",
     "PyJWT>=2.8",
     "cryptography>=42.0",
 ]
@@ -37,7 +35,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["core*", "bundles*", "runtime*"]
+include = ["core*", "profiles*", "runtime*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

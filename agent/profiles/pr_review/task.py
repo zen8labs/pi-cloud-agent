@@ -1,9 +1,8 @@
-"""Trigger -> TaskSpec for the pr_review bundle.
+"""Trigger -> TaskSpec for the pr_review profile.
 
 The webhook layer normalizes a VCS event into a flat trigger dict; here we
 reconstruct the `RepoRef` and wrap it in a harness-agnostic `TaskSpec`. The
-`instructions` are deliberately thin — they just activate the bundle's
-pr-review skill; the real behaviour lives in the skill (which drives `gh`).
+The concrete request stays small; reusable behavior lives in ``SKILL.md``.
 """
 
 from __future__ import annotations
@@ -28,8 +27,8 @@ def build_task(trigger: dict[str, Any]) -> TaskSpec:
         pr_number=trigger.get("pr_number"),
     )
     return TaskSpec(
-        bundle="pr_review",
-        instructions="Run the pr-review skill to review this pull request.",
+        profile="pr_review",
+        prompt=f"Review PR #{repo.pr_number} in the current checkout.",
         repo=repo,
         inputs=trigger,
         limits=RunLimits(),

@@ -22,7 +22,7 @@ function ChatInner() {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [repo, setRepo] = useState(params.get("repo") || "");
   const [customRepo, setCustomRepo] = useState("");
-  const [bundle, setBundle] = useState(params.get("bundle") || "general_agent");
+  const [profile, setProfile] = useState(params.get("profile") || "general_agent");
   const [model, setModel] = useState<string>("");
   const [prNumber, setPrNumber] = useState("");
   const [prompt, setPrompt] = useState("");
@@ -63,7 +63,7 @@ function ChatInner() {
     return () => { cancelled = true; };
   }, [effectiveRepo]);
 
-  const isReview = bundle === "pr_review";
+  const isReview = profile === "pr_review";
   const canSubmit =
     !!effectiveRepo &&
     (isReview ? !!prNumber.trim() : prompt.trim().length > 0) &&
@@ -76,7 +76,7 @@ function ChatInner() {
     try {
       const run = await api.createRun({
         repo: effectiveRepo,
-        bundle,
+        profile,
         prompt: isReview ? prompt.trim() || "Review this pull request." : prompt.trim(),
         branch: branch || null,
         pr_number: isReview ? Number(prNumber) : null,
@@ -132,7 +132,7 @@ function ChatInner() {
               {/* Task type */}
               <div className="flex items-center justify-between gap-4 px-5 py-3">
                 <label className="text-[13px] font-medium text-[var(--color-muted)]">Task type</label>
-                <SelectField value={bundle} onChange={(v) => setBundle(v)} className="w-40">
+                <SelectField value={profile} onChange={(v) => setProfile(v)} className="w-40">
                   <option value="general_agent">Agent task</option>
                   <option value="pr_review">PR review</option>
                 </SelectField>

@@ -2,7 +2,7 @@
 
 Kept intentionally small. Every log line carries whatever correlation fields are
 bound for the current async task (run_id, session_id, provider), so logs across
-the controller and the sandbox bridge can be stitched together.
+the controller and the sandbox runtime can be stitched together.
 """
 
 from __future__ import annotations

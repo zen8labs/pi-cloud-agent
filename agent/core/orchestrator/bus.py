@@ -1,9 +1,8 @@
 """In-process per-run event bus.
 
-The in-sandbox bridge dials the controller and POSTs events to the internal API
+The in-sandbox Pi runner dials the controller and POSTs events to the internal API
 (see ARCHITECTURE.md → "The request lifecycle"). Those handlers `publish()` onto
-this bus; the harness adapter's `run()` `subscribe()`s and yields events until
-`done`.
+this bus; the orchestrator subscribes before provisioning and waits for `done`.
 
 This is intentionally in-memory: it works when the API and the worker share a
 process (the default deployment). To scale the worker out to its own process,

@@ -21,7 +21,7 @@ from core.types import RunStatus
 async def create_run(
     db: AsyncSession,
     *,
-    bundle: str,
+    profile: str,
     provider: str,
     repo_full_name: str,
     pr_number: int | None,
@@ -30,7 +30,7 @@ async def create_run(
     model: str | None = None,
 ) -> Run:
     run = Run(
-        bundle=bundle,
+        profile=profile,
         provider=provider,
         repo_full_name=repo_full_name,
         pr_number=pr_number,

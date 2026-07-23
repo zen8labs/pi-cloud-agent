@@ -2,7 +2,7 @@
 
   * GET /repos                    — repo list for the chat page's repo selector
   * GET /repos/{owner}/{name}/branches — branches + resolved default for a repo
-  * GET /config                   — non-secret defaults (model, bundles) shown in the UI
+  * GET /config                   — non-secret defaults (model, profiles) shown in the UI
 """
 
 from __future__ import annotations
@@ -74,7 +74,7 @@ async def list_repos():
 
 @router.get("/config")
 async def get_config():
-    """Non-secret defaults the dashboard surfaces (available models, bundles)."""
+    """Non-secret defaults the dashboard surfaces (available models, profiles)."""
     s = get_settings()
     models = available_models()
     async with get_session() as db:
@@ -86,6 +86,6 @@ async def get_config():
         "model": default_model,
         "available_models": [{"id": m.id, "label": m.label} for m in models],
         "default_model": default_model,
-        "bundles": ["general_agent", "pr_review"],
-        "default_bundle": "general_agent",
+        "profiles": ["general_agent", "pr_review"],
+        "default_profile": "general_agent",
     }

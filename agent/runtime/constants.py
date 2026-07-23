@@ -1,8 +1,7 @@
 """Shared constants for the in-sandbox runtime.
 
-Centralised so the supervisor, bridge, and credential helper agree on ports,
-paths, and timeouts without restating literals (house style: define a default
-value exactly once). Durations are in *seconds* per Python convention.
+Centralized so runtime components agree on paths and timeouts. Durations are in
+seconds.
 """
 
 from __future__ import annotations
@@ -14,9 +13,9 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 # The agent package is installed to /app in the image (see Dockerfile.sandbox),
-# so `bundles/` is importable and the baked bundle assets live under here.
+# so `profiles/` is importable and the baked profile assets live under here.
 APP_DIR = Path("/app")
-BUNDLES_DIR = APP_DIR / "bundles"
+PROFILES_DIR = APP_DIR / "profiles"
 PI_RUNNER = APP_DIR / "runtime" / "pi-runner.mjs"
 
 # Where the repo is cloned and Pi runs.

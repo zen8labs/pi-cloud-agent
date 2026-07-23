@@ -1,4 +1,4 @@
-"""Core, harness- and bundle-agnostic data contracts.
+"""Core, runtime- and profile-agnostic data contracts.
 
 These are the load-bearing types referenced across the whole system
 (see ARCHITECTURE.md → "Core contracts"). Keep them free of provider/harness
@@ -67,14 +67,10 @@ class ModelSpec:
 
 @dataclass(slots=True)
 class TaskSpec:
-    """A harness-agnostic unit of work produced by a bundle from a trigger.
+    """A normalized unit of work produced by a profile from a trigger."""
 
-    `instructions` is usually a thin pointer that activates the bundle's skill;
-    the heavy behavioural logic lives in the skill + MCP tools, not here.
-    """
-
-    bundle: str  # e.g. "pr_review"
-    instructions: str
+    profile: str  # e.g. "pr_review"
+    prompt: str
     repo: RepoRef
     inputs: dict[str, Any] = field(default_factory=dict)
     limits: RunLimits = field(default_factory=RunLimits)

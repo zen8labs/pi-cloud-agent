@@ -2,7 +2,7 @@
 
 Exercises the real FastAPI app + DB through a full request lifecycle: health,
 webhook signature handling, run creation + read-back, and the token-authenticated
-internal callbacks the sandbox bridge uses.
+internal callbacks the sandbox runtime uses.
 """
 
 from __future__ import annotations
@@ -80,6 +80,7 @@ def test_webhook_valid_pr_creates_run_then_readable(client):
     assert got.status_code == 200
     data = got.json()
     assert data["repo"] == "octo/repo"
+    assert data["profile"] == "pr_review"
     assert data["status"] == "queued"
 
 
@@ -275,12 +276,12 @@ def test_internal_status_error_publishes_done_event(client):
         client,
         run_id,
         token,
-        {"status": "error", "detail": "bridge failed"},
+        {"status": "error", "detail": "runtime failed"},
         expected_count=3,
     )
 
     assert [e["type"] for e in raw] == ["status", "error", "done"]
-    assert raw[1]["data"]["message"] == "bridge failed"
+    assert raw[1]["data"]["message"] == "runtime failed"
     assert raw[2]["data"]["status"] == "error"
 
 

@@ -118,7 +118,7 @@ export default function SessionsPage() {
 
                 {/* Type */}
                 <span className="w-24 shrink-0 font-mono text-[11px] uppercase tracking-wide text-[var(--color-faint)]">
-                  {r.bundle === "pr_review" ? "pr-review" : "agent"}
+                  {r.profile === "pr_review" ? "pr-review" : "agent"}
                 </span>
 
                 {/* Run ID */}

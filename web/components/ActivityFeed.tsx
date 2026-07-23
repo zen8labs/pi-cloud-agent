@@ -200,7 +200,7 @@ function foldInnerEvent(
 }
 
 function isVerbose(text: string): boolean {
-  return text.includes("opencode.stdout");
+  return text.includes("pi.stdout");
 }
 
 function logText(d: Record<string, unknown>): string {

@@ -12,7 +12,7 @@ it's a debug/operator console.
   and findings, streamed live. A metadata sidebar shows status, repo, PR link,
   findings, and the raw SSE endpoint. Active runs can be cancelled.
 - **New session** (`/chat`) — pick a repo, choose **Agent task** (free-form,
-  general_agent bundle) or **PR review**, type a prompt, and press Enter to start
+  `general_agent` profile) or **PR review**, type a prompt, and press Enter to start
   a run in a fresh sandbox.
 
 ## Running
@@ -41,7 +41,7 @@ On the controller side, set:
 | Cancel | `POST /runs/{id}/cancel` |
 | Start a session | `POST /runs` |
 | Repo selector | `GET /repos` |
-| Model/bundles | `GET /config` |
+| Models/profiles | `GET /config` |
 
 ## Streaming
 

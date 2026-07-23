@@ -79,7 +79,7 @@ async def receive_webhook(provider: str, request: Request) -> Response:
         )
         run = await runs.create_run(
             db,
-            bundle="pr_review",
+            profile="pr_review",
             provider=provider,
             repo_full_name=parsed.repo.full_name,
             pr_number=parsed.repo.pr_number,

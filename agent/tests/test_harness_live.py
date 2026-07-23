@@ -45,7 +45,7 @@ async def test_template_ships_pi_and_runtime():
         assert "function" in pi.stdout
 
         imports = await sandbox.commands.run(
-            "cd /app && python -c 'import runtime, bundles; print(\"import-ok\")'"
+            "cd /app && python -c 'import runtime, profiles; print(\"import-ok\")'"
         )
         assert "import-ok" in imports.stdout
     finally:

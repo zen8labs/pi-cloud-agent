@@ -1,7 +1,7 @@
-"""Internal callbacks the in-sandbox bridge dials back to.
+"""Internal callbacks the in-sandbox Pi runtime dials back to.
 
 Every endpoint is authenticated by the per-run bearer token (`Run.auth_token`).
-Scope is deliberately tiny — telemetry only: the bridge relays harness events
+Scope is deliberately tiny — telemetry only: Pi relays agent events
 and the terminal status here. Secrets (LLM keys + a scoped SCM token) are baked
 into the sandbox env at creation time (see core/orchestrator/runner.py), so the
 sandbox no longer brokers credentials back through the controller.
@@ -47,7 +47,7 @@ async def post_event(run_id: str, ev: EventIn, run: Run = Depends(_authed_run)):
 
 
 class StatusIn(BaseModel):
-    status: str  # free-form bridge status; "done" closes the stream
+    status: str  # free-form runtime status; "done" closes the stream
     detail: str | None = None
 
 

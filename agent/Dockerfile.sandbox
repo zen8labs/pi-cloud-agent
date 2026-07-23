@@ -43,9 +43,9 @@ COPY package.json package-lock.json /app/
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 
 COPY runtime /app/runtime
-COPY bundles /app/bundles
+COPY profiles /app/profiles
 COPY core /app/core
-RUN chmod -R a+rX /app/runtime /app/bundles /app/core
+RUN chmod -R a+rX /app/runtime /app/profiles /app/core
 
 RUN mkdir -p /workspace && chmod 1777 /workspace
 
