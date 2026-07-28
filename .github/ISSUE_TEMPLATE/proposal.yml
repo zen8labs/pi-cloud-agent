@@ -1,0 +1,59 @@
+name: Proposal
+description: Suggest a change, a new profile, or a new provider
+labels: ["proposal"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This project stays small deliberately. Please read
+        [VISION.md](https://github.com/zen8labs/pi-cloud-agent/blob/main/VISION.md)
+        first — it lists what the core intentionally does not do and why.
+
+        A proposal that fits an existing extension surface (a profile, a sandbox
+        backend, a forge) usually needs no discussion at all. Just send the PR.
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: The outcome you want
+      description: Start from what a user should be able to do, not from the implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: today
+    attributes:
+      label: Why this isn't possible today
+      description: What did you try, and where did it stop?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which surface does this touch
+      options:
+        - a new profile (a vertical)
+        - a new sandbox provider
+        - a new VCS provider / forge
+        - a new integration (Slack, Linear, …)
+        - the protocol contracts — needs discussion first
+        - the controller, reconciler, or trust boundary — needs discussion first
+        - documentation
+        - not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: shape
+    attributes:
+      label: Smallest shape you can imagine
+      description: |
+        What is the least this could be and still solve the problem? If it needs
+        a new contract, a new dependency, or a new service, say so explicitly.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Including doing nothing.

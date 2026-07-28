@@ -1,0 +1,40 @@
+version: 2
+
+# Grouped and weekly on purpose. A daily per-package PR stream is noise that
+# maintainers learn to ignore, which is worse than updating a week later.
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      dev-tooling:
+        patterns:
+          - "@biomejs/*"
+          - "turbo"
+          - "typescript"
+          - "vitest"
+          - "@vitest/*"
+          - "tsx"
+          - "@types/*"
+      patch-and-minor:
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: chore
+      include: scope
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: chore

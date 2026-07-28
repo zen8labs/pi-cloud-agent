@@ -1,5 +1,9 @@
 # pi-cloud-agent
 
+[![CI](https://github.com/zen8labs/pi-cloud-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/zen8labs/pi-cloud-agent/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D22.19-3c873a.svg)](package.json)
+
 A minimal, extensible core for coding agents that run in the cloud.
 
 Something triggers a run — a webhook, the dashboard, an API call. The controller
@@ -111,3 +115,25 @@ token, that token is compromised in principle — the controls are scope, TTL, a
 isolation, not obfuscation. The operator API has no authentication in this phase
 and is meant for localhost or a private network. Details and the intended next
 step in [docs/secrets.md](docs/secrets.md).
+
+To report a vulnerability, use [private disclosure](https://github.com/zen8labs/pi-cloud-agent/security/advisories/new),
+not a public issue — see [SECURITY.md](SECURITY.md).
+
+## Contributing
+
+Profiles, sandbox backends, and forges are the surfaces this project wants to
+grow, and none of them require touching the controller. Bug fixes, corrected
+docs, and deletions are equally welcome.
+
+```bash
+pnpm install && pnpm up && pnpm db:migrate
+pnpm verify      # what CI runs
+```
+
+[CONTRIBUTING.md](CONTRIBUTING.md) covers the setup, the rules CI enforces, and
+the short list of changes worth discussing before you write code. By
+participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## License
+
+[MIT](LICENSE) © zen8labs

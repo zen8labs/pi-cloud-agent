@@ -3,7 +3,25 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "A minimal, extensible core for coding agents that run in the cloud",
+  "description": "A minimal and self-contained cloud agent built from first principles",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zen8labs/pi-cloud-agent.git"
+  },
+  "homepage": "https://github.com/zen8labs/pi-cloud-agent#readme",
+  "bugs": {
+    "url": "https://github.com/zen8labs/pi-cloud-agent/issues"
+  },
+  "keywords": [
+    "coding-agent",
+    "cloud-agent",
+    "background-agent",
+    "ai-agent",
+    "sandbox",
+    "code-review",
+    "pi"
+  ],
   "engines": {
     "node": ">=22.19.0"
   },

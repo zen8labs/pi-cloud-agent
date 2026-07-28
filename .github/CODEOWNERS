@@ -1,0 +1,16 @@
+# Review is requested automatically from the owners listed here.
+#
+# Replace @zen8labs/cloud-agent-maintainers with a real GitHub team or username
+# before launch — GitHub silently ignores entries it cannot resolve.
+
+*                       @zen8labs/cloud-agent-maintainers
+
+# The contracts and the trust boundary are the parts that are expensive to
+# change later, so they always get a maintainer's eyes.
+/packages/protocol/     @zen8labs/cloud-agent-maintainers
+/packages/runtime/      @zen8labs/cloud-agent-maintainers
+/apps/controller/       @zen8labs/cloud-agent-maintainers
+/scripts/               @zen8labs/cloud-agent-maintainers
+/.github/               @zen8labs/cloud-agent-maintainers
+/VISION.md              @zen8labs/cloud-agent-maintainers
+/SECURITY.md            @zen8labs/cloud-agent-maintainers

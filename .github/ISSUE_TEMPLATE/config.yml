@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question or idea
+    url: https://github.com/zen8labs/pi-cloud-agent/discussions
+    about: Ask how something works, or float an idea before writing code.
+  - name: Report a security vulnerability
+    url: https://github.com/zen8labs/pi-cloud-agent/security/advisories/new
+    about: Private disclosure. Please never use a public issue for this.
