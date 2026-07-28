@@ -90,6 +90,10 @@ The split is by **substitutability and trust**, not by feature. `packages/runtim
 executes untrusted repository code and may depend only on `packages/protocol`;
 `pnpm boundaries` enforces that in CI.
 
+Each package has its own README covering what it owns, what it may depend on, its
+invariants, and a map of its files. Start there when you land in a directory
+rather than at the root.
+
 ## Extending it
 
 | To add | Read | Effort |

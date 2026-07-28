@@ -34,6 +34,7 @@
     "lint": "biome check .",
     "fix": "biome check --write .",
     "boundaries": "tsx scripts/check-boundaries.ts",
+    "docs:check": "tsx scripts/check-docs.ts",
     "test": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
     "test:live": "vitest run --project live",
@@ -42,7 +43,7 @@
     "sandbox:template": "pnpm --filter @pi-cloud-agent/runtime template:build",
     "up": "docker compose up -d --build",
     "down": "docker compose down",
-    "verify": "pnpm lint && pnpm boundaries && pnpm typecheck && pnpm test && pnpm test:integration"
+    "verify": "pnpm lint && pnpm boundaries && pnpm docs:check && pnpm typecheck && pnpm test && pnpm test:integration"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.5",

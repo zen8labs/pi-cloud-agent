@@ -11,6 +11,25 @@ document that matches what you are about to do, rather than everything.
 | How do the pieces fit, and where does each concept live? | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | How do I run it? | [README.md](README.md) |
 
+## If you arrived at a directory, start with its README
+
+Every package and app has one, and it is the local entry point: what that package
+owns, what it is allowed to depend on, its own invariants, and a map of its files.
+Read it before editing anything inside — the invariants are the part you cannot
+infer from the code in front of you.
+
+| Package | Read |
+|---|---|
+| the contracts | [packages/protocol/README.md](packages/protocol/README.md) |
+| verticals | [packages/profiles/README.md](packages/profiles/README.md) |
+| compute backends | [packages/sandbox/README.md](packages/sandbox/README.md) |
+| forges | [packages/vcs/README.md](packages/vcs/README.md) |
+| the untrusted sandbox side | [packages/runtime/README.md](packages/runtime/README.md) |
+| the trusted service | [apps/controller/README.md](apps/controller/README.md) |
+| the dashboard | [apps/web/README.md](apps/web/README.md) |
+
+`pnpm docs:check` fails if a package has no README, so this list stays complete.
+
 ## Then read what your task needs
 
 | If you are… | Read |
@@ -58,6 +77,7 @@ pnpm lint                # biome check
 pnpm fix                 # biome check --write
 pnpm typecheck
 pnpm boundaries          # enforce the trust boundary
+pnpm docs:check          # every package has a README; every relative link resolves
 pnpm test                # unit: no I/O, runs anywhere
 pnpm test:integration    # needs Postgres (`pnpm up`)
 pnpm test:live           # needs real E2B + model credentials; never in CI
@@ -89,6 +109,9 @@ failure makes sense when you hit it.
   diff.
 - **`console` is not the logger.** Use `createLogger`; the runtime is exempt
   because it has no controller to log through.
+- **A new package needs a README, and links must resolve.** `pnpm docs:check`
+  fails otherwise, so a package cannot ship undocumented and a moved file cannot
+  silently orphan the documents that pointed at it.
 
 ## Consult the maintainer first
 

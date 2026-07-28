@@ -68,9 +68,13 @@ failure makes sense when you hit it.
   diff: `pnpm --filter @pi-cloud-agent/controller db:generate`.
 - **`console` is not the logger.** Use `createLogger`. The runtime is exempt
   because it has no controller to log through.
+- **A new package needs a README, and relative links must resolve.**
+  `pnpm docs:check` fails otherwise.
 
 [AGENTS.md](AGENTS.md) is the index coding agents read, and it's a good map for
-humans too.
+humans too. Each package also has its own README — what it owns, its invariants,
+and a map of its files. That's the right place to start when you arrive at a
+directory instead of at the root.
 
 ## Tests
 

@@ -31,6 +31,8 @@ jobs:
         run: pnpm lint
       - name: Trust boundaries
         run: pnpm boundaries
+      - name: Docs
+        run: pnpm docs:check
       - name: Types
         run: pnpm typecheck
       - name: Unit tests
