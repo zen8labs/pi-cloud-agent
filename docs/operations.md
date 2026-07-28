@@ -1,0 +1,163 @@
+# Operations
+
+Running it, watching it, and working out what went wrong.
+
+## Local setup
+
+```bash
+pnpm install
+cp .env.example .env
+pnpm up                   # Postgres on 5532
+pnpm db:migrate
+pnpm sandbox:template     # build the sandbox image and push the E2B template
+pnpm controller           # :8080
+pnpm web                  # :3000
+```
+
+`.env` at the repository root configures the controller. It is gitignored and
+holds live credentials — **never print its values.**
+
+### The one setting people get wrong
+
+`CONTROL_PLANE_URL` must be reachable **from inside the sandbox**, because the
+sandbox is outbound-only and reports back over it. With a hosted provider like
+E2B, `http://localhost:8080` is unreachable and every run goes silent until the
+reconciler times it out.
+
+Use a tunnel:
+
+```bash
+cloudflared tunnel --url http://localhost:8080
+# then set CONTROL_PLANE_URL to the public https:// URL it prints
+```
+
+A run that provisions, produces no events, and fails ten minutes later with
+"stopped reporting" is almost always this.
+
+## When to rebuild the sandbox template
+
+Rebuild after changing `packages/runtime/**`, `Dockerfile.sandbox`, or the pinned
+agent harness version:
+
+```bash
+pnpm sandbox:template
+```
+
+Controller-only changes need a restart, not a rebuild. The build bundles the
+runtime to a single file and writes `dist/package.json` pinning the harness to the
+version the bundle was typechecked against, so the image cannot drift from the
+workspace.
+
+## Watching a run
+
+```bash
+RUN_ID=<run-id>
+
+# live, resumable — every frame carries its sequence number
+curl -N localhost:8080/runs/$RUN_ID/stream
+
+# history
+curl -s localhost:8080/runs/$RUN_ID/events | jq '.events[]'
+
+# resume from a cursor
+curl -s "localhost:8080/runs/$RUN_ID/events?afterSeq=42" | jq '.events[]'
+```
+
+## Reading the state directly
+
+```bash
+psql() { docker compose exec -T db psql -U pi_cloud_agent -d pi_cloud_agent "$@"; }
+
+# recent runs
+psql -c "select id, status, profile, repo_full_name, attempt, created_at
+         from runs order by created_at desc limit 10;"
+
+# one run's event log
+psql -c "select seq, type, data->>'event', created_at
+         from run_events where run_id='$RUN_ID' order by seq;"
+
+# what the reconciler is looking at: in-flight work
+psql -c "select id, status, sandbox_id, last_event_at, deadline_at, claim_expires_at
+         from runs where status in ('queued','provisioning','running');"
+
+# machines that should have been reclaimed
+psql -c "select id, status, sandbox_provider, sandbox_id
+         from runs where sandbox_id is not null and sandbox_stopped_at is null;"
+```
+
+## What a healthy run looks like
+
+```text
+status: queued → provisioning → running → succeeded
+events: git.cloned → git.checkout_ready → setup.skipped
+        → agent.session_start → token… → tool_call… → agent.turn_end
+        → agent.session_complete → status{done}
+```
+
+The terminal evidence is a `status` event followed by the run row reaching
+`succeeded` or `failed`. **Token and tool-call events are telemetry and never
+control completion** — a run that streamed a thousand tokens and never reported a
+status is a timeout, not a success.
+
+## Diagnosing by symptom
+
+| Symptom | Cause | Where to look |
+|---|---|---|
+| stuck in `queued` | reconciler not running, or `SANDBOX_PROVIDER` misconfigured | controller logs at startup |
+| `failed` immediately, "could not create a sandbox" | bad `E2B_API_KEY`, or the template does not exist | `pnpm sandbox:template` |
+| `running`, no events, fails with "stopped reporting" | `CONTROL_PLANE_URL` unreachable from the sandbox | the tunnel |
+| events stop mid-run, then "wall-clock budget" | the agent genuinely ran long | `RUN_WALL_CLOCK_SECONDS` |
+| `git.clone_branch_failed` then a successful clone | the named branch is gone; fell back to the default | benign |
+| webhook returns 401 | signature mismatch | the forge's configured secret vs `*_WEBHOOK_SECRET` |
+| webhook returns 204 | understood and deliberately ignored | the profile's `accepts`, and `repo_config` |
+| `attempt` climbing | retryable provisioning failures | the provider's error in the logs |
+
+A 204 from a webhook is the one that looks like a bug and is not. Check whether a
+repository has turned the trigger off:
+
+```bash
+psql -c "select * from repo_config;"
+```
+
+## Cancelling and cleanup
+
+```bash
+curl -X POST localhost:8080/runs/$RUN_ID/cancel
+```
+
+Cancelling only writes state. The reconciler reclaims the machine on its next
+tick, using the same path as a crash or a timeout — there is no separate teardown
+code to go wrong.
+
+## Restarts and deploys
+
+Restarting the controller is safe at any moment. In-flight runs keep working:
+their sandboxes are still running and still reporting, and whichever process comes
+up next finishes the bookkeeping. Nothing is force-failed.
+
+On `SIGINT`/`SIGTERM` the reconciler stops claiming and drains in-flight
+provisioning before exiting, so a sandbox whose id has not yet been stored is not
+leaked.
+
+→ [resumability.md](resumability.md) for why this works.
+
+## Live validation
+
+Costs money; needs real credentials in `.env`.
+
+```bash
+pnpm sandbox:template
+pnpm test:live
+```
+
+Or by hand:
+
+```bash
+curl -sS -X POST http://localhost:8080/runs \
+  -H 'Content-Type: application/json' \
+  -d '{"repo":"owner/repo","prompt":"Report the latest commit.","profile":"general"}'
+```
+
+Run these after changing the sandbox image, the runtime, or the model
+configuration — they validate the one thing offline tests cannot: that the image,
+the harness, the gateway, and the callback path work together.

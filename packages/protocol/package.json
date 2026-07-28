@@ -1,0 +1,22 @@
+{
+  "name": "@pi-cloud-agent/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The contracts: types, schemas, and the interfaces every provider implements",
+  "main": "./index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@pi-cloud-agent/tsconfig": "workspace:*",
+    "@types/node": "24.13.3",
+    "typescript": "5.9.3"
+  }
+}

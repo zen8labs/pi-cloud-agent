@@ -1,130 +1,127 @@
 # AGENTS.md
 
-Guidance for coding agents working in this repository.
+Navigation for coding agents. This file is an index, not a manual — read the
+document that matches what you are about to do, rather than everything.
+
+## Read this first, always
+
+| Question | Document |
+|---|---|
+| What is this project for, and what will it refuse to become? | [VISION.md](VISION.md) |
+| How do the pieces fit, and where does each concept live? | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| How do I run it? | [README.md](README.md) |
+
+## Then read what your task needs
+
+| If you are… | Read |
+|---|---|
+| adding or changing a profile (a vertical) | [docs/adding-a-profile.md](docs/adding-a-profile.md) |
+| adding a sandbox backend (Docker, Modal, Daytona…) | [docs/adding-a-sandbox-provider.md](docs/adding-a-sandbox-provider.md) |
+| adding a forge (GitHub Enterprise, Gitea, Forgejo…) | [docs/adding-a-vcs-provider.md](docs/adding-a-vcs-provider.md) |
+| touching run state, the queue, or the reconciler | [docs/resumability.md](docs/resumability.md) |
+| touching credentials, tokens, or anything logged | [docs/secrets.md](docs/secrets.md) |
+| writing or changing tests | [docs/testing.md](docs/testing.md) |
+| running, debugging, or validating a live run | [docs/operations.md](docs/operations.md) |
+
+Each document is self-contained for its task. If you find yourself reading three
+of them to make one change, the change probably crosses a boundary it should not
+— see *Consult first* below.
 
 ## Layout
 
 ```text
-agent/
-  core/       Trusted controller: API, queue, state, VCS, sandbox, orchestration
-  profiles/   Agent specializations: general_agent and pr_review
-  runtime/    Untrusted-sandbox supervisor and embedded Pi runner
-  tests/      Offline tests plus opt-in live E2B/MiniMax tests
-web/          Next.js operator dashboard
+apps/
+  controller/     trusted service: HTTP, reconciler, credentials, database
+  web/            operator dashboard (Next.js)
+packages/
+  protocol/       the contracts: types, schemas, and the three provider interfaces
+  profiles/       verticals: general, pr-review
+  sandbox/        SandboxProvider implementations (e2b)
+  vcs/            VCSProvider implementations (github, gitlab, bitbucket)
+  runtime/        runs INSIDE the sandbox — untrusted
+  tsconfig/       shared compiler options
 ```
 
-All Python commands run from `agent/`; web commands run from `web/`.
+## Commands
+
+Everything runs from the repository root.
 
 ```bash
-make install
-make dev
-make up
-make test
-make test-live
-make lint
-make compile
-make sandbox-template
+pnpm install
+pnpm up                  # Postgres on 5532, plus the controller image
+pnpm db:migrate          # apply migrations (never automatic on boot)
+pnpm controller          # controller on :8080, with reload
+pnpm web                 # dashboard on :3000
 
-cd web && npm run build
-cd web && npm run lint
+pnpm verify              # what CI runs: lint, boundaries, typecheck, unit, integration
+pnpm lint                # biome check
+pnpm fix                 # biome check --write
+pnpm typecheck
+pnpm boundaries          # enforce the trust boundary
+pnpm test                # unit: no I/O, runs anywhere
+pnpm test:integration    # needs Postgres (`pnpm up`)
+pnpm test:live           # needs real E2B + model credentials; never in CI
+pnpm sandbox:template    # rebuild the sandbox image and E2B template
 ```
 
-For one test:
+One file:
 
 ```bash
-cd agent && pytest tests/test_api.py -q
-cd agent && pytest tests/test_harness_live.py -m live -q -s
+pnpm vitest run packages/vcs/webhooks.test.ts
+pnpm vitest run --project integration apps/controller/db/runs.integration.test.ts
 ```
 
-## Architecture
+## Rules that the tooling enforces
 
-The system has two trust zones:
+You do not need to remember these — they fail the build. They are listed so the
+failure makes sense when you hit it.
 
-1. The trusted controller (`agent/core/`) verifies triggers, persists and claims
-   runs, mints short-lived credentials, creates an E2B sandbox, and records
-   outbound events. It never executes repository code or publishes agent output.
-2. The untrusted sandbox (`agent/runtime/`) clones the repository, optionally
-   runs `.coreview/setup.sh`, and starts one embedded Pi session. Pi reads the
-   selected profile's instructions and actuates outcomes itself with ordinary
-   tools such as `git` and `gh`.
+- **`packages/runtime` may depend only on `packages/protocol`.** It executes
+  untrusted repository code. pnpm makes an undeclared import unresolvable, and
+  `pnpm boundaries` makes a *declared* one a CI failure. Widening this is a
+  decision, not a fix — see *Consult first*.
+- **Only `apps/controller/config.ts` reads `process.env`.** Everything else takes
+  typed values or is handed an environment to validate itself.
+- **No `any`, no non-null assertions, no `enum`.** Use unions and `as const`.
+- **Every `UPDATE` needs a `WHERE`.** Run transitions are compare-and-set; see
+  [docs/resumability.md](docs/resumability.md).
+- **A schema change needs a generated migration.** CI regenerates and fails on a
+  diff.
+- **`console` is not the logger.** Use `createLogger`; the runtime is exempt
+  because it has no controller to log through.
 
-Request lifecycle:
+## Consult the maintainer first
 
-```text
-trigger → Run row → worker claim → pre-subscribe event queue
-        → E2B sandbox → supervisor → embedded Pi session
-        → outbound events/status → controller → terminal Run status
-        → sandbox teardown
-```
+Ask before:
 
-The sandbox is outbound-only. `runtime/pi-runner.mjs` posts native Pi token and
-tool events to `core/api/routes/internal.py`. That route first appends to
-`run_events`, then publishes to the per-run in-process bus used for controller
-flow control. API and worker share a process by default; a split deployment must
-replace that bus with a cross-process transport.
+- adding a new contract to `packages/protocol`, or widening an existing one
+- moving the trust boundary, including adding a dependency to `packages/runtime`
+- adding controller-side knowledge of a specific profile or provider
+- adding a dependency, a provider, or a service (a queue, a cache, a broker)
+- introducing an agent server, a polling bridge, or controller-side parsing of
+  agent output — Pi stays an implementation detail of the sandbox image
+- anything that trades flexibility for a one-time convenience
 
-## Extension points
+For reversible, local, within-contract work, just proceed.
 
-Keep the orchestrator free of profile- and provider-specific behavior.
+## Design philosophy — think in primitives, not features
 
-| Contract | Location | Resolver |
-|---|---|---|
-| `VCSProvider` | `core/vcs/base.py` | `get_vcs_provider(name)` |
-| `SandboxProvider` | `core/sandbox/provider.py` | `get_sandbox_provider()` |
-| `Profile` | `core/profiles.py` | `get_profile(name)` |
+The primitive is the product; workflows outlast technologies. Pi, E2B, and
+MiniMax are implementation details. `TaskSpec`, `Profile`, `SandboxProvider`, and
+`VCSProvider` are the product.
 
-`TaskSpec` is the pivot. A profile converts a normalized trigger into the repo,
-task prompt, and limits that the controller passes to the sandbox.
-
-A profile under `profiles/<name>/` contains:
-
-- `profile.py` — implements the `Profile` protocol.
-- `task.py` — normalizes its trigger into `TaskSpec`.
-- optional `SKILL.md` — reusable instructions prepended to the concrete prompt.
-
-Pi is intentionally an implementation detail of the sandbox image, not a
-controller-side session abstraction. Do not add an agent server, polling bridge,
-or controller-side output parser.
-
-## Live debugging
-
-```bash
-RUN_ID=<run_id>
-
-curl -N localhost:8080/runs/$RUN_ID/stream
-curl -s localhost:8080/runs/$RUN_ID/events | jq '.events[]'
-
-docker compose exec db psql -U coreview -d coreview_agent -c \
-  "SELECT id, status, profile, created_at FROM runs ORDER BY created_at DESC LIMIT 10;"
-
-docker compose exec db psql -U coreview -d coreview_agent -c \
-  "SELECT seq, type, data->>'event', created_at FROM run_events WHERE run_id='$RUN_ID' ORDER BY seq;"
-```
-
-Expected terminal evidence is a `status` event followed by controller state
-`succeeded` or `failed`. Token and tool-call events are telemetry; they do not
-control completion.
-
-## End-to-end validation
-
-`agent/.env` contains the live E2B, VCS, and Netmind/Viettel MiniMax settings.
-Never print its values.
-
-```bash
-make sandbox-template
-cd agent && pytest tests/test_harness_live.py -m live -q -s
-
-curl -sS -X POST http://localhost:8080/runs \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "repo": "owner/repo",
-    "prompt": "Inspect the repository and report its latest commit.",
-    "profile": "general_agent",
-    "provider": "github",
-    "host": "github.com"
-  }'
-```
-
-Rebuild the E2B template whenever `Dockerfile.sandbox`, `runtime/`,
-`profiles/`, or the Pi package lock changes. Controller-only changes need a
-controller restart, not a template rebuild.
+- Start from the outcome, then find the smallest stable abstraction that enables
+  it. Do not add a feature where a sharper primitive would do.
+- Treat every new feature as a liability. The default answer to "should we add
+  this?" is "not yet, and probably not here."
+- Prefer composability over owning a workflow. Ask what others should be able to
+  build on this, not what flow we should own.
+- Draw abstraction lines deliberately. Where to be opinionated versus extensible
+  is a decision to surface, not an implementation detail.
+- Aim for boring. Complexity should be compressed into the abstraction (S3: put,
+  get, list). If a design feels clever or sprawling, the line is wrong.
+- Assume the model, sandbox, and forge will all change. Keep the workflow stable
+  so swapping one is a small local change.
+- **Deleting is design work.** This codebase is smaller than the problem it
+  solves, deliberately. If you find code with no caller, a table with no writer,
+  or a config field nothing reads, removing it is a contribution.

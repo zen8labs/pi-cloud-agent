@@ -1,175 +1,141 @@
 # Architecture
 
-This is the design record for the minimal cloud-agent core. Product principles
-live in [VISION.md](VISION.md); setup and operation live in [README.md](README.md).
+## Two trust zones
 
-## Design constraints
+Everything else follows from this line.
 
-1. Repository code executes only in an ephemeral sandbox.
-2. The controller coordinates infrastructure; profiles own agent behavior.
-3. The sandbox is outbound-only.
-4. The agent actuates its own outcomes through ordinary tools.
-5. Every meaningful action is observable and persisted.
-6. Prefer one explicit path over configurable abstractions without a second use.
-
-## Trust zones and components
-
-```mermaid
-flowchart LR
-    Trigger["Webhook / API / chat"] --> API["FastAPI controller"]
-    API --> DB[("Postgres")]
-    Worker["Embedded worker"] --> DB
-    Worker --> VCS["VCS provider"]
-    Worker --> E2B["E2B provider"]
-    E2B --> Sandbox["Ephemeral sandbox"]
-    Sandbox --> Supervisor["Supervisor"]
-    Supervisor --> Pi["Embedded Pi session"]
-    Pi --> Repo["Repository checkout"]
-    Pi --> VCSAPI["git / gh / provider API"]
-    Pi --> Internal["Authenticated outbound callbacks"]
-    Internal --> API
+```text
+┌─ TRUSTED ───────────────────────────────┐      ┌─ UNTRUSTED ──────────────────┐
+│ apps/controller                         │      │ packages/runtime             │
+│                                         │      │                              │
+│  • verifies webhook signatures          │      │  • clones the repository     │
+│  • owns Postgres                        │      │  • runs repository code      │
+│  • mints repo-scoped credentials        │      │  • runs one agent session    │
+│  • decides what runs and when           │      │  • posts events outward      │
+│  • never executes repository code       │      │  • holds no database, no     │
+│                                         │      │    forge client, no broker   │
+└─────────────────────────────────────────┘      └──────────────────────────────┘
+              ▲                                            │
+              └──────── outbound HTTP only ────────────────┘
 ```
 
-The trusted controller contains:
+The controller never dials into a sandbox. That single constraint is what keeps
+the sandbox provider contract at two methods, and what lets any backend —
+E2B today, Docker or Modal later — be interchangeable.
 
-- HTTP trigger and operator APIs;
-- Postgres run state and append-only events;
-- worker claim coordination;
-- VCS token minting;
-- sandbox provisioning and teardown.
+The boundary is enforced mechanically, not by convention: `packages/runtime`
+declares a dependency on `packages/protocol` and nothing else, pnpm's isolated
+`node_modules` makes an undeclared import unresolvable, and `pnpm boundaries`
+fails CI on a declared one.
 
-The untrusted sandbox contains:
+## The seven building blocks, and where they live
 
-- the repository checkout;
-- optional repository setup code;
-- the selected profile instructions;
-- one embedded Pi session;
-- short-lived model and SCM credentials for that run.
+The vocabulary for reasoning about a cloud agent, mapped onto the tree. Note that
+the packages are **not** split along these lines — they are split by what a
+contributor might substitute — so this table is how you find things.
+
+| Building block | Where it lives |
+|---|---|
+| **Trigger** — why a run exists | `apps/controller/http/webhooks.ts`, `http/runs.ts`, normalization in `packages/vcs` |
+| **Sandbox** — isolated compute | `packages/sandbox` |
+| **Harness** — the agent loop | `packages/runtime/agent.ts` (Pi, embedded as a library) |
+| **Secret broker** — credentials for one run | `apps/controller/secrets/broker.ts` |
+| **Actuation** — how work becomes an outcome | *no code.* The agent uses `git` and `gh` itself |
+| **Observability** — what happened | `run_events` + `/runs/:id/stream` + `apps/web` |
+| **Profiles** — the vertical | `packages/profiles` |
+
+Actuation having no implementation is the point, not an omission. A controller
+that posted the agent's findings would need to parse them, and then it could
+disagree with what the agent actually did.
 
 ## Run lifecycle
 
-```mermaid
-sequenceDiagram
-    participant T as Trigger
-    participant C as Controller
-    participant D as Postgres
-    participant S as E2B sandbox
-    participant P as Pi
-
-    T->>C: normalized event or POST /runs
-    C->>D: create queued Run
-    C->>D: claim with FOR UPDATE SKIP LOCKED
-    C->>C: resolve Profile → TaskSpec
-    C->>C: subscribe to run event bus
-    C->>S: create with task config + scoped secrets
-    S->>S: clone exact checkout; optional setup
-    S->>P: createAgentSession and prompt
-    loop native events
-        P->>C: token / tool_call / log
-        C->>D: append RunEvent
-        C->>C: publish to run event bus
-    end
-    P->>C: terminal status
-    C->>D: mark succeeded or failed
-    C->>S: stop sandbox
+```text
+trigger ──► runs row (queued)
+              │
+              │  reconciler tick: claim with `for update skip locked`
+              ▼
+         provisioning ──► profile.buildTask(trigger, repoConfig)
+              │           broker.mintForRun()
+              │           sandbox.create()
+              │           attachSandbox(id, deadline)   ← first durable write
+              ▼
+           running ──────────────────────────────────────┐
+              │                                          │ sandbox posts
+              │                                          │ events + status
+              ▼                                          │ (outbound only)
+      succeeded / failed / cancelled ◄───────────────────┘
+              │
+              │  reconciler tick: stop the machine, stamp sandbox_stopped_at
+              ▼
+            reclaimed
 ```
 
-The event subscription is created before sandbox provisioning. This ordering is
-load-bearing: a fast session cannot finish before the worker starts listening.
+Provisioning is a **short transaction**, not a long-lived task. Once
+`attachSandbox` commits, everything needed to finish or recover the run is on its
+row, and the process that started it can die without consequence. This is the
+central difference from the earlier design, where a coroutine held each run's
+lifecycle in memory and a restart force-failed live work.
 
-`run_events` is the durable reader source. The in-process bus is control flow
-only and is not replayable. API and worker therefore share one process by
-default. Splitting them requires a cross-process bus.
-
-## Core contracts
-
-### `TaskSpec`
-
-`TaskSpec` is the pivot between behavior and infrastructure:
-
-- `profile`
-- concrete `prompt`
-- `RepoRef`
-- normalized profile inputs
-- run limits
-
-### `Profile`
-
-`Profile.build_task(trigger) -> TaskSpec` is the behavior extension seam.
-Profiles may also carry a `SKILL.md` loaded by the sandbox supervisor.
-
-The built-ins:
-
-- `general_agent`
-- `pr_review`
-
-The registry uses explicit built-in module mappings. It does not swallow import
-errors or depend on registration side effects.
-
-### `SandboxProvider`
-
-Creates and stops isolated compute using a non-secret config plus a separately
-identified secret environment. E2B is the current implementation.
-
-### `VCSProvider`
-
-Verifies webhooks, normalizes provider payloads, looks up repositories and pull
-requests, and mints short-lived clone/API tokens.
-
-Pi is not a controller contract. It is the sandbox agent engine. A
-controller-side adapter would add session lifecycle concepts the controller
-cannot actually own and recreate the server glue this architecture removed.
-
-## Sandbox runtime
-
-`runtime/entrypoint.py` is intentionally tiny. It creates
-`SandboxSupervisor`, which composes:
-
-- `RuntimeConfig` — immutable environment inputs;
-- `Workspace` — credentials, clone, checkout, optional setup;
-- `ControlReporter` — best-effort outbound logs and terminal status;
-- `pi-runner.mjs` — provider registration, Pi session, native event relay.
-
-The supervisor reads `profiles/<profile>/SKILL.md` when present and prepends it
-to `TASK_PROMPT`. A missing skill is valid for free-form profiles.
-
-Pi completion is authoritative. A successful session posts `done`; an exception
-posts `error`. Tokens and tool calls are telemetry and never used to infer
-completion.
+→ [docs/resumability.md](docs/resumability.md) for the reconciler's exact queries.
 
 ## State
 
-`runs` is the queue and lifecycle record. Workers atomically claim queued rows
-with `FOR UPDATE SKIP LOCKED`. Startup reconciliation fails abandoned in-flight
-runs after controller restarts.
+Three tables. That is the entire persistent state of the system.
 
-`run_events` is append-only and sequence-numbered per run. REST and SSE readers
-use it for history, replay, and resumption.
+| Table | Role |
+|---|---|
+| `runs` | the queue, the lifecycle record, and the crash-recovery journal at once |
+| `run_events` | append-only log, `(run_id, seq)` — the only observability source |
+| `repo_config` | per-repo, per-profile JSON the controller stores but never reads |
 
-The historical `runs.bundle` column is renamed to `runs.profile` by an
-idempotent Postgres compatibility migration during initialization.
+`repo_config` is what keeps profile-specific settings out of the core. A profile
+publishes a Zod schema; the controller validates through the profile, stores the
+result opaquely, and the dashboard renders the schema. Adding a profile setting
+needs no migration and no API change.
 
-## Credentials and security
+## Observability
 
-The controller injects:
+One source of truth, two access patterns:
 
-- a per-run callback bearer token;
-- the selected model provider credential;
-- a short-lived SCM token and conventional CLI variable names.
+- `GET /runs/:id/events?afterSeq=N` — history
+- `GET /runs/:id/stream` — Server-Sent Events, live
 
-Tokens are never returned through controller read APIs or written to event data.
-Git stderr is redacted before forwarding.
+Every data frame carries `id: <seq>`. A browser echoes the last one back as
+`Last-Event-ID` on reconnect, so resuming is exact rather than approximate, and
+history and live tail are the same code path. Status frames are derived from the
+run row and carry no id, which makes them safe to re-send.
 
-Sandbox isolation and network policy are the primary security controls.
-Credentials still need narrow repository and permission scopes; isolation alone
-does not make a broad write token safe.
+Telemetry (tokens, tool calls, logs) is best-effort and never load-bearing. The
+terminal status report is delivered with retries and is the *only* thing that
+completes a run. A run that emits a thousand tokens and never reports a status is
+a timeout, not a success.
 
-## Deployment
+## The contracts
 
-The controller image contains `core/`, `profiles/`, and `runtime/`. The E2B
-image additionally contains Node 22, the pinned Pi package tree, GitHub CLI, and
-the one-shot supervisor.
+All three live in `packages/protocol`, so an implementation package depends on the
+contract and never on another implementation.
 
-Rebuild the E2B template after changes to runtime code, profiles, the sandbox
-Dockerfile, or Pi package locks. Other changes require only a controller
-restart.
+| Contract | Resolver | Implementations |
+|---|---|---|
+| `Profile` | `getProfile(name)` | `general`, `pr-review` |
+| `SandboxProvider` | `createSandboxProvider(name, env)` | `e2b` |
+| `VCSProvider` | `createVcsProvider(name, env)` | `github`, `gitlab`, `bitbucket` |
+
+`TaskSpec` is the pivot: a profile turns a normalized `Trigger` into the
+repository, the prompt, and an optional budget. Everything below that line is
+infrastructure; everything above it is a vertical.
+
+Each factory validates its own slice of the environment, which is why adding a
+provider requires no change to the controller's configuration schema.
+
+## Deployment shape
+
+The HTTP surface and the reconciler share a process because it is simpler, not
+because they must. They exchange nothing in memory — all coordination is through
+Postgres — so splitting them across machines is a deployment decision that needs
+no code change. That is the payoff for not having an in-process event bus.
+
+The sandbox image is built separately (`pnpm sandbox:template`) and pins the agent
+harness to the version its bundle was typechecked against. Controller-only changes
+need a restart, not a template rebuild.

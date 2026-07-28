@@ -1,0 +1,29 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# One version of every shared dependency, declared once. Packages reference
+# these with "catalog:" so a bump happens in exactly one place.
+catalog:
+  "@earendil-works/pi-coding-agent": 0.82.1
+  "@hono/node-server": 2.0.12
+  drizzle-kit: 0.31.10
+  drizzle-orm: 0.45.2
+  e2b: 2.36.0
+  hono: 4.12.32
+  postgres: 3.4.9
+  zod: 4.4.3
+
+# Refuse to install a version published in the last day. The blast radius of a
+# typosquat or a compromised release is usually contained within hours.
+minimumReleaseAge: 1440
+minimumReleaseAgeStrict: true
+
+# Install scripts run arbitrary code, so they are opt-in per package. esbuild
+# selects a platform binary; the rest are transitive dependencies of the agent
+# harness that work fine without theirs.
+allowBuilds:
+  esbuild: true
+  sharp: true
+  "@google/genai": false
+  protobufjs: false

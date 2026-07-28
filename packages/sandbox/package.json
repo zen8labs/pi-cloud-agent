@@ -1,0 +1,24 @@
+{
+  "name": "@pi-cloud-agent/sandbox",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SandboxProvider implementations: isolated, ephemeral compute",
+  "main": "./index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pi-cloud-agent/protocol": "workspace:*",
+    "e2b": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@pi-cloud-agent/tsconfig": "workspace:*",
+    "@types/node": "24.13.3",
+    "typescript": "5.9.3"
+  }
+}

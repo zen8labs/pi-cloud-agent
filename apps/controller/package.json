@@ -1,0 +1,33 @@
+{
+  "name": "@pi-cloud-agent/controller",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The trusted controller: triggers, run state, credentials, reconciliation",
+  "scripts": {
+    "dev": "tsx watch index.ts",
+    "start": "tsx index.ts",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx db/migrate.ts",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "@hono/node-server": "catalog:",
+    "@pi-cloud-agent/profiles": "workspace:*",
+    "@pi-cloud-agent/protocol": "workspace:*",
+    "@pi-cloud-agent/sandbox": "workspace:*",
+    "@pi-cloud-agent/vcs": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "hono": "catalog:",
+    "postgres": "catalog:",
+    "tsx": "4.23.1",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@pi-cloud-agent/tsconfig": "workspace:*",
+    "@types/node": "24.13.3",
+    "drizzle-kit": "catalog:",
+    "typescript": "5.9.3"
+  }
+}

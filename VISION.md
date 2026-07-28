@@ -119,33 +119,38 @@ The live stream is for *this* run; the trace store is for *every* run.
 
 ## Where we are today
 
-A working MVP that proves the pipeline end to end:
+A working core that proves the pipeline end to end, as a TypeScript monorepo:
 
 ```
-trigger (webhook) → controller (FastAPI + worker, Postgres queue)
-        → mint scoped SCM token → E2B sandbox → agent loop
-        → agent reviews the checkout and posts its own PR comments
+trigger (webhook / API) → controller (Hono + reconciler, Postgres)
+        → mint scoped SCM token → sandbox → embedded agent session
+        → the agent works the checkout and posts its own outcomes
         → live events streamed to the controller + web dashboard
 ```
 
-- **Clean seams already exist.** Infrastructure sits behind `VCSProvider` and
-  `SandboxProvider`; `Profile` turns triggers into `TaskSpec`. Pi is embedded
-  inside the sandbox rather than represented by controller-side session glue.
-- **Two profiles:** `pr_review` (GitHub / GitLab / Bitbucket) and a free-form
-  `general_agent`.
-- **Already trending this way:** we dropped the structured-output publish path
-  and the MCP tool — the agent now actuates its own outcomes. Good instinct; we
-  just hadn't named the principle.
+- **The seams are the product.** Infrastructure sits behind `SandboxProvider` and
+  `VCSProvider`; `Profile` turns a normalized `Trigger` into a `TaskSpec`. All
+  three contracts live in one dependency-free package, so an implementation never
+  depends on another implementation.
+- **Two profiles:** `pr-review` (GitHub / GitLab / Bitbucket) and a free-form
+  `general`.
+- **The trust boundary is mechanical, not documentary.** The package that runs
+  inside the sandbox may depend only on the contracts package, enforced by the
+  package manager and by CI.
+- **Resumability without a workflow engine.** Run state lives in Postgres and one
+  reconciliation loop repairs it, so a controller restart is indistinguishable
+  from a slow tick. No Temporal, no broker, no in-memory run lifecycle.
 
-The OpenCode server and its bridge workarounds have been removed. The sandbox
-now embeds Pi directly, and Pi's native session events feed the same durable
-event stream used by the dashboard.
+The principles in this document are now load-bearing rather than aspirational.
+The publish path, the findings table, the structured-output parser, the model
+registry, and the in-process event bus have all been deleted — the core is
+meaningfully smaller than the problem it solves.
 
 ## What's next
 
-**0. Restructure — bet on Pi, drop OpenCode. Complete.** Pi runs as a one-shot
-embedded session in each sandbox. There is no agent server, inbound sandbox
-connection, or controller-side harness session to coordinate.
+**0. Restructure — bet on Pi, and on primitives. Complete.** The agent harness
+runs as a one-shot embedded session in each sandbox. There is no agent server, no
+inbound sandbox connection, and no controller-side harness session to coordinate.
 
 **1. Core agent capabilities.** Make the agent smarter without bloating the
 kernel: first-class Skills, opt-in MCP, and grounding experiments (code-graph /

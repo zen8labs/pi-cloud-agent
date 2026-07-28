@@ -1,0 +1,26 @@
+{
+  "name": "@pi-cloud-agent/runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Runs inside the sandbox: checkout, one Pi session, outbound reporting",
+  "main": "./run.ts",
+  "exports": {
+    ".": "./run.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsx build.ts",
+    "template:build": "pnpm build && e2b template build -c 'sleep infinity' -d Dockerfile.sandbox --name pi-cloud-agent --cpu-count 4 --memory-mb 4096"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "catalog:",
+    "@pi-cloud-agent/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@pi-cloud-agent/tsconfig": "workspace:*",
+    "@types/node": "24.13.3",
+    "esbuild": "0.28.1",
+    "typescript": "5.9.3"
+  }
+}

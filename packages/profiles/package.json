@@ -1,0 +1,23 @@
+{
+  "name": "@pi-cloud-agent/profiles",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Profiles: the extension surface that turns the core into a vertical",
+  "main": "./index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pi-cloud-agent/protocol": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@pi-cloud-agent/tsconfig": "workspace:*",
+    "@types/node": "24.13.3",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,15 +1,21 @@
-__pycache__/
-*.pyc
-.venv/
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
-.env
-*.egg-info/
 node_modules/
+.turbo/
+.next/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+.env
+.env.local
+!.env.example
+
+.DS_Store
+*.log
+
+# Written by `e2b template build`; holds an account-specific template id.
+e2b.toml
 
 # AIHub auto-generated history
 .specstory/
-
-# Reference code to support architecture design
+# Reference code consulted during architecture design, not part of the project
 references/

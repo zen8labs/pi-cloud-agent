@@ -1,201 +1,113 @@
-# Minimal Cloud Agent
+# pi-cloud-agent
 
-A small, task-agnostic cloud-agent core for CoReview. A trusted controller
-creates ephemeral sandboxes; an embedded Pi session does the work; profiles
-specialize the agent without adding behavior to the controller.
+A minimal, extensible core for coding agents that run in the cloud.
 
-Read [VISION.md](VISION.md) for the product principles.
+Something triggers a run — a webhook, the dashboard, an API call. The controller
+verifies it, mints a short-lived credential scoped to one repository, and starts
+an isolated sandbox. Inside, an agent clones the repository and does the work,
+posting its own results back to the forge with ordinary tools like `git` and
+`gh`. The controller records what happened and reclaims the machine.
 
-## Architecture
+That is the whole product. Everything specific to a task — reviewing a pull
+request, answering a question about a codebase — is a **profile**, and profiles
+are the extension surface.
 
-```text
-webhook / API / chat
-        │
-        ▼
-FastAPI controller + embedded worker ─── Postgres runs and event log
-        │  mint scoped credentials
-        │  create and later destroy
-        ▼
-E2B microVM
-  └─ supervisor
-      ├─ clone checkout
-      ├─ optional .coreview/setup.sh
-      └─ embedded Pi session + selected profile
-             │
-             ├─ read/edit/bash/git/gh
-             └─ outbound token, tool, log, and terminal events
-```
+## Why it is this small
 
-There are two trust zones:
+The interesting decisions here are subtractions:
 
-- The controller is trusted. It verifies triggers, coordinates state, mints
-  short-lived credentials, and provisions infrastructure. It never executes
-  repository code or interprets/publishes agent output.
-- The E2B sandbox is untrusted and ephemeral. It runs repository code and owns
-  the agent loop. It only calls outward; the controller never dials into it.
+- **No workflow engine.** Run state lives in Postgres and a single reconciliation
+  loop repairs it. A controller restart is indistinguishable from a slow tick, so
+  there is no Temporal, no trigger.dev, and no in-memory run lifecycle to lose.
+  → [docs/resumability.md](docs/resumability.md)
+- **No event bus and no Redis.** Postgres already holds every event durably;
+  `LISTEN/NOTIFY` is a wake-up hint, and polling is the correctness baseline.
+- **No publishing step.** The agent posts its own review. There is no
+  controller-side reporting tool, no output parser, and no findings table — which
+  means there is no way for the controller to disagree with what the agent
+  actually did.
+- **Two methods of sandbox contract.** `create` and `stop`. The sandbox is
+  outbound-only, so no provider needs to expose tunnels or reachability.
+  → [docs/adding-a-sandbox-provider.md](docs/adding-a-sandbox-provider.md)
+- **One model.** One configured model means one credential, so there is no
+  provider matrix to leak the wrong key into a sandbox.
 
-Pi is embedded through `createAgentSession()`. There is no agent server, SSE
-completion inference, polling bridge, or controller-side harness session.
+## Quickstart
 
-## Repository
-
-```text
-agent/
-  core/
-    api/            Public and sandbox-callback HTTP routes
-    orchestrator/   Generic run lifecycle, event bus, credential shaping
-    profiles.py     Profile contract and registry
-    sandbox/        SandboxProvider contract and E2B implementation
-    state/          SQLAlchemy models and repositories
-    vcs/            GitHub, GitLab, and Bitbucket providers
-  profiles/
-    general_agent/  Free-form repository task
-    pr_review/      PR task plus SKILL.md instructions
-  runtime/
-    entrypoint.py   Thin sandbox process entrypoint
-    supervisor.py   One-run lifecycle
-    workspace.py    Git checkout and optional setup
-    control.py      Outbound controller reporting
-    pi-runner.mjs   Embedded Pi session and native event relay
-  tests/
-web/                Next.js operator dashboard
-```
-
-## Core contracts
-
-- `VCSProvider` verifies and normalizes provider events and mints clone tokens.
-- `SandboxProvider` creates and stops isolated compute.
-- `Profile` converts a trigger into a `TaskSpec`.
-- `TaskSpec` carries the repo, concrete prompt, inputs, and run limits.
-
-The orchestrator knows infrastructure, not the meaning of a task. To add an
-agent vertical, add a profile; do not branch the run lifecycle.
-
-## Profiles
-
-A profile lives at `agent/profiles/<name>/`:
-
-```text
-profile.py   implements Profile
-task.py      trigger → TaskSpec
-SKILL.md     optional reusable instructions loaded inside the sandbox
-```
-
-The built-ins are:
-
-- `general_agent` — execute a free-form request against a repository.
-- `pr_review` — review one PR and post high-signal feedback directly with `gh`.
-
-Profiles start with Pi's built-in tools and normal CLIs. MCP, subagents, plans,
-and custom tools are opt-in additions only when a profile proves it needs them.
-
-## Local setup
-
-Requirements: Python 3.12+, Node 22+, Docker, and an E2B account for live runs.
+Requires Node 22.19+, pnpm, and Docker.
 
 ```bash
-cp agent/.env.example agent/.env
-make install
-make up
-make web-dev
+pnpm install
+cp .env.example .env      # then fill in E2B and model credentials
+pnpm up                   # Postgres on 5532
+pnpm db:migrate
+pnpm sandbox:template     # build the sandbox image and E2B template
+pnpm controller           # :8080
+pnpm web                  # :3000
 ```
 
-The controller listens on `:8080`; the dashboard listens on `:3000`.
-
-Important settings:
-
-- `DATABASE_URL`
-- `CONTROL_PLANE_URL` — externally reachable by E2B for full live runs
-- `E2B_API_KEY`, `E2B_TEMPLATE`
-- `AGENT_MODEL`
-- `AIGATEWAY_BASE_URL`, `AIGATEWAY_API_KEY` for Netmind/Viettel MiniMax
-- GitHub App, GitLab, or Bitbucket credentials
-- `WEB_REPOS`, `WEB_CORS_ORIGINS`
-
-Never bake `agent/.env` into either image.
-
-## Sandbox template
-
-The sandbox image pins Pi in `agent/package.json` and installs from
-`agent/package-lock.json`.
-
-```bash
-make sandbox-template
-```
-
-Rebuild after changes to:
-
-- `agent/Dockerfile.sandbox`
-- `agent/runtime/`
-- `agent/profiles/`
-- `agent/package.json` or `agent/package-lock.json`
-
-Controller-only changes need a restart, not a new template.
-
-## Start a run
+Start a run:
 
 ```bash
 curl -sS -X POST http://localhost:8080/runs \
   -H 'Content-Type: application/json' \
   -d '{
     "repo": "owner/repo",
-    "prompt": "Inspect the repository and summarize its architecture.",
-    "profile": "general_agent",
-    "provider": "github",
-    "host": "github.com"
+    "prompt": "Inspect the repository and report its latest commit.",
+    "profile": "general"
   }'
 ```
 
-For PR review, use `"profile": "pr_review"` and provide `pr_number`.
-
-## Observe a run
+Then watch it, resumably:
 
 ```bash
-RUN_ID=<run-id>
-
-curl -s localhost:8080/runs/$RUN_ID | jq
-curl -s localhost:8080/runs/$RUN_ID/events | jq '.events[]'
-curl -N localhost:8080/runs/$RUN_ID/stream
+curl -N http://localhost:8080/runs/<run-id>/stream
 ```
 
-The internal callback routes authenticate with a per-run bearer token. Each
-event is appended to Postgres before it is published to the in-process control
-bus. The worker subscribes before sandbox creation, preventing a fast run from
-finishing before the controller is listening.
+`CONTROL_PLANE_URL` must be reachable **from inside the sandbox**. With a hosted
+sandbox provider that means a public tunnel, not `localhost`. See
+[docs/operations.md](docs/operations.md).
 
-API and worker run in one process by default. A deployment that separates them
-must replace the in-memory bus with a cross-process transport such as Redis.
+## Layout
 
-## Validate
-
-```bash
-make test       # offline unit and API integration suite
-make lint
-make compile
-make test-live  # real E2B + configured model; reads agent/.env
-
-cd web
-npm run build
-npm run lint
+```text
+apps/
+  controller/     trusted service: HTTP, reconciler, credentials, database
+  web/            operator dashboard
+packages/
+  protocol/       the contracts: types, schemas, provider interfaces
+  profiles/       verticals: general, pr-review
+  sandbox/        SandboxProvider implementations
+  vcs/            VCSProvider implementations
+  runtime/        runs inside the sandbox — untrusted
 ```
 
-The live Pi tests create real E2B sandboxes and call the configured model. For a
-production-shaped proof, also start the controller with an externally reachable
-`CONTROL_PLANE_URL`, submit a run, and verify:
+The split is by **substitutability and trust**, not by feature. `packages/runtime`
+executes untrusted repository code and may depend only on `packages/protocol`;
+`pnpm boundaries` enforces that in CI.
 
-1. the run reaches `succeeded`;
-2. stored events include tokens and completed tool calls;
-3. the sandbox is destroyed at the end.
+## Extending it
 
-## Security model
+| To add | Read | Effort |
+|---|---|---|
+| a vertical | [docs/adding-a-profile.md](docs/adding-a-profile.md) | one directory, one registry line |
+| a sandbox backend | [docs/adding-a-sandbox-provider.md](docs/adding-a-sandbox-provider.md) | two methods |
+| a forge | [docs/adding-a-vcs-provider.md](docs/adding-a-vcs-provider.md) | one file |
 
-- Repository code runs only in the ephemeral sandbox.
-- The controller injects only credentials needed for that run.
-- GitHub App installation tokens are repository-scoped and short-lived.
-- The agent acts directly through `git` and provider CLIs; there is no hidden
-  controller publish step.
-- Egress can be restricted with `SANDBOX_EGRESS_ALLOWLIST`.
+None of these require touching the controller.
 
-The remaining hardening priority is permission-level downscoping for external or
-forked repositories. Isolation does not make an overpowered write credential
-safe.
+## Documentation
+
+- [VISION.md](VISION.md) — what this is for, and what it will refuse to become
+- [ARCHITECTURE.md](ARCHITECTURE.md) — the two trust zones and the run lifecycle
+- [AGENTS.md](AGENTS.md) — index for coding agents, plus the enforced rules
+- [docs/](docs/) — resumability, secrets, testing, operations, extension guides
+
+## Security posture
+
+Honest about what it is: the sandbox receives a repo-scoped, short-lived forge
+token and one model key in its environment. Once repository code runs alongside a
+token, that token is compromised in principle — the controls are scope, TTL, and
+isolation, not obfuscation. The operator API has no authentication in this phase
+and is meant for localhost or a private network. Details and the intended next
+step in [docs/secrets.md](docs/secrets.md).

@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Every job needs the same Node and pnpm. Pinned rather than floating so a
+  # toolchain bump is a visible commit.
+  NODE_VERSION: "22.19.0"
+
+jobs:
+  # Everything that needs nothing but the source: formatting, lint rules, the
+  # trust-boundary check, types, and the tests that do no I/O.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Lint and format
+        run: pnpm lint
+      - name: Trust boundaries
+        run: pnpm boundaries
+      - name: Types
+        run: pnpm typecheck
+      - name: Unit tests
+        run: pnpm test
+
+  # The state machine, against a real Postgres. These are the tests that assert
+  # the resumability properties, so they are not optional.
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pi_cloud_agent
+          POSTGRES_PASSWORD: pi_cloud_agent
+          POSTGRES_DB: pi_cloud_agent
+        ports:
+          - 5532:5432
+        options: >-
+          --health-cmd "pg_isready -U pi_cloud_agent -d pi_cloud_agent"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Integration tests
+        run: pnpm test:integration
+        env:
+          TEST_DATABASE_URL: postgres://pi_cloud_agent:pi_cloud_agent@localhost:5532/pi_cloud_agent
+
+  # Proves the schema in db/schema.ts matches the committed migrations. Without
+  # this, a schema edit with no generated migration passes every other check and
+  # then fails on deploy.
+  migrations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Migrations are up to date
+        run: pnpm --filter @pi-cloud-agent/controller db:generate
+      - name: No uncommitted migration
+        run: |
+          if [ -n "$(git status --porcelain apps/controller/db/migrations)" ]; then
+            echo "db/schema.ts changed without a generated migration."
+            echo "Run: pnpm --filter @pi-cloud-agent/controller db:generate"
+            git --no-pager diff -- apps/controller/db/migrations
+            exit 1
+          fi
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Dashboard build
+        run: pnpm --filter @pi-cloud-agent/web build
+      - name: Sandbox runtime bundle
+        run: pnpm --filter @pi-cloud-agent/runtime build
