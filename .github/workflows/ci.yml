@@ -20,7 +20,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -62,7 +62,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -82,7 +82,7 @@ jobs:
           # Present so the e2b provider constructs at boot; provisioning then
           # fails authentication, which is the failure the test watches for.
           E2B_API_KEY: ci-dummy-no-sandbox
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-traces
@@ -95,7 +95,7 @@ jobs:
   migrations:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -113,7 +113,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
         with:
           node-version: ${{ env.NODE_VERSION }}
