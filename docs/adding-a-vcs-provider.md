@@ -22,7 +22,7 @@ export interface VCSProvider {
 packages/vcs/
   my-forge.ts     the implementation
   index.ts        add one line to FACTORIES
-  http.ts         shared helpers — use these
+  http.ts         shared helpers. Use these
 ```
 
 Use `http.ts` rather than rolling your own: `verifyHmacSignature` fails closed, `secureEquals` is constant-time, and `fetchJson` applies a timeout.
@@ -41,16 +41,15 @@ The webhook endpoint `POST /webhooks/my-forge` now exists.
 
 ## What each method must guarantee
 
-### `verifyAndParseWebhook` — the one that matters
+### `verifyAndParseWebhook`: the one that matters
 
 This is the only surface an unauthenticated stranger can reach. Three rules:
 
 **Verify before you parse.** An unauthenticated body must never reach JSON handling, let alone anything that acts on it.
 
-**Fail closed, always.** No configured secret, no signature header, a malformed body — all throw `WebhookVerificationError`, which the controller answers with
-401. "We could not check" and "this is authentic" must never take the same branch.
+**Fail closed, always.** No configured secret, no signature header, a malformed body: all throw `WebhookVerificationError`, which the controller answers with 401. "We could not check" and "this is authentic" must never take the same branch.
 
-**Return `null` for events you understand and do not care about.** That is not an error and must not look like one; the controller answers 204. A closed pull request, a star, a push to an unrelated branch — all `null`.
+**Return `null` for events you understand and do not care about.** That is not an error and must not look like one; the controller answers 204. A closed pull request, a star, a push to an unrelated branch: all `null`.
 
 Then normalize into a `Trigger`. The mapping to be consistent about:
 
@@ -60,25 +59,25 @@ Then normalize into a `Trigger`. The mapping to be consistent about:
 | new commits pushed to a pull request | `pr_updated` |
 | comment created on a pull request | `pr_comment`, with `command` set to the body |
 
-Only map to `pr_updated` when **code actually changed**. Most forges fire an update event for label and description edits too — GitLab's `update` action needs an `oldrev` to count. Getting this wrong means running the agent on every label change.
+Only map to `pr_updated` when **code actually changed**. Most forges fire an update event for label and description edits too. GitLab's `update` action needs an `oldrev` to count. Getting this wrong means running the agent on every label change.
 
 ### `mintRepoToken`
 
-Prefer something short-lived and scoped to the single repository. A GitHub App installation token is the reference. A long-lived personal access token is acceptable as a fallback, and is strictly worse — say so in a comment so nobody mistakes it for equivalent. See [secrets.md](secrets.md).
+Prefer something short-lived and scoped to the single repository. A GitHub App installation token is the reference. A long-lived personal access token is acceptable as a fallback, and is strictly worse. Say so in a comment so nobody mistakes it for equivalent. See [secrets.md](secrets.md).
 
 Cache tokens and refresh before expiry with slack, so a long clone cannot straddle the boundary. Collapse concurrent requests for the same repository into one round-trip.
 
 ### `resolvePullRequest`
 
-Some webhooks carry no commit SHAs — GitHub's `issue_comment` is the common case — and the sandbox must clone an exact revision. Return **coordinates, not content**: `baseSha`, `headSha`, `headBranch`. The agent reads the diff itself with `git` in the checkout it already has.
+Some webhooks carry no commit SHAs (GitHub's `issue_comment` is the common case) and the sandbox must clone an exact revision. Return **coordinates, not content**: `baseSha`, `headSha`, `headBranch`. The agent reads the diff itself with `git` in the checkout it already has.
 
 ### The selector methods
 
-`getDefaultBranch`, `listBranches`, and `listRepos` are best-effort. They feed dashboard selectors, so they must **never throw** — return `null` or an empty array. A forge outage should leave the dashboard usable with a typed-in `owner/name`, not blank.
+`getDefaultBranch`, `listBranches`, and `listRepos` are best-effort. They feed dashboard selectors, so they must **never throw**. Return `null` or an empty array. A forge outage should leave the dashboard usable with a typed-in `owner/name`, not blank.
 
 ## Configuration
 
-Validate your own slice of the environment inside your factory, the way `github.ts` does. Do not add fields to the controller's config schema — that is what keeps a new forge from touching `apps/controller` at all.
+Validate your own slice of the environment inside your factory, the way `github.ts` does. Do not add fields to the controller's config schema. That is what keeps a new forge from touching `apps/controller` at all.
 
 ## Test it
 

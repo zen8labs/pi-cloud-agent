@@ -24,7 +24,7 @@ Separated by what they need to run, so a fresh clone can always run something.
 
 `pnpm verify` runs unit and integration. Configuration is in `vitest.config.ts`.
 
-Integration tests share one database and truncate between tests, so they run in a single fork, sequentially. Migrations are applied once by `apps/controller/test-global-setup.ts` — doing it per file raced.
+Integration tests share one database and truncate between tests, so they run in a single fork, sequentially. Migrations are applied once by `apps/controller/test-global-setup.ts`. Doing it per file raced.
 
 ## What is covered, and why that
 
@@ -50,14 +50,14 @@ it("lets the first terminal decision win permanently", …)   // yes
 it("completeRun returns false when already terminal", …)     // no
 ```
 
-**Explain a non-obvious assertion in a comment.** Not what it does — why the case exists at all:
+**Explain a non-obvious assertion in a comment.** Not what it does, why the case exists at all:
 
 ```ts
 // This race is real: a sandbox posting `done` and the reconciler timing the
 // same run out can arrive together.
 ```
 
-**Use the shared helpers.** `apps/controller/test-support.ts` provides `setupTestDatabase`, `resetTables`, `testConfig`, `seedRun`, `manualTrigger`, and `silentLogger`. Do not hand-roll a config object — `testConfig` goes through the real `configFrom`, so a config change breaks the tests rather than drifting past them.
+**Use the shared helpers.** `apps/controller/test-support.ts` provides `setupTestDatabase`, `resetTables`, `testConfig`, `seedRun`, `manualTrigger`, and `silentLogger`. Do not hand-roll a config object. `testConfig` goes through the real `configFrom`, so a config change breaks the tests rather than drifting past them.
 
 **Inject providers, do not mock modules.** The reconciler takes a `createProvider` factory, so tests substitute a recording fake. There is no module mocking anywhere in this suite.
 

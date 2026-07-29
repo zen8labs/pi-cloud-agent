@@ -14,7 +14,7 @@ pnpm controller           # :8080
 pnpm web                  # :3000
 ```
 
-`.env` at the repository root configures the controller. It is gitignored and holds live credentials — **never print its values.**
+`.env` at the repository root configures the controller. It is gitignored and holds live credentials. **Never print its values.**
 
 ### The one setting people get wrong
 
@@ -44,7 +44,7 @@ Controller-only changes need a restart, not a rebuild. The build bundles the run
 ```bash
 RUN_ID=<run-id>
 
-# live, resumable — every frame carries its sequence number
+# live, resumable. Every frame carries its sequence number
 curl -N localhost:8080/runs/$RUN_ID/stream
 
 # history
@@ -85,7 +85,7 @@ events: git.cloned → git.checkout_ready → setup.skipped
         → agent.session_complete → status{done}
 ```
 
-The terminal evidence is a `status` event followed by the run row reaching `succeeded` or `failed`. **Token and tool-call events are telemetry and never control completion** — a run that streamed a thousand tokens and never reported a status is a timeout, not a success.
+The terminal evidence is a `status` event followed by the run row reaching `succeeded` or `failed`. **Token and tool-call events are telemetry and never control completion**. A run that streamed a thousand tokens and never reported a status is a timeout, not a success.
 
 ## Diagnosing by symptom
 
@@ -112,7 +112,7 @@ psql -c "select * from repo_config;"
 curl -X POST localhost:8080/runs/$RUN_ID/cancel
 ```
 
-Cancelling only writes state. The reconciler reclaims the machine on its next tick, using the same path as a crash or a timeout — there is no separate teardown code to go wrong.
+Cancelling only writes state. The reconciler reclaims the machine on its next tick, using the same path as a crash or a timeout. There is no separate teardown code to go wrong.
 
 ## Restarts and deploys
 
@@ -139,4 +139,4 @@ curl -sS -X POST http://localhost:8080/runs \
   -d '{"repo":"owner/repo","prompt":"Report the latest commit.","profile":"general"}'
 ```
 
-Run these after changing the sandbox image, the runtime, or the model configuration — they validate the one thing offline tests cannot: that the image, the harness, the gateway, and the callback path work together.
+Run these after changing the sandbox image, the runtime, or the model configuration. They validate the one thing offline tests cannot: that the image, the harness, the gateway, and the callback path work together.

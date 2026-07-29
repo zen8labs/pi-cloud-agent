@@ -4,7 +4,7 @@ Shared compiler options, so strictness is set once.
 
 | File | Extended by |
 |---|---|
-| `base.json` | everything — strict, `noUncheckedIndexedAccess`, `noEmit`, ESM-only |
+| `base.json` | everything: strict, `noUncheckedIndexedAccess`, `noEmit`, ESM-only |
 | `node.json` | the controller and every package that runs on Node |
 | `next.json` | `apps/web` only, adding DOM libs and the Next plugin |
 

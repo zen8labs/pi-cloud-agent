@@ -1,6 +1,6 @@
 # Adding a profile
 
-A profile is a vertical: it decides **whether a trigger should start a run**, **what the agent is asked to do**, and **what per-repository settings exist**. Those three decisions are the entire extension surface. Everything else — sandboxes, credentials, state, streaming — is infrastructure the profile inherits.
+A profile is a vertical: it decides **whether a trigger should start a run**, **what the agent is asked to do**, and **what per-repository settings exist**. Those three decisions are the entire extension surface. Everything else (sandboxes, credentials, state, streaming) is infrastructure the profile inherits.
 
 The controller must not learn anything about your vertical. If you find yourself wanting to add a condition to `apps/controller`, that condition belongs in `accepts` instead.
 
@@ -30,7 +30,7 @@ export const myProfile = defineProfile({
     enabled: z.boolean().default(true),
   }),
 
-  // Should this trigger start a run? This is your triggering policy — the
+  // Should this trigger start a run? This is your triggering policy. The
   // controller has no opinion and will not second-guess you.
   accepts(trigger, config) {
     return config.enabled && trigger.kind === "manual";
@@ -61,7 +61,7 @@ const REGISTRY: Record<string, Profile> = {
 };
 ```
 
-That is the whole integration. Your profile now appears in `GET /config`, in the dashboard's profile selector, and — if `accepts` returns true for repository events — in webhook intake. Its settings appear on the settings page, rendered from your schema, with no migration and no API change.
+That is the whole integration. Your profile now appears in `GET /config`, in the dashboard's profile selector, and, if `accepts` returns true for repository events, in webhook intake. Its settings appear on the settings page, rendered from your schema, with no migration and no API change.
 
 ## 3. Optionally add a SKILL.md
 
@@ -83,7 +83,7 @@ Write a skill as instructions to a capable colleague, not as a script. The `pr-r
 
 **Every config field needs a default.** Stored config is validated *through your schema* on read, so a schema that rejects `{}` breaks every unconfigured repository.
 
-**Changing a config schema is a migration you have to think about.** Existing rows were stored under the old schema. Adding an optional field with a default is safe; renaming or narrowing a field will throw on read — and the controller logs that and skips your profile rather than failing the whole webhook delivery.
+**Changing a config schema is a migration you have to think about.** Existing rows were stored under the old schema. Adding an optional field with a default is safe; renaming or narrowing a field will throw on read, and the controller logs that and skips your profile rather than failing the whole webhook delivery.
 
 **Do not reach for the network in `buildTask`.** It runs on the provisioning path. Enrichment that needs a forge call belongs in webhook intake, where `resolvePullRequest` already fills in missing commit coordinates.
 
@@ -91,13 +91,13 @@ Write a skill as instructions to a capable colleague, not as a script. The `pr-r
 
 ## Actuation
 
-Your profile does not post results. The agent does, from inside the sandbox, using `git` and `gh` with the token it was given. There is no reporting tool to call and no publishing step behind you — whatever the agent posts is the outcome.
+Your profile does not post results. The agent does, from inside the sandbox, using `git` and `gh` with the token it was given. There is no reporting tool to call and no publishing step behind you. Whatever the agent posts is the outcome.
 
 If you want structured output, ask for it in the skill and have the agent write it where the reader will look. Do not add a controller-side parser; see [../AGENTS.md](../AGENTS.md) on what to consult about first.
 
 ## Test it
 
-Add cases to `packages/profiles/profiles.test.ts`. The shared `describe("every profile")` block already covers the contract — registration, empty config, schema publication, task attribution — so you only need tests for your own triggering policy and prompt.
+Add cases to `packages/profiles/profiles.test.ts`. The shared `describe("every profile")` block already covers the contract (registration, empty config, schema publication, task attribution), so you only need tests for your own triggering policy and prompt.
 
 ```bash
 pnpm vitest run packages/profiles/profiles.test.ts

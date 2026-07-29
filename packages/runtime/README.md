@@ -12,7 +12,7 @@ It reaches exactly one thing: `CONTROL_PLANE_URL`, outbound only.
 
 | File | Role |
 |---|---|
-| `run.ts` | the entry point — four steps, exactly one terminal report |
+| `run.ts` | the entry point: four steps, exactly one terminal report |
 | `config.ts` | reads `SANDBOX_ENV` into a typed object; `secretValues()` for redaction |
 | `workspace.ts` | git credential helper, clone and checkout, the repo's setup hook |
 | `agent.ts` | one agent session, relaying its native events as telemetry |
@@ -22,7 +22,7 @@ It reaches exactly one thing: `CONTROL_PLANE_URL`, outbound only.
 
 ## Invariants
 
-- **Exactly one terminal status per process.** It is the only thing that completes a run. If it cannot be delivered, exit non-zero and let the controller's reconciler notice the silence — never exit 0 having said nothing.
+- **Exactly one terminal status per process.** It is the only thing that completes a run. If it cannot be delivered, exit non-zero and let the controller's reconciler notice the silence. Never exit 0 having said nothing.
 - **Telemetry is best-effort and must never fail a run.** Losing a token event costs a line in the feed. `reporter.ts` swallows those failures on purpose.
 - **Everything outbound passes through the redactor.** This is the only side that knows every secret in play, so it is the side that scrubs. Do not add a second send path. Credentials must be named `*_TOKEN`, `*_API_KEY`, `*_SECRET`, or `*_PASSWORD` so `secretValues()` catches them without being told.
 - **Never write a credential to disk.** The git credential helper prints from the environment on demand, precisely so no token lands in `.git/config` where the agent could later read or commit it.
@@ -36,7 +36,7 @@ pnpm --filter @pi-cloud-agent/runtime build     # bundle only
 pnpm sandbox:template                           # bundle + rebuild the image
 ```
 
-Changes here need a template rebuild before they take effect — a controller restart is not enough. Then validate against a real sandbox, because nothing offline covers the image, the harness, and the callback path together:
+Changes here need a template rebuild before they take effect. A controller restart is not enough. Then validate against a real sandbox, because nothing offline covers the image, the harness, and the callback path together:
 
 ```bash
 pnpm test:live

@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for being here. This project is small on purpose, and that shapes what a good contribution looks like. Read [VISION.md](VISION.md) once before you start — it explains what this is for and, more usefully, what it will refuse to become.
+Thanks for being here. This project is small on purpose, and that shapes what a good contribution looks like. Read [VISION.md](VISION.md) once before you start. It explains what this is for and, more usefully, what it will refuse to become.
 
 ## The short version
 
@@ -39,7 +39,7 @@ Some changes are cheap to make and expensive to undo. For these, please open an 
 
 For reversible, local, within-contract work, just send the PR.
 
-Please don't take a "not yet" personally. The default answer to "should we add this?" is "not yet, and probably not here" — that is the reason the codebase is still readable in an afternoon.
+Please don't take a "not yet" personally. The default answer to "should we add this?" is "not yet, and probably not here"; that is the reason the codebase is still readable in an afternoon.
 
 ## Rules the tooling enforces
 
@@ -48,7 +48,7 @@ You don't need to memorize these; they fail the build. They're listed so the fai
 - **`packages/runtime` may depend only on `packages/protocol`.** It executes untrusted repository code. `pnpm boundaries` fails CI on a declared dependency.
 - **Only `apps/controller/config.ts` reads `process.env`.** Everything else takes typed values.
 - **No `any`, no non-null assertions, no `enum`.** Use unions and `as const`.
-- **Every `UPDATE` needs a `WHERE`.** Run transitions are compare-and-set — see [docs/resumability.md](docs/resumability.md).
+- **Every `UPDATE` needs a `WHERE`.** Run transitions are compare-and-set. See [docs/resumability.md](docs/resumability.md).
 - **A schema change needs a generated migration.** CI regenerates and fails on a diff: `pnpm --filter @pi-cloud-agent/controller db:generate`.
 - **`console` is not the logger.** Use `createLogger`. The runtime is exempt because it has no controller to log through.
 - **A new package needs a README, and relative links must resolve.** `pnpm docs:check` fails otherwise.
@@ -59,7 +59,7 @@ You don't need to memorize these; they fail the build. They're listed so the fai
 - **Copy-paste has a budget.** `pnpm dupes` (jscpd) fails CI when duplicated lines cross the threshold in `.jscpd.json`.
 - **Commits are checked before they land.** The husky pre-commit hook runs Biome on staged files plus the file-size check.
 
-[AGENTS.md](AGENTS.md) is the index coding agents read, and it's a good map for humans too. Each package also has its own README — what it owns, its invariants, and a map of its files. That's the right place to start when you arrive at a directory instead of at the root.
+[AGENTS.md](AGENTS.md) is the index coding agents read, and it's a good map for humans too. Each package also has its own README: what it owns, its invariants, and a map of its files. That's the right place to start when you arrive at a directory instead of at the root.
 
 ## Tests
 
@@ -97,6 +97,6 @@ Do not open a public issue for a vulnerability. See [SECURITY.md](SECURITY.md) f
 
 ## Getting unstuck
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — the two trust zones and the run lifecycle
-- [docs/operations.md](docs/operations.md) — running, debugging, and validating a live run, including what a healthy run looks like
+- [ARCHITECTURE.md](ARCHITECTURE.md): the two trust zones and the run lifecycle
+- [docs/operations.md](docs/operations.md): running, debugging, and validating a live run, including what a healthy run looks like
 - Open a discussion or an issue. A question that reveals a confusing document is useful information; we'd rather fix the document than answer it twice.

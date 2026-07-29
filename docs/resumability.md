@@ -28,13 +28,13 @@ export async function markRunning(database: Database, runId: string): Promise<bo
 
 No read-then-write, no transaction held open across network I/O, no application lock. A transition that loses a race updates zero rows and says so, rather than overwriting a decision another worker already made.
 
-This matters most for completion. A sandbox posting `done` and the reconciler timing the same run out genuinely race, and whichever lands first must win permanently — so `completeRun` guards on *not already terminal*.
+This matters most for completion. A sandbox posting `done` and the reconciler timing the same run out genuinely race, and whichever lands first must win permanently, so `completeRun` guards on *not already terminal*.
 
 ### 2. No in-memory run state
 
 If the controller needs a fact to resume a run, that fact is a column. This is the rule that removes the event bus: nothing waits in memory for a run to finish, so there is nothing to wait *with*.
 
-Provisioning is therefore a short transaction — claim, build the task, mint credentials, create the sandbox, write its id, return — measured in seconds, not in the length of the run. `attachSandbox` is the first durable write after a machine exists, and it is deliberately the first thing that happens:
+Provisioning is therefore a short transaction (claim, build the task, mint credentials, create the sandbox, write its id, return) measured in seconds, not in the length of the run. `attachSandbox` is the first durable write after a machine exists, and it is deliberately the first thing that happens:
 
 - before it commits, a crash leaks a sandbox that nobody knows about
 - after it commits, the reconciler will always find and reclaim it
@@ -59,7 +59,7 @@ Events are written only by the sandbox callback route. Status only by the transi
 
 Ordering is deliberate: teardown runs *before* new work, so a busy queue can never starve the reclamation of machines that are still costing money.
 
-**Crash recovery is not a special case.** After a restart these same queries simply return more rows. There is no startup sweep, and nothing force-fails in-flight work — the earlier Python design did exactly that, because completion lived in a coroutine, and its own docstring admitted it.
+**Crash recovery is not a special case.** After a restart these same queries simply return more rows. There is no startup sweep, and nothing force-fails in-flight work. The earlier Python design did exactly that, because completion lived in a coroutine, and its own docstring admitted it.
 
 The single loop replaces three separate mechanisms: a blocking wait per run, an `asyncio` wall-clock timeout, and a startup reconciliation pass.
 
@@ -88,7 +88,7 @@ Concurrent writers serialize on the row lock. Two things fall out for free:
 
 `select ... for update skip locked` is the entire queue implementation. Concurrent workers step over each other's locked candidate rather than blocking or double-claiming. It is one SQL clause.
 
-Adding Redis or a broker would mean holding work in a second system when it is already durably in the first. The lease (`claim_expires_at`) closes the one gap: a worker that dies between claiming and creating a sandbox would otherwise strand the run, and the reconciler returns it to the queue — safely, because no sandbox exists yet.
+Adding Redis or a broker would mean holding work in a second system when it is already durably in the first. The lease (`claim_expires_at`) closes the one gap: a worker that dies between claiming and creating a sandbox would otherwise strand the run, and the reconciler returns it to the queue, safely, because no sandbox exists yet.
 
 `LISTEN/NOTIFY` makes claiming and streaming feel instant, but it is only a wake-up hint. Every listener also polls, so a dropped notification costs latency, not correctness. Unlike an in-memory bus it works across processes, which is what makes splitting the API from the reconciler a deployment choice.
 
@@ -102,4 +102,4 @@ Adding Redis or a broker would mean holding work in a second system when it is a
 
 `apps/controller/db/runs.integration.test.ts` covers the SQL properties: exclusive claiming, guarded transitions, gapless sequences under concurrency.
 
-`apps/controller/reconcile/reconciler.integration.test.ts` drives the loop one tick at a time and simulates crashes by starting a fresh reconciler over existing state — including the case that used to break: *a live run must survive a restart untouched*.
+`apps/controller/reconcile/reconciler.integration.test.ts` drives the loop one tick at a time and simulates crashes by starting a fresh reconciler over existing state, including the case that used to break: *a live run must survive a restart untouched*.

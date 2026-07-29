@@ -19,23 +19,23 @@ Everything else follows from this line.
               └──────── outbound HTTP only ────────────────┘
 ```
 
-The controller never dials into a sandbox. That single constraint is what keeps the sandbox provider contract at two methods, and what lets any backend — E2B today, Docker or Modal later — be interchangeable.
+The controller never dials into a sandbox. That single constraint is what keeps the sandbox provider contract at two methods, and what lets any backend (E2B today, Docker or Modal later) be interchangeable.
 
 The boundary is enforced mechanically, not by convention: `packages/runtime` declares a dependency on `packages/protocol` and nothing else, pnpm's isolated `node_modules` makes an undeclared import unresolvable, and `pnpm boundaries` fails CI on a declared one.
 
 ## The seven building blocks, and where they live
 
-The vocabulary for reasoning about a cloud agent, mapped onto the tree. Note that the packages are **not** split along these lines — they are split by what a contributor might substitute — so this table is how you find things.
+The vocabulary for reasoning about a cloud agent, mapped onto the tree. Note that the packages are **not** split along these lines (they are split by what a contributor might substitute), so this table is how you find things.
 
 | Building block | Where it lives |
 |---|---|
-| **Trigger** — why a run exists | `apps/controller/http/webhooks.ts`, `http/runs.ts`, normalization in `packages/vcs` |
-| **Sandbox** — isolated compute | `packages/sandbox` |
-| **Harness** — the agent loop | `packages/runtime/agent.ts` (Pi, embedded as a library) |
-| **Secret broker** — credentials for one run | `apps/controller/secrets/broker.ts` |
-| **Actuation** — how work becomes an outcome | *no code.* The agent uses `git` and `gh` itself |
-| **Observability** — what happened | `run_events` + `/runs/:id/stream` + `apps/web` |
-| **Profiles** — the vertical | `packages/profiles` |
+| **Trigger**: why a run exists | `apps/controller/http/webhooks.ts`, `http/runs.ts`, normalization in `packages/vcs` |
+| **Sandbox**: isolated compute | `packages/sandbox` |
+| **Harness**: the agent loop | `packages/runtime/agent.ts` (Pi, embedded as a library) |
+| **Secret broker**: credentials for one run | `apps/controller/secrets/broker.ts` |
+| **Actuation**: how work becomes an outcome | *no code.* The agent uses `git` and `gh` itself |
+| **Observability**: what happened | `run_events` + `/runs/:id/stream` + `apps/web` |
+| **Profiles**: the vertical | `packages/profiles` |
 
 Actuation having no implementation is the point, not an omission. A controller that posted the agent's findings would need to parse them, and then it could disagree with what the agent actually did.
 
@@ -73,7 +73,7 @@ Three tables. That is the entire persistent state of the system.
 | Table | Role |
 |---|---|
 | `runs` | the queue, the lifecycle record, and the crash-recovery journal at once |
-| `run_events` | append-only log, `(run_id, seq)` — the only observability source |
+| `run_events` | append-only log, `(run_id, seq)`. The only observability source |
 | `repo_config` | per-repo, per-profile JSON the controller stores but never reads |
 
 `repo_config` is what keeps profile-specific settings out of the core. A profile publishes a Zod schema; the controller validates through the profile, stores the result opaquely, and the dashboard renders the schema. Adding a profile setting needs no migration and no API change.
@@ -82,8 +82,8 @@ Three tables. That is the entire persistent state of the system.
 
 One source of truth, two access patterns:
 
-- `GET /runs/:id/events?afterSeq=N` — history
-- `GET /runs/:id/stream` — Server-Sent Events, live
+- `GET /runs/:id/events?afterSeq=N`: history
+- `GET /runs/:id/stream`: Server-Sent Events, live
 
 Every data frame carries `id: <seq>`. A browser echoes the last one back as `Last-Event-ID` on reconnect, so resuming is exact rather than approximate, and history and live tail are the same code path. Status frames are derived from the run row and carry no id, which makes them safe to re-send.
 
@@ -105,6 +105,6 @@ Each factory validates its own slice of the environment, which is why adding a p
 
 ## Deployment shape
 
-The HTTP surface and the reconciler share a process because it is simpler, not because they must. They exchange nothing in memory — all coordination is through Postgres — so splitting them across machines is a deployment decision that needs no code change. That is the payoff for not having an in-process event bus.
+The HTTP surface and the reconciler share a process because it is simpler, not because they must. They exchange nothing in memory (all coordination is through Postgres), so splitting them across machines is a deployment decision that needs no code change. That is the payoff for not having an in-process event bus.
 
 The sandbox image is built separately (`pnpm sandbox:template`) and pins the agent harness to the version its bundle was typechecked against. Controller-only changes need a restart, not a template rebuild.

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Navigation for coding agents. This file is an index, not a manual — read the document that matches what you are about to do, rather than everything.
+Navigation for coding agents. This file is an index, not a manual. Read the document that matches what you are about to do, rather than everything.
 
 ## Read this first, always
 
@@ -12,7 +12,7 @@ Navigation for coding agents. This file is an index, not a manual — read the d
 
 ## If you arrived at a directory, start with its README
 
-Every package and app has one, and it is the local entry point: what that package owns, what it is allowed to depend on, its own invariants, and a map of its files. Read it before editing anything inside — the invariants are the part you cannot infer from the code in front of you.
+Every package and app has one, and it is the local entry point: what that package owns, what it is allowed to depend on, its own invariants, and a map of its files. Read it before editing anything inside; the invariants are the part you cannot infer from the code in front of you.
 
 | Package | Read |
 |---|---|
@@ -38,7 +38,7 @@ Every package and app has one, and it is the local entry point: what that packag
 | writing or changing tests | [docs/testing.md](docs/testing.md) |
 | running, debugging, or validating a live run | [docs/operations.md](docs/operations.md) |
 
-Each document is self-contained for its task. If you find yourself reading three of them to make one change, the change probably crosses a boundary it should not — see *Consult first* below.
+Each document is self-contained for its task. If you find yourself reading three of them to make one change, the change probably crosses a boundary it should not. See *Consult first* below.
 
 ## Layout
 
@@ -51,7 +51,7 @@ packages/
   profiles/       verticals: general, pr-review
   sandbox/        SandboxProvider implementations (e2b)
   vcs/            VCSProvider implementations (github, gitlab, bitbucket)
-  runtime/        runs INSIDE the sandbox — untrusted
+  runtime/        runs INSIDE the sandbox (untrusted)
   tsconfig/       shared compiler options
 ```
 
@@ -90,9 +90,9 @@ pnpm vitest run --project integration apps/controller/db/runs.integration.test.t
 
 ## Rules that the tooling enforces
 
-You do not need to remember these — they fail the build. They are listed so the failure makes sense when you hit it.
+You do not need to remember these; they fail the build. They are listed so the failure makes sense when you hit it.
 
-- **`packages/runtime` may depend only on `packages/protocol`.** It executes untrusted repository code. pnpm makes an undeclared import unresolvable, and `pnpm boundaries` makes a *declared* one a CI failure. Widening this is a decision, not a fix — see *Consult first*.
+- **`packages/runtime` may depend only on `packages/protocol`.** It executes untrusted repository code. pnpm makes an undeclared import unresolvable, and `pnpm boundaries` makes a *declared* one a CI failure. Widening this is a decision, not a fix. See *Consult first*.
 - **Only `apps/controller/config.ts` reads `process.env`.** Everything else takes typed values or is handed an environment to validate itself.
 - **No `any`, no non-null assertions, no `enum`.** Use unions and `as const`.
 - **Every `UPDATE` needs a `WHERE`.** Run transitions are compare-and-set; see [docs/resumability.md](docs/resumability.md).
@@ -114,12 +114,12 @@ Ask before:
 - moving the trust boundary, including adding a dependency to `packages/runtime`
 - adding controller-side knowledge of a specific profile or provider
 - adding a dependency, a provider, or a service (a queue, a cache, a broker)
-- introducing an agent server, a polling bridge, or controller-side parsing of agent output — Pi stays an implementation detail of the sandbox image
+- introducing an agent server, a polling bridge, or controller-side parsing of agent output; Pi stays an implementation detail of the sandbox image
 - anything that trades flexibility for a one-time convenience
 
 For reversible, local, within-contract work, just proceed.
 
-## Design philosophy — think in primitives, not features
+## Design philosophy: think in primitives, not features
 
 The primitive is the product; workflows outlast technologies. Pi, E2B, and MiniMax are implementation details. `TaskSpec`, `Profile`, `SandboxProvider`, and `VCSProvider` are the product.
 

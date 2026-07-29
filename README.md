@@ -4,14 +4,14 @@
 
 **Background agents, without the backend.**
 
-Code review, issue triage, research bots — every agentic product rebuilds the same 80%: a durable queue, an isolated machine, credentials that survive sitting next to untrusted code, a log someone can replay. This is that 80%, in under 8,000 lines, MIT, on your own server.
+Every agentic product (code review, issue triage, research bots) rebuilds the same 80%: a durable queue, an isolated machine, credentials that survive sitting next to untrusted code, a log someone can replay. This is that 80%, in under 8,000 lines, MIT, on your own server.
 
 You write the other 20%.
 
 ## Principles
 
-- **Small enough to read.** Under 8,000 lines of TypeScript monorepo. You can audit every line that touches your credentials in an evening, which is the only honest reason to trust it with one.
-- **Composable, not configurable.** Three contracts — a vertical, a compute backend, a forge. No plugin registry, no config DSL, no lifecycle hooks.
+- **Small enough to read.** Under 8,000 lines of TypeScript. You can audit every line that touches your credentials in an evening, which is the only honest reason to trust it with one.
+- **Composable, not configurable.** Three contracts: a vertical, a compute backend, a forge. No plugin registry, no config DSL, no lifecycle hooks.
 - **Boring on purpose.** Postgres and one reconciliation loop. No workflow engine, no message broker, no cache.
 - **Deleting is design work.** Every feature is a liability. The default answer to "should we add this?" is "not yet, and probably not here."
 
@@ -19,7 +19,7 @@ Complexity belongs compressed inside the abstraction, not spread across the surf
 
 ## How a run works
 
-1. Something triggers it — a webhook, the dashboard, an API call.
+1. Something triggers it: a webhook, the dashboard, an API call.
 2. The controller mints a credential scoped to one repository and boots a sandbox.
 3. Inside, an agent clones the repo, does the work, and posts its own result with ordinary tools like `git` and `gh`.
 4. Every step lands in an append-only log you can stream live or replay later.
@@ -29,7 +29,7 @@ Nobody is typing turn by turn. That is the point.
 
 ## What it is not
 
-A remote dev environment. There is nothing to attach to — the controller cannot even dial into a sandbox, by design. If you want a durable machine you ssh into, that is a different and better tool.
+A remote dev environment. There is nothing to attach to; the controller cannot even dial into a sandbox, by design. If you want a durable machine you ssh into, that is a different and better tool.
 
 The unit here is a **run**: an event starts it, it ends, and what survives is the outcome and the log.
 
@@ -68,17 +68,17 @@ packages/
   profiles/       verticals: general, pr-review
   sandbox/        SandboxProvider implementations
   vcs/            VCSProvider implementations
-  runtime/        runs inside the sandbox — untrusted
+  runtime/        runs inside the sandbox (untrusted)
 ```
 
 The split is by **substitutability and trust**, not by feature. `packages/runtime` executes untrusted repository code and may depend only on `packages/protocol`; `pnpm boundaries` enforces that in CI.
 
 ## Documentation
 
-- [VISION.md](VISION.md) — what this is for, and what it will refuse to become
-- [ARCHITECTURE.md](ARCHITECTURE.md) — the two trust zones and the run lifecycle
-- [AGENTS.md](AGENTS.md) — index for coding agents, plus the enforced rules
-- [docs/](docs/) — resumability, secrets, testing, operations, extension guides
+- [VISION.md](VISION.md): what this is for, and what it will refuse to become
+- [ARCHITECTURE.md](ARCHITECTURE.md): the two trust zones and the run lifecycle
+- [AGENTS.md](AGENTS.md): index for coding agents, plus the enforced rules
+- [docs/](docs/): resumability, secrets, testing, operations, extension guides
 
 ## Contributing
 

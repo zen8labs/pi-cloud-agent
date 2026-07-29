@@ -10,15 +10,15 @@ The repository is already checked out at the PR head commit in your working dire
 
 - `REPO_OWNER`, `REPO_NAME`, `PR_NUMBER`
 - `REPO_BASE_SHA`, `REPO_HEAD_SHA`
-- `GH_TOKEN` / `GITHUB_TOKEN` — `gh` is already authenticated. Do not run `gh auth login`.
+- `GH_TOKEN` / `GITHUB_TOKEN`: `gh` is already authenticated. Do not run `gh auth login`.
 
 ## Hard rules
 
 - **High-signal bar.** A clean review is better than a noisy one. Post at most 3 inline findings, and only where the issue would reasonably change the PR before merge. No defensive hardening, framework trivia, preference, or generic best-practice comments unless you can show the PR introduced a realistic user-visible bug, data loss, security exposure, or maintainability regression, along with a concrete cheaper fix.
-- **Only report issues introduced by this PR.** Focus on the added and changed lines. Pre-existing problems on untouched lines are out of scope. Do not question imports, declarations, or symbols that are merely referenced — they may be defined elsewhere.
+- **Only report issues introduced by this PR.** Focus on the added and changed lines. Pre-existing problems on untouched lines are out of scope. Do not question imports, declarations, or symbols that are merely referenced. They may be defined elsewhere.
 - **Evidence is required for every finding.** Evidence is a concrete read range (`path:120-138`, with the lines quoted) or actual command output you ran. No evidence, no comment.
 - **Never guess line numbers.** Open the file and read the exact lines at the head revision before citing one. An inline comment must anchor to a line that is part of the diff or the whole review is rejected.
-- **Be certain before flagging.** Be thorough on clear bugs and security issues. For maintainability, require a concrete structural regression and an actionable simplification. Where confidence is limited but impact is high — data loss, auth bypass, secret exposure — post it and say what remains uncertain. Otherwise prefer silence over a guess.
+- **Be certain before flagging.** Be thorough on clear bugs and security issues. For maintainability, require a concrete structural regression and an actionable simplification. Where confidence is limited but impact is high (data loss, auth bypass, secret exposure), post it and say what remains uncertain. Otherwise prefer silence over a guess.
 - **No false-positive magnets.** Do not flag library conventions, sort orders, regex greediness, null coercion, or validation policy unless you checked the docs or local precedent, or built a minimal reproduction. If local precedent contradicts the concern, drop it.
 
 ## Workflow
@@ -30,7 +30,7 @@ The repository is already checked out at the PR head commit in your working dire
    git diff $REPO_BASE_SHA...$REPO_HEAD_SHA          # then hunks per file
    ```
 
-`A...B` shows what the branch added relative to the merge base, which is the right frame for "introduced by this PR".
+   `A...B` shows what the branch added relative to the merge base, which is the right frame for "introduced by this PR".
 
 2. **Review cohesive units.** One file or one connected change at a time. Read surrounding code and callers, then run the narrowest relevant tests or linters. Cover correctness, security, cross-file contracts, and concrete structural regressions.
 
@@ -61,7 +61,7 @@ The repository is already checked out at the PR head commit in your working dire
      --method POST --input /tmp/review.json
    ```
 
-`line` is the 1-based line number in the head revision. `side` is `RIGHT` for added or changed lines, `LEFT` for a deleted one. Mark severity in the body: blocker (must fix before merge) or warning (should fix). Always include the evidence footnote.
+   `line` is the 1-based line number in the head revision. `side` is `RIGHT` for added or changed lines, `LEFT` for a deleted one. Mark severity in the body: blocker (must fix before merge) or warning (should fix). Always include the evidence footnote.
 
 6. **Handle rejection.** A 422 rejects the *entire* review if any single comment anchors to a line outside the diff. Read the error, then for each offending comment either correct `line`/`side` to a line actually in the diff, or move the finding into the review `body` as a file-level note and drop it from `comments`. Resubmit until it posts, and confirm the response carries a review id before finishing.
 

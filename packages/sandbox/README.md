@@ -17,12 +17,12 @@ It stays this small because of one constraint: **the sandbox is outbound-only.**
 |---|---|
 | `index.ts` | the `FACTORIES` registry, `createSandboxProvider`, `sandboxProviderNames` |
 | `e2b.ts` | E2B: one hosted microVM per run |
-| `registry.test.ts` | the registry contract — construction and its failure messages |
+| `registry.test.ts` | the registry contract: construction and its failure messages |
 
 ## Invariants
 
 - **`stop` is idempotent.** The reconciler may call it for a machine that is already dead; that is the normal path after a timeout.
-- **`create` returns a working machine or throws.** A machine that exists but whose command never started is the worst outcome — it burns a slot and a credential and then goes silent. Reclaim it yourself and throw.
+- **`create` returns a working machine or throws.** A machine that exists but whose command never started is the worst outcome. It burns a slot and a credential and then goes silent. Reclaim it yourself and throw.
 - **Classify failures with `SandboxError.retryable`.** `true` returns the run to the queue (up to three attempts); `false` fails it immediately. Getting this wrong means either burning attempts on a missing image or failing runs on a transient blip.
 - **Secrets are opened here and only here.** `spec.secrets` holds `Secret` objects; `expose()` is called at the boundary where they must become plain strings to cross into the machine.
 - **Never derive behavior from `spec.runId`.** It is correlation only. A provider that special-cases a run is a provider that cannot be swapped.
