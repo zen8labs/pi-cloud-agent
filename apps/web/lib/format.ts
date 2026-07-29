@@ -1,7 +1,5 @@
 import { ACTIVE_STATUSES, type RunStatus } from "@pi-cloud-agent/protocol";
 
-export { ACTIVE_STATUSES };
-
 export function relativeTime(iso: string): string {
   const seconds = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
   if (seconds < 5) return "just now";

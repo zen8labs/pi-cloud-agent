@@ -1,0 +1,6 @@
+# Lint, format, and organize-imports on staged files only. A failure here is
+# cheaper than a red CI job. Fix with `pnpm fix` and re-stage.
+pnpm exec biome check --staged --no-errors-on-unmatched .
+
+# Oversized source files are caught before they enter history.
+pnpm files:check

@@ -21,25 +21,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v5
+      - uses: ./.github/actions/setup
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
       - name: Lint and format
         run: pnpm lint
       - name: Trust boundaries
         run: pnpm boundaries
       - name: Docs
         run: pnpm docs:check
+      - name: File sizes
+        run: pnpm files:check
+      - name: Dead code and unused dependencies
+        run: pnpm deadcode
+      - name: Duplicated code
+        run: pnpm dupes
       - name: Types
         run: pnpm typecheck
       - name: Unit tests
         run: pnpm test
 
   # The state machine, against a real Postgres. These are the tests that assert
-  # the resumability properties, so they are not optional.
+  # the resumability properties, so they are not optional. The same database then
+  # backs the browser smoke test: no forge or sandbox credentials, so the run it
+  # creates must fail provisioning, and the test asserts the failure is shown.
   integration:
     runs-on: ubuntu-latest
     services:
@@ -58,16 +63,31 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v5
+      - uses: ./.github/actions/setup
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
       - name: Integration tests
         run: pnpm test:integration
         env:
           TEST_DATABASE_URL: postgres://pi_cloud_agent:pi_cloud_agent@localhost:5532/pi_cloud_agent
+      - name: Dashboard build
+        run: pnpm --filter @pi-cloud-agent/web build
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Browser smoke tests
+        run: pnpm test:e2e
+        env:
+          CI: "true"
+          DATABASE_URL: postgres://pi_cloud_agent:pi_cloud_agent@localhost:5532/pi_cloud_agent
+          # Present so the e2b provider constructs at boot; provisioning then
+          # fails authentication, which is the failure the test watches for.
+          E2B_API_KEY: ci-dummy-no-sandbox
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: apps/web/test-results
+          if-no-files-found: ignore
 
   # Proves the schema in db/schema.ts matches the committed migrations. Without
   # this, a schema edit with no generated migration passes every other check and
@@ -76,12 +96,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v5
+      - uses: ./.github/actions/setup
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
       - name: Migrations are up to date
         run: pnpm --filter @pi-cloud-agent/controller db:generate
       - name: No uncommitted migration
@@ -97,13 +114,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v5
+      - uses: ./.github/actions/setup
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
       - name: Dashboard build
         run: pnpm --filter @pi-cloud-agent/web build
       - name: Sandbox runtime bundle
         run: pnpm --filter @pi-cloud-agent/runtime build
+
+

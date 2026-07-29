@@ -1,6 +1,6 @@
 "use client";
 
-import type { ConfigResponse, RunEvent } from "@pi-cloud-agent/protocol";
+import type { ConfigResponse, RunDetail, RunEvent } from "@pi-cloud-agent/protocol";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -30,60 +30,9 @@ export default function SessionPage() {
     }
   };
 
-  const prUrl =
-    run && run.prNumber !== null ? `https://github.com/${run.repo}/pull/${run.prNumber}` : null;
-
   return (
     <div className="flex h-screen flex-col" style={{ background: "var(--color-canvas)" }}>
-      <header className="flex items-center gap-3 border-b border-[var(--color-line-strong)] bg-[var(--color-surface)] px-5 py-3">
-        <Link
-          href="/"
-          className="flex h-7 w-7 items-center justify-center border border-[var(--color-line-strong)] text-[var(--color-faint)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-accent)]"
-          title="Back to sessions"
-        >
-          <svg
-            viewBox="0 0 16 16"
-            className="h-3.5 w-3.5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            aria-hidden="true"
-          >
-            <path d="M10 12L6 8l4-4" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </Link>
-
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate text-[13px] font-semibold text-[var(--color-ink)]">
-            {run
-              ? run.prompt
-                ? truncate(run.prompt, 72)
-                : `${run.profile} · ${run.repo}`
-              : "Session"}
-          </h1>
-          {run && (
-            <p className="truncate font-mono text-[10px] text-[var(--color-faint)]">
-              {run.repo}
-              {run.prNumber !== null ? ` · PR #${run.prNumber}` : ""}
-              {` · ${run.id.slice(0, 8)}`}
-            </p>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2">
-          {active && (
-            <button
-              type="button"
-              onClick={onCancel}
-              disabled={cancelling}
-              className="border border-red-500/30 px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-red-400 transition-colors hover:bg-red-500/8 disabled:opacity-40"
-            >
-              {cancelling ? "Stopping…" : "Cancel"}
-            </button>
-          )}
-          {run && <StatusBadge status={run.status} />}
-        </div>
-      </header>
+      <SessionHeader run={run} active={active} cancelling={cancelling} onCancel={onCancel} />
 
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
@@ -118,51 +67,126 @@ export default function SessionPage() {
           )}
         </div>
 
-        <aside className="hidden w-64 shrink-0 overflow-y-auto border-l border-[var(--color-line-strong)] bg-[var(--color-surface)] lg:block">
-          <Section title="Details">
-            <Row label="Status" value={run ? <StatusBadge status={run.status} /> : "—"} />
-            <Row label="Profile" value={run?.profile ?? "—"} mono />
-            <Row label="Model" value={run?.model ?? "—"} mono />
-            <Row label="Repo" value={run?.repo ?? "—"} mono />
-            <Row label="Provider" value={run?.provider ?? "—"} />
-            <Row label="Run" value={run ? run.id.slice(0, 8) : "—"} mono />
-            <Row label="Created" value={run ? absoluteTime(run.createdAt) : "—"} />
-          </Section>
-
-          {prUrl && run && (
-            <Section title="Pull request">
-              <a
-                href={prUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="font-mono text-[11px] text-[var(--color-blue)] hover:underline"
-              >
-                #{run.prNumber} on GitHub ↗
-              </a>
-            </Section>
-          )}
-
-          {run?.error && (
-            <Section title="Error">
-              <pre className="whitespace-pre-wrap break-words border border-red-500/30 bg-red-500/8 px-2.5 py-2 font-mono text-[10px] leading-relaxed text-red-400">
-                {run.error}
-              </pre>
-            </Section>
-          )}
-
-          <Section title="Raw stream">
-            <a
-              href={`${API_BASE}/runs/${id}/stream`}
-              target="_blank"
-              rel="noreferrer"
-              className="font-mono text-[10px] text-[var(--color-blue)] hover:underline"
-            >
-              GET /runs/{id.slice(0, 8)}…/stream ↗
-            </a>
-          </Section>
-        </aside>
+        <SessionAside run={run} id={id} />
       </div>
     </div>
+  );
+}
+
+function sessionTitle(run: RunDetail | null): string {
+  if (!run) return "Session";
+  if (run.prompt) return truncate(run.prompt, 72);
+  return `${run.profile} · ${run.repo}`;
+}
+
+function SessionHeader({
+  run,
+  active,
+  cancelling,
+  onCancel,
+}: {
+  run: RunDetail | null;
+  active: boolean;
+  cancelling: boolean;
+  onCancel: () => void;
+}) {
+  return (
+    <header className="flex items-center gap-3 border-b border-[var(--color-line-strong)] bg-[var(--color-surface)] px-5 py-3">
+      <Link
+        href="/"
+        className="flex h-7 w-7 items-center justify-center border border-[var(--color-line-strong)] text-[var(--color-faint)] transition-colors hover:border-[var(--color-accent)]/50 hover:text-[var(--color-accent)]"
+        title="Back to sessions"
+      >
+        <svg
+          viewBox="0 0 16 16"
+          className="h-3.5 w-3.5"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          aria-hidden="true"
+        >
+          <path d="M10 12L6 8l4-4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </Link>
+
+      <div className="min-w-0 flex-1">
+        <h1 className="truncate text-[13px] font-semibold text-[var(--color-ink)]">
+          {sessionTitle(run)}
+        </h1>
+        {run && (
+          <p className="truncate font-mono text-[10px] text-[var(--color-faint)]">
+            {run.repo}
+            {run.prNumber !== null ? ` · PR #${run.prNumber}` : ""}
+            {` · ${run.id.slice(0, 8)}`}
+          </p>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2">
+        {active && (
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={cancelling}
+            className="border border-red-500/30 px-3 py-1.5 font-mono text-[10px] uppercase tracking-wide text-red-400 transition-colors hover:bg-red-500/8 disabled:opacity-40"
+          >
+            {cancelling ? "Stopping…" : "Cancel"}
+          </button>
+        )}
+        {run && <StatusBadge status={run.status} />}
+      </div>
+    </header>
+  );
+}
+
+function SessionAside({ run, id }: { run: RunDetail | null; id: string }) {
+  const prUrl =
+    run && run.prNumber !== null ? `https://github.com/${run.repo}/pull/${run.prNumber}` : null;
+
+  return (
+    <aside className="hidden w-64 shrink-0 overflow-y-auto border-l border-[var(--color-line-strong)] bg-[var(--color-surface)] lg:block">
+      <Section title="Details">
+        <Row label="Status" value={run ? <StatusBadge status={run.status} /> : "—"} />
+        <Row label="Profile" value={run?.profile ?? "—"} mono />
+        <Row label="Model" value={run?.model ?? "—"} mono />
+        <Row label="Repo" value={run?.repo ?? "—"} mono />
+        <Row label="Provider" value={run?.provider ?? "—"} />
+        <Row label="Run" value={run ? run.id.slice(0, 8) : "—"} mono />
+        <Row label="Created" value={run ? absoluteTime(run.createdAt) : "—"} />
+      </Section>
+
+      {prUrl && run && (
+        <Section title="Pull request">
+          <a
+            href={prUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="font-mono text-[11px] text-[var(--color-blue)] hover:underline"
+          >
+            #{run.prNumber} on GitHub ↗
+          </a>
+        </Section>
+      )}
+
+      {run?.error && (
+        <Section title="Error">
+          <pre className="whitespace-pre-wrap break-words border border-red-500/30 bg-red-500/8 px-2.5 py-2 font-mono text-[10px] leading-relaxed text-red-400">
+            {run.error}
+          </pre>
+        </Section>
+      )}
+
+      <Section title="Raw stream">
+        <a
+          href={`${API_BASE}/runs/${id}/stream`}
+          target="_blank"
+          rel="noreferrer"
+          className="font-mono text-[10px] text-[var(--color-blue)] hover:underline"
+        >
+          GET /runs/{id.slice(0, 8)}…/stream ↗
+        </a>
+      </Section>
+    </aside>
   );
 }
 

@@ -134,32 +134,13 @@ function NewSession() {
             </div>
 
             <div className="divide-y divide-[var(--color-line)]">
-              <Field label="Repository">
-                <div className="flex items-center gap-2">
-                  <Select value={repo} onChange={setRepo} className="w-52">
-                    {repos.length === 0 && <option value="">No repositories found</option>}
-                    {repos.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                    <option value="__custom__">Custom…</option>
-                  </Select>
-                  {repo === "__custom__" && (
-                    <input
-                      value={customRepo}
-                      onChange={(event) => setCustomRepo(event.target.value)}
-                      placeholder="owner/repo"
-                      style={{
-                        background: "var(--color-surface)",
-                        color: "var(--color-ink)",
-                        borderColor: "var(--color-line-strong)",
-                      }}
-                      className="w-36 border px-3 py-2 font-mono text-[12px] placeholder:text-[var(--color-faint)] focus:border-[var(--color-accent)] focus:outline-none"
-                    />
-                  )}
-                </div>
-              </Field>
+              <RepoField
+                repo={repo}
+                repos={repos}
+                customRepo={customRepo}
+                onRepoChange={setRepo}
+                onCustomRepoChange={setCustomRepo}
+              />
 
               <Field label="Profile">
                 <Select value={profile} onChange={setProfile} className="w-52">
@@ -172,38 +153,14 @@ function NewSession() {
               </Field>
 
               {needsPullRequest ? (
-                <Field label="Pull request">
-                  <input
-                    value={prNumber}
-                    onChange={(event) => setPrNumber(event.target.value.replace(/[^0-9]/g, ""))}
-                    placeholder="#"
-                    style={{
-                      background: "var(--color-surface)",
-                      color: "var(--color-ink)",
-                      borderColor: "var(--color-line-strong)",
-                    }}
-                    className="w-24 border px-3 py-2 font-mono text-[12px] placeholder:text-[var(--color-faint)] focus:border-[var(--color-accent)] focus:outline-none"
-                  />
-                </Field>
+                <PullRequestField value={prNumber} onChange={setPrNumber} />
               ) : (
-                <Field label="Branch">
-                  <Select
-                    value={branch}
-                    onChange={setBranch}
-                    disabled={branchesLoading || branches.length === 0}
-                    className="w-52"
-                  >
-                    {branchesLoading && <option value="">Loading…</option>}
-                    {!branchesLoading && branches.length === 0 && (
-                      <option value="">{branch || "default"}</option>
-                    )}
-                    {branches.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
+                <BranchField
+                  branch={branch}
+                  branches={branches}
+                  loading={branchesLoading}
+                  onChange={setBranch}
+                />
               )}
             </div>
 
@@ -257,6 +214,102 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+const inputStyle = {
+  background: "var(--color-surface)",
+  color: "var(--color-ink)",
+  borderColor: "var(--color-line-strong)",
+} as const;
+
+function RepoField({
+  repo,
+  repos,
+  customRepo,
+  onRepoChange,
+  onCustomRepoChange,
+}: {
+  repo: string;
+  repos: string[];
+  customRepo: string;
+  onRepoChange: (value: string) => void;
+  onCustomRepoChange: (value: string) => void;
+}) {
+  return (
+    <Field label="Repository">
+      <div className="flex items-center gap-2">
+        <Select value={repo} onChange={onRepoChange} className="w-52">
+          {repos.length === 0 && <option value="">No repositories found</option>}
+          {repos.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+          <option value="__custom__">Custom…</option>
+        </Select>
+        {repo === "__custom__" && (
+          <input
+            value={customRepo}
+            onChange={(event) => onCustomRepoChange(event.target.value)}
+            placeholder="owner/repo"
+            style={inputStyle}
+            className="w-36 border px-3 py-2 font-mono text-[12px] placeholder:text-[var(--color-faint)] focus:border-[var(--color-accent)] focus:outline-none"
+          />
+        )}
+      </div>
+    </Field>
+  );
+}
+
+function PullRequestField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <Field label="Pull request">
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value.replace(/[^0-9]/g, ""))}
+        placeholder="#"
+        style={inputStyle}
+        className="w-24 border px-3 py-2 font-mono text-[12px] placeholder:text-[var(--color-faint)] focus:border-[var(--color-accent)] focus:outline-none"
+      />
+    </Field>
+  );
+}
+
+function BranchField({
+  branch,
+  branches,
+  loading,
+  onChange,
+}: {
+  branch: string;
+  branches: string[];
+  loading: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <Field label="Branch">
+      <Select
+        value={branch}
+        onChange={onChange}
+        disabled={loading || branches.length === 0}
+        className="w-52"
+      >
+        {loading && <option value="">Loading…</option>}
+        {!loading && branches.length === 0 && <option value="">{branch || "default"}</option>}
+        {branches.map((name) => (
+          <option key={name} value={name}>
+            {name}
+          </option>
+        ))}
+      </Select>
+    </Field>
+  );
+}
+
 function Select({
   value,
   onChange,
@@ -276,11 +329,7 @@ function Select({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         disabled={disabled}
-        style={{
-          background: "var(--color-surface)",
-          color: "var(--color-ink)",
-          borderColor: "var(--color-line-strong)",
-        }}
+        style={inputStyle}
         className="w-full appearance-none border px-3 py-2 pr-8 font-mono text-[12px] focus:border-[var(--color-accent)] focus:outline-none disabled:opacity-40"
       >
         {children}

@@ -1,0 +1,15 @@
+{
+  "gitignore": true,
+  "threshold": 0.7,
+  "reporters": ["console"],
+  "ignore": [
+    "**/*.md",
+    "**/pnpm-lock.yaml",
+    "**/db/migrations/**",
+    "**/*.css",
+    "**/next-env.d.ts",
+    "**/tsconfig.tsbuildinfo",
+    "references/**",
+    ".specstory/**"
+  ]
+}

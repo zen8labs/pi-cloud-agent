@@ -3,7 +3,7 @@ import { WebhookVerificationError } from "@pi-cloud-agent/protocol";
 
 /** Shared helpers for talking to forges and authenticating their webhooks. */
 
-export const REQUEST_TIMEOUT_MS = 30_000;
+const REQUEST_TIMEOUT_MS = 30_000;
 
 export async function fetchJson<T>(
   url: string,

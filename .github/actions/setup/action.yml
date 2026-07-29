@@ -1,0 +1,21 @@
+name: setup
+
+description: >-
+  pnpm, Node, and a frozen install. Every job starts the same way, so the
+  toolchain lives here exactly once.
+
+inputs:
+  node-version:
+    description: Node version to set up
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@v4
+    - uses: actions/setup-node@v5
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: pnpm
+    - run: pnpm install --frozen-lockfile
+      shell: bash

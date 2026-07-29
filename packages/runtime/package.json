@@ -18,6 +18,7 @@
     "@pi-cloud-agent/protocol": "workspace:*"
   },
   "devDependencies": {
+    "@e2b/cli": "2.16.0",
     "@pi-cloud-agent/tsconfig": "workspace:*",
     "@types/node": "24.13.3",
     "esbuild": "0.28.1",

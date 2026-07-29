@@ -134,101 +134,73 @@ export function SideNav() {
   );
 }
 
-function SessionsIcon({
+/** Shared svg chrome so each icon below is only its shapes. */
+function Icon({
   className,
   style,
-}: {
-  className?: string;
-  style?: React.CSSProperties;
-}) {
+  strokeWidth = 1.5,
+  children,
+  ...rest
+}: React.SVGAttributes<SVGSVGElement> & { children: React.ReactNode }) {
   return (
     <svg
       aria-hidden="true"
-      className={className}
-      style={style}
       viewBox="0 0 16 16"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.5"
+      strokeLinecap="round"
+      {...rest}
+      className={className}
+      style={style}
+      strokeWidth={strokeWidth}
     >
+      {children}
+    </svg>
+  );
+}
+
+type NavIconProps = { className?: string; style?: React.CSSProperties };
+
+function SessionsIcon(props: NavIconProps) {
+  return (
+    <Icon {...props}>
       <rect x="2" y="2.5" width="12" height="3.5" rx="0.5" />
       <rect x="2" y="10" width="12" height="3.5" rx="0.5" />
-    </svg>
+    </Icon>
   );
 }
 
-function PlusIcon({ className, style }: { className?: string; style?: React.CSSProperties }) {
+function PlusIcon(props: NavIconProps) {
   return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      style={style}
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-    >
+    <Icon {...props}>
       <path d="M8 3v10M3 8h10" />
-    </svg>
+    </Icon>
   );
 }
 
-function SettingsIcon({
-  className,
-  style,
-}: {
-  className?: string;
-  style?: React.CSSProperties;
-}) {
+function SettingsIcon(props: NavIconProps) {
   return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      style={style}
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-    >
+    <Icon {...props}>
       <path d="M2 4.5h7M11.5 4.5h2.5M2 11.5h2.5M7 11.5h7" />
       <circle cx="10" cy="4.5" r="1.6" />
       <circle cx="5.5" cy="11.5" r="1.6" />
-    </svg>
+    </Icon>
   );
 }
 
 function SunIcon() {
   return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-3.5 w-3.5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-    >
+    <Icon className="h-3.5 w-3.5" strokeWidth={1.4}>
       <circle cx="8" cy="8" r="2.5" />
       <path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.5 3.5l1 1M11.5 11.5l1 1M11.5 3.5l-1 1M3.5 11.5l-1 1" />
-    </svg>
+    </Icon>
   );
 }
 
 function MoonIcon() {
   return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-3.5 w-3.5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
+    <Icon className="h-3.5 w-3.5" strokeWidth={1.4} strokeLinejoin="round">
       <path d="M13.5 10A6 6 0 016 2.5a6 6 0 100 11 6 6 0 007.5-3.5z" />
-    </svg>
+    </Icon>
   );
 }

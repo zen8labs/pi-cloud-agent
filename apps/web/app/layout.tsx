@@ -26,6 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script
           // biome-ignore lint/security/noDangerouslySetInnerHtml: static literal, no user input
           dangerouslySetInnerHTML={{
+            // biome-ignore lint/style/useNamingConvention: React dictates the __html key
             __html: `try{var t=localStorage.getItem('pca-theme');if(t==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}`,
           }}
         />

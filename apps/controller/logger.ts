@@ -14,7 +14,7 @@
 const LEVELS = { debug: 10, info: 20, warn: 30, error: 40, silent: 100 } as const;
 export type LogLevel = keyof typeof LEVELS;
 
-export type LogFields = Record<string, unknown>;
+type LogFields = Record<string, unknown>;
 
 export interface Logger {
   debug(message: string, fields?: LogFields): void;

@@ -12,6 +12,10 @@ next-env.d.ts
 .DS_Store
 *.log
 
+.playwright-mcp
+test-results/
+playwright-report/
+
 # Written by `e2b template build`; holds an account-specific template id.
 e2b.toml
 

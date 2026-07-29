@@ -15,7 +15,7 @@ export interface CredentialBroker {
   mintForRun(input: MintInput): Promise<RunCredentials>;
 }
 
-export interface MintInput {
+interface MintInput {
   provider: string;
   repoFullName: string;
   /** Forge host, so a CLI can be pointed at an Enterprise instance. */
@@ -23,7 +23,7 @@ export interface MintInput {
   vcs: VCSProvider;
 }
 
-export interface RunCredentials {
+interface RunCredentials {
   /** Injected as environment variables, kept out of logs and events. */
   secrets: Record<string, Secret>;
   /** Non-secret companions to those credentials (usernames, hosts). */

@@ -3,6 +3,7 @@ import {
   runEventInputSchema,
   runStatusReportSchema,
 } from "@pi-cloud-agent/protocol";
+import type { Context } from "hono";
 import { Hono } from "hono";
 import type { Database } from "../db/client";
 import { appendEvent, completeRun, getRunByCallbackToken } from "../db/runs";
@@ -25,12 +26,8 @@ export function internalRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   app.post("/runs/:runId/events", async (c) => {
-    const run = await authenticate(
-      c.get("database"),
-      c.req.param("runId"),
-      c.req.header("authorization"),
-    );
-    if (!run) return c.json({ error: "invalid run token" }, 403);
+    const run = await requireRun(c, c.req.param("runId"));
+    if (run instanceof Response) return run;
 
     const parsed = runEventInputSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "unrecognized event" }, 422);
@@ -50,12 +47,8 @@ export function internalRoutes(): Hono<AppEnv> {
   });
 
   app.post("/runs/:runId/status", async (c) => {
-    const run = await authenticate(
-      c.get("database"),
-      c.req.param("runId"),
-      c.req.header("authorization"),
-    );
-    if (!run) return c.json({ error: "invalid run token" }, 403);
+    const run = await requireRun(c, c.req.param("runId"));
+    if (run instanceof Response) return run;
 
     const parsed = runStatusReportSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "unrecognized status" }, 422);
@@ -80,6 +73,12 @@ export function internalRoutes(): Hono<AppEnv> {
   });
 
   return app;
+}
+
+/** The run behind the callback token, or the 403 to return when there is none. */
+async function requireRun(c: Context<AppEnv>, runId: string): Promise<RunRow | Response> {
+  const run = await authenticate(c.get("database"), runId, c.req.header("authorization"));
+  return run ?? c.json({ error: "invalid run token" }, 403);
 }
 
 async function authenticate(

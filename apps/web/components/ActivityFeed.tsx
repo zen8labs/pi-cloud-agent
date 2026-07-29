@@ -43,59 +43,76 @@ function foldEvents(events: RunEvent[], userPrompt: string | null): Block[] {
   const blocks: Block[] = [];
   if (userPrompt) blocks.push({ key: "prompt", kind: "user", text: userPrompt });
   const toolByCall = new Map<string, ToolBlock>();
-
-  for (const event of events) {
-    const data = event.data ?? {};
-    switch (event.type) {
-      case "token": {
-        const content = String(data.content ?? "");
-        if (!content) break;
-        const last = blocks.at(-1);
-        if (last?.kind === "assistant") last.text += content;
-        else blocks.push({ key: `assistant-${event.seq}`, kind: "assistant", text: content });
-        break;
-      }
-      case "tool_call": {
-        const callId = String(data.callId ?? "");
-        const args = (data.args as Record<string, unknown>) ?? {};
-        const status = String(data.status ?? "");
-        const existing = callId ? toolByCall.get(callId) : undefined;
-        if (existing) {
-          // The end event carries no args, so keep the ones from the start.
-          existing.status = status;
-          break;
-        }
-        const block: ToolBlock = {
-          key: `tool-${callId || event.seq}`,
-          kind: "tool",
-          tool: String(data.tool ?? "tool"),
-          args,
-          status,
-          callId,
-        };
-        if (callId) toolByCall.set(callId, block);
-        blocks.push(block);
-        break;
-      }
-      case "status": {
-        const detail = String(data.detail ?? "");
-        blocks.push({
-          key: `status-${event.seq}`,
-          kind: "status",
-          status: data.status === "done" ? "succeeded" : "failed",
-          error: detail || null,
-        });
-        break;
-      }
-      default: {
-        const text = logText(data);
-        if (text) blocks.push({ key: `log-${event.seq}`, kind: "log", text });
-        break;
-      }
-    }
-  }
-
+  for (const event of events) foldEvent(blocks, toolByCall, event);
   return blocks.filter((block) => block.kind !== "assistant" || block.text.trim().length > 0);
+}
+
+function foldEvent(blocks: Block[], toolByCall: Map<string, ToolBlock>, event: RunEvent): void {
+  switch (event.type) {
+    case "token":
+      foldToken(blocks, event);
+      break;
+    case "tool_call":
+      foldToolCall(blocks, toolByCall, event);
+      break;
+    case "status":
+      foldStatus(blocks, event);
+      break;
+    default:
+      foldLog(blocks, event);
+  }
+}
+
+/** Token events coalesce into one trailing assistant message. */
+function foldToken(blocks: Block[], event: RunEvent): void {
+  const content = String(event.data?.content ?? "");
+  if (!content) return;
+  const last = blocks.at(-1);
+  if (last?.kind === "assistant") last.text += content;
+  else blocks.push({ key: `assistant-${event.seq}`, kind: "assistant", text: content });
+}
+
+/** The two halves of a tool call (start, then end) merge into one row by call id. */
+function foldToolCall(
+  blocks: Block[],
+  toolByCall: Map<string, ToolBlock>,
+  event: RunEvent,
+): void {
+  const data = event.data ?? {};
+  const callId = String(data.callId ?? "");
+  const status = String(data.status ?? "");
+  const existing = callId ? toolByCall.get(callId) : undefined;
+  if (existing) {
+    // The end event carries no args, so keep the ones from the start.
+    existing.status = status;
+    return;
+  }
+  const block: ToolBlock = {
+    key: `tool-${callId || event.seq}`,
+    kind: "tool",
+    tool: String(data.tool ?? "tool"),
+    args: (data.args as Record<string, unknown>) ?? {},
+    status,
+    callId,
+  };
+  if (callId) toolByCall.set(callId, block);
+  blocks.push(block);
+}
+
+function foldStatus(blocks: Block[], event: RunEvent): void {
+  const data = event.data ?? {};
+  const detail = String(data.detail ?? "");
+  blocks.push({
+    key: `status-${event.seq}`,
+    kind: "status",
+    status: data.status === "done" ? "succeeded" : "failed",
+    error: detail || null,
+  });
+}
+
+function foldLog(blocks: Block[], event: RunEvent): void {
+  const text = logText(event.data ?? {});
+  if (text) blocks.push({ key: `log-${event.seq}`, kind: "log", text });
 }
 
 function logText(data: Record<string, unknown>): string {

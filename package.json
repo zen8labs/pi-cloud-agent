@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "A minimal and self-contained cloud agent built from first principles",
+  "description": "Background agents, without the backend: a minimal, extensible cloud-agent core",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -35,6 +35,10 @@
     "fix": "biome check --write .",
     "boundaries": "tsx scripts/check-boundaries.ts",
     "docs:check": "tsx scripts/check-docs.ts",
+    "files:check": "tsx scripts/check-file-size.ts",
+    "deadcode": "knip",
+    "dupes": "jscpd",
+    "prepare": "husky",
     "test": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
     "test:live": "vitest run --project live",
@@ -43,11 +47,16 @@
     "sandbox:template": "pnpm --filter @pi-cloud-agent/runtime template:build",
     "up": "docker compose up -d --build",
     "down": "docker compose down",
-    "verify": "pnpm lint && pnpm boundaries && pnpm docs:check && pnpm typecheck && pnpm test && pnpm test:integration"
+    "verify": "pnpm lint && pnpm boundaries && pnpm docs:check && pnpm files:check && pnpm deadcode && pnpm dupes && pnpm typecheck && pnpm test && pnpm test:integration",
+    "test:e2e": "playwright test --config apps/web/playwright.config.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.5",
+    "@playwright/test": "1.62.0",
     "@types/node": "24.13.3",
+    "husky": "9.1.7",
+    "jscpd": "5.0.14",
+    "knip": "6.29.0",
     "tsx": "4.23.1",
     "turbo": "2.10.7",
     "typescript": "5.9.3",
