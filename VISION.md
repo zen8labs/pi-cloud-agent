@@ -1,7 +1,4 @@
-# Cloud Agent — a minimal, extensible core for agents that run in the cloud
-
-> Borrowing the pi philosophy: build the smallest correct core, and make
-> everything else an extension.
+# A minimal, self-contained, and extensible core for agents that run in the cloud
 
 ## The idea
 
@@ -64,9 +61,8 @@ until it's done, a broker supplies scoped creds, the agent actuates its result,
 and the whole run is observable.** That's it. A model, file/shell tools, a loop,
 an isolated box, short-lived creds, and a record of what happened.
 
-Notably *not* irreducible: MCP, sub-agents, plan mode, to-do tracking, a
-retrieval index, a permissions UI, controller-side output parsing. Useful,
-sometimes — but they are extensions, not the core.
+Notably *not* irreducible: MCP, sub-agents, to-do plan tracking. Useful,
+sometimes - but they are extensions, not the core.
 
 ## What we intentionally don't build (and why)
 
@@ -84,14 +80,6 @@ missing features:
   work starts. Default runs carry zero MCP servers; a profile that genuinely needs
   one declares it, and it runs inside the sandbox boundary. Prefer a CLI tool
   with a README the agent reads on demand (progressive disclosure).
-- **Minimal system prompt.** Frontier models are already trained to be coding
-  agents. We don't ship thousands of tokens of instructions; the vertical's
-  behavior comes from its profile (a skill/prompt), loaded when relevant.
-- **The sandbox is the security model — no controller-side guardrails.** Once an
-  agent can write and run code, permission prompts and output-scanning are mostly
-  theater. We don't pretend otherwise. Safety comes from the sandbox being
-  isolated, ephemeral, and network-scoped, plus the one control that genuinely
-  matters in the cloud (below).
 - **No baked sub-agents / plan mode / to-dos.** These add hidden state the model
   has to track and hurt observability. If a vertical wants them, it builds them
   as an extension or writes a plan/TODO file in the repo.
@@ -101,73 +89,10 @@ credential with write access to someone else's repo, sitting next to untrusted
 code.** That risk is handled properly — brokered, narrowly scoped, and
 short-lived — rather than waved away.
 
-## Observability is two things
-
-Because nobody watches the loop live, "record the run" splits into two distinct
-needs, and we want both:
-
-1. **Live stream (the web UI).** While a run is working, its output — messages,
-   tool calls, results — streams to a dashboard so a human can watch, follow
-   along, and step in. This is the real-time "watch it work" view.
-2. **Trace store (Langfuse-style).** Every run is also persisted as structured
-   traces to a data store, so we can browse and replay *all* past sessions,
-   debug failures after the sandbox is gone, and use real runs to improve the
-   agent over time (prompts, tools, evals, regression tracking). This is the
-   long-term memory of how the agent behaves.
-
-The live stream is for *this* run; the trace store is for *every* run.
-
-## Where we are today
-
-A working core that proves the pipeline end to end, as a TypeScript monorepo:
-
-```
-trigger (webhook / API) → controller (Hono + reconciler, Postgres)
-        → mint scoped SCM token → sandbox → embedded agent session
-        → the agent works the checkout and posts its own outcomes
-        → live events streamed to the controller + web dashboard
-```
-
-- **The seams are the product.** Infrastructure sits behind `SandboxProvider` and
-  `VCSProvider`; `Profile` turns a normalized `Trigger` into a `TaskSpec`. All
-  three contracts live in one dependency-free package, so an implementation never
-  depends on another implementation.
-- **Two profiles:** `pr-review` (GitHub / GitLab / Bitbucket) and a free-form
-  `general`.
-- **The trust boundary is mechanical, not documentary.** The package that runs
-  inside the sandbox may depend only on the contracts package, enforced by the
-  package manager and by CI.
-- **Resumability without a workflow engine.** Run state lives in Postgres and one
-  reconciliation loop repairs it, so a controller restart is indistinguishable
-  from a slow tick. No Temporal, no broker, no in-memory run lifecycle.
-
-The principles in this document are now load-bearing rather than aspirational.
-The publish path, the findings table, the structured-output parser, the model
-registry, and the in-process event bus have all been deleted — the core is
-meaningfully smaller than the problem it solves.
-
-## What's next
-
-**0. Restructure — bet on Pi, and on primitives. Complete.** The agent harness
-runs as a one-shot embedded session in each sandbox. There is no agent server, no
-inbound sandbox connection, and no controller-side harness session to coordinate.
-
-**1. Core agent capabilities.** Make the agent smarter without bloating the
-kernel: first-class Skills, opt-in MCP, and grounding experiments (code-graph /
-retrieval so the agent understands code by structure, not blind grep).
-
-**2. Integrations.** Meet teams where they work — trigger from and report back to
-Slack, Microsoft Teams, Linear, and more, each a thin adapter on the same core.
-
-**3. Advanced runtime.** The infrastructure that makes it feel fast and powerful:
-sandbox boot-time optimization, more sandbox backends, an in-app browser, and the
-runtime capabilities leading agents ship — each built as an opt-in tool, the
-pi way.
-
 ## The bet
 
 If pi is right that a coding agent can be tiny and still excellent, a cloud
 agent can be too. Build the smallest correct core, make the extension surface
 delightful, and let an ecosystem grow the verticals. Power users get a cloud
-agent shaped exactly to their workflow — fully customized, fully featured, and
+agent shaped exactly to their workflow - fully customized, fully featured, and
 theirs.

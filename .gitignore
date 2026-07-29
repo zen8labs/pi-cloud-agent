@@ -19,3 +19,5 @@ e2b.toml
 .specstory/
 # Reference code consulted during architecture design, not part of the project
 references/
+# Codegraph 
+.codegraph
