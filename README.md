@@ -1,40 +1,37 @@
 # pi-cloud-agent
 
-[![CI](https://github.com/zen8labs/pi-cloud-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/zen8labs/pi-cloud-agent/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%3E%3D22.19-3c873a.svg)](package.json)
+[![CI](https://github.com/zen8labs/pi-cloud-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/zen8labs/pi-cloud-agent/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Node](https://img.shields.io/badge/node-%3E%3D22.19-3c873a.svg)](package.json)
 
-A minimal, extensible core for coding agents that run in the cloud.
+**Background agents, without the backend.**
 
-Something triggers a run — a webhook, the dashboard, an API call. The controller
-verifies it, mints a short-lived credential scoped to one repository, and starts
-an isolated sandbox. Inside, an agent clones the repository and does the work,
-posting its own results back to the forge with ordinary tools like `git` and
-`gh`. The controller records what happened and reclaims the machine.
+Code review, issue triage, research bots — every agentic product rebuilds the same 80%: a durable queue, an isolated machine, credentials that survive sitting next to untrusted code, a log someone can replay. This is that 80%, in under 8,000 lines, MIT, on your own server.
 
-That is the whole product. Everything specific to a task — reviewing a pull
-request, answering a question about a codebase — is a **profile**, and profiles
-are the extension surface.
+You write the other 20%.
 
-## Why it is this small
+## Principles
 
-The interesting decisions here are subtractions:
+- **Small enough to read.** Under 8,000 lines of TypeScript monorepo. You can audit every line that touches your credentials in an evening, which is the only honest reason to trust it with one.
+- **Composable, not configurable.** Three contracts — a vertical, a compute backend, a forge. No plugin registry, no config DSL, no lifecycle hooks.
+- **Boring on purpose.** Postgres and one reconciliation loop. No workflow engine, no message broker, no cache.
+- **Deleting is design work.** Every feature is a liability. The default answer to "should we add this?" is "not yet, and probably not here."
 
-- **No workflow engine.** Run state lives in Postgres and a single reconciliation
-  loop repairs it. A controller restart is indistinguishable from a slow tick, so
-  there is no Temporal, no trigger.dev, and no in-memory run lifecycle to lose.
-  → [docs/resumability.md](docs/resumability.md)
-- **No event bus and no Redis.** Postgres already holds every event durably;
-  `LISTEN/NOTIFY` is a wake-up hint, and polling is the correctness baseline.
-- **No publishing step.** The agent posts its own review. There is no
-  controller-side reporting tool, no output parser, and no findings table — which
-  means there is no way for the controller to disagree with what the agent
-  actually did.
-- **Two methods of sandbox contract.** `create` and `stop`. The sandbox is
-  outbound-only, so no provider needs to expose tunnels or reachability.
-  → [docs/adding-a-sandbox-provider.md](docs/adding-a-sandbox-provider.md)
-- **One model.** One configured model means one credential, so there is no
-  provider matrix to leak the wrong key into a sandbox.
+Complexity belongs compressed inside the abstraction, not spread across the surface.
+
+## How a run works
+
+1. Something triggers it — a webhook, the dashboard, an API call.
+2. The controller mints a credential scoped to one repository and boots a sandbox.
+3. Inside, an agent clones the repo, does the work, and posts its own result with ordinary tools like `git` and `gh`.
+4. Every step lands in an append-only log you can stream live or replay later.
+5. The machine is reclaimed.
+
+Nobody is typing turn by turn. That is the point.
+
+## What it is not
+
+A remote dev environment. There is nothing to attach to — the controller cannot even dial into a sandbox, by design. If you want a durable machine you ssh into, that is a different and better tool.
+
+The unit here is a **run**: an event starts it, it ends, and what survives is the outcome and the log.
 
 ## Quickstart
 
@@ -50,27 +47,15 @@ pnpm controller           # :8080
 pnpm web                  # :3000
 ```
 
-Start a run:
+## Why it is this small
 
-```bash
-curl -sS -X POST http://localhost:8080/runs \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "repo": "owner/repo",
-    "prompt": "Inspect the repository and report its latest commit.",
-    "profile": "general"
-  }'
-```
+The interesting decisions are subtractions:
 
-Then watch it, resumably:
-
-```bash
-curl -N http://localhost:8080/runs/<run-id>/stream
-```
-
-`CONTROL_PLANE_URL` must be reachable **from inside the sandbox**. With a hosted
-sandbox provider that means a public tunnel, not `localhost`. See
-[docs/operations.md](docs/operations.md).
+- **No workflow engine.** Run state lives in Postgres and one reconciliation loop repairs it, so a restart is indistinguishable from a slow tick. No Temporal, no trigger.dev, no run lifecycle held in memory to lose. → [docs/resumability.md](docs/resumability.md)
+- **No event bus, no Redis.** Postgres already stores every event; `LISTEN/NOTIFY` is a wake-up hint and polling is the correctness baseline.
+- **No publishing step.** The agent posts its own review. No output parser, no findings table, and therefore no way for the controller to disagree with what the agent actually did.
+- **Two methods of sandbox contract.** `create` and `stop`. The sandbox is outbound-only, so no backend has to expose tunnels or reachability. → [docs/adding-a-sandbox-provider.md](docs/adding-a-sandbox-provider.md)
+- **One model.** One configured model means one credential, so there is no provider matrix to leak the wrong key into a sandbox.
 
 ## Layout
 
@@ -86,23 +71,7 @@ packages/
   runtime/        runs inside the sandbox — untrusted
 ```
 
-The split is by **substitutability and trust**, not by feature. `packages/runtime`
-executes untrusted repository code and may depend only on `packages/protocol`;
-`pnpm boundaries` enforces that in CI.
-
-Each package has its own README covering what it owns, what it may depend on, its
-invariants, and a map of its files. Start there when you land in a directory
-rather than at the root.
-
-## Extending it
-
-| To add | Read | Effort |
-|---|---|---|
-| a vertical | [docs/adding-a-profile.md](docs/adding-a-profile.md) | one directory, one registry line |
-| a sandbox backend | [docs/adding-a-sandbox-provider.md](docs/adding-a-sandbox-provider.md) | two methods |
-| a forge | [docs/adding-a-vcs-provider.md](docs/adding-a-vcs-provider.md) | one file |
-
-None of these require touching the controller.
+The split is by **substitutability and trust**, not by feature. `packages/runtime` executes untrusted repository code and may depend only on `packages/protocol`; `pnpm boundaries` enforces that in CI.
 
 ## Documentation
 
@@ -111,32 +80,16 @@ None of these require touching the controller.
 - [AGENTS.md](AGENTS.md) — index for coding agents, plus the enforced rules
 - [docs/](docs/) — resumability, secrets, testing, operations, extension guides
 
-## Security posture
-
-Honest about what it is: the sandbox receives a repo-scoped, short-lived forge
-token and one model key in its environment. Once repository code runs alongside a
-token, that token is compromised in principle — the controls are scope, TTL, and
-isolation, not obfuscation. The operator API has no authentication in this phase
-and is meant for localhost or a private network. Details and the intended next
-step in [docs/secrets.md](docs/secrets.md).
-
-To report a vulnerability, use [private disclosure](https://github.com/zen8labs/pi-cloud-agent/security/advisories/new),
-not a public issue — see [SECURITY.md](SECURITY.md).
-
 ## Contributing
 
-Profiles, sandbox backends, and forges are the surfaces this project wants to
-grow, and none of them require touching the controller. Bug fixes, corrected
-docs, and deletions are equally welcome.
+Profiles, sandbox backends, and forges are the surfaces this project wants to grow, and none of them require touching the controller. Bug fixes, corrected docs, and deletions are equally welcome.
 
 ```bash
 pnpm install && pnpm up && pnpm db:migrate
 pnpm verify      # what CI runs
 ```
 
-[CONTRIBUTING.md](CONTRIBUTING.md) covers the setup, the rules CI enforces, and
-the short list of changes worth discussing before you write code. By
-participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+[CONTRIBUTING.md](CONTRIBUTING.md) covers the setup, the rules CI enforces, and the short list of changes worth discussing before you write code. By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 

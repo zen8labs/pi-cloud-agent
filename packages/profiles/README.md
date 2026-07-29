@@ -22,24 +22,15 @@ A profile owns three decisions and nothing else:
 
 ## Invariants
 
-- **`accepts` must never green-light something `buildTask` would refuse.** The
-  shared test block asserts this for every registered profile.
-- **Every config field needs a default.** Stored config is validated through your
-  schema on read, so a schema that rejects `{}` breaks every unconfigured
-  repository.
-- **The controller never reads inside a config.** It stores the JSON opaquely in
-  `repo_config` and hands it back. That is what keeps profile settings out of the
-  core — and it means a new setting needs no migration and no API change.
-- **No network calls in `buildTask`.** It runs on the provisioning path.
-  Enrichment that needs a forge belongs in webhook intake.
-- **Profiles do not publish results.** The agent posts its own outcomes from
-  inside the sandbox with `git` and `gh`. There is no reporting tool behind you.
+- **`accepts` must never green-light something `buildTask` would refuse.** The shared test block asserts this for every registered profile.
+- **Every config field needs a default.** Stored config is validated through your schema on read, so a schema that rejects `{}` breaks every unconfigured repository.
+- **The controller never reads inside a config.** It stores the JSON opaquely in `repo_config` and hands it back. That is what keeps profile settings out of the core — and it means a new setting needs no migration and no API change.
+- **No network calls in `buildTask`.** It runs on the provisioning path. Enrichment that needs a forge belongs in webhook intake.
+- **Profiles do not publish results.** The agent posts its own outcomes from inside the sandbox with `git` and `gh`. There is no reporting tool behind you.
 
 ## Adding one
 
-One directory and one line in `index.ts`. Full walkthrough, including how skills
-and config schemas work:
-[../../docs/adding-a-profile.md](../../docs/adding-a-profile.md).
+One directory and one line in `index.ts`. Full walkthrough, including how skills and config schemas work: [../../docs/adding-a-profile.md](../../docs/adding-a-profile.md).
 
 ```bash
 pnpm vitest run packages/profiles/profiles.test.ts

@@ -1,13 +1,10 @@
 # @pi-cloud-agent/controller
 
-> **This is the trusted zone.** It holds credentials and owns the database. It
-> never executes repository code.
+> **This is the trusted zone.** It holds credentials and owns the database. It never executes repository code.
 
-Verifies triggers, decides what runs and when, mints scoped credentials, starts
-sandboxes, records what happened, and reclaims machines.
+Verifies triggers, decides what runs and when, mints scoped credentials, starts sandboxes, records what happened, and reclaims machines.
 
-**Depends on:** `protocol`, `profiles`, `sandbox`, `vcs`. It is the only package
-allowed to compose everything — and the only one that reaches Postgres.
+**Depends on:** `protocol`, `profiles`, `sandbox`, `vcs`. It is the only package allowed to compose everything — and the only one that reaches Postgres.
 
 ## Files
 
@@ -34,24 +31,13 @@ allowed to compose everything — and the only one that reaches Postgres.
 
 ## Invariants
 
-- **Only `config.ts` reads `process.env`.** Provider packages are handed the
-  environment and validate their own slice, which is why adding a provider needs
-  no change here. The `noProcessEnv` lint rule enforces it.
-- **Every run transition is a single `UPDATE` with its expected state in the
-  `WHERE`**, returning whether it changed a row. No read-then-write, no
-  transaction held open across network I/O. See
-  [../../docs/resumability.md](../../docs/resumability.md).
-- **No in-memory run state.** If it is needed to resume a run, it is a column.
-  This is the rule that removed the event bus.
-- **No profile- or provider-specific behavior.** Webhook intake asks every profile
-  whether it wants a trigger; this app contains no mention of code review. If you
-  find yourself adding a condition here, it belongs in a profile's `accepts`.
-- **`attachSandbox` is the first durable write after a machine exists.** Before it
-  commits a crash leaks a sandbox; after it, the reconciler always finds it.
-- **The controller never parses agent output.** The agent actuates its own
-  outcomes. Adding a parser here is one of the changes to raise first.
-- **Migrations are never applied on boot.** A schema change is a deliberate step,
-  not a side effect of one replica winning a race during a deploy.
+- **Only `config.ts` reads `process.env`.** Provider packages are handed the environment and validate their own slice, which is why adding a provider needs no change here. The `noProcessEnv` lint rule enforces it.
+- **Every run transition is a single `UPDATE` with its expected state in the `WHERE`**, returning whether it changed a row. No read-then-write, no transaction held open across network I/O. See [../../docs/resumability.md](../../docs/resumability.md).
+- **No in-memory run state.** If it is needed to resume a run, it is a column. This is the rule that removed the event bus.
+- **No profile- or provider-specific behavior.** Webhook intake asks every profile whether it wants a trigger; this app contains no mention of code review. If you find yourself adding a condition here, it belongs in a profile's `accepts`.
+- **`attachSandbox` is the first durable write after a machine exists.** Before it commits a crash leaks a sandbox; after it, the reconciler always finds it.
+- **The controller never parses agent output.** The agent actuates its own outcomes. Adding a parser here is one of the changes to raise first.
+- **Migrations are never applied on boot.** A schema change is a deliberate step, not a side effect of one replica winning a race during a deploy.
 
 ## Working on it
 
@@ -62,13 +48,8 @@ pnpm --filter @pi-cloud-agent/controller db:generate     # after editing db/sche
 pnpm test:integration                                    # needs `pnpm up`
 ```
 
-`config.ts` reads `.env` from the repository root. `CONTROL_PLANE_URL` must be
-reachable **from inside the sandbox** — see
-[../../docs/operations.md](../../docs/operations.md), which also covers debugging
-a run by symptom.
+`config.ts` reads `.env` from the repository root. `CONTROL_PLANE_URL` must be reachable **from inside the sandbox** — see [../../docs/operations.md](../../docs/operations.md), which also covers debugging a run by symptom.
 
 ## Deployment note
 
-The HTTP surface and the reconciler share a process because it is simpler, not
-because they must. They exchange nothing in memory, so splitting them is a
-deployment decision requiring no code change.
+The HTTP surface and the reconciler share a process because it is simpler, not because they must. They exchange nothing in memory, so splitting them is a deployment decision requiring no code change.

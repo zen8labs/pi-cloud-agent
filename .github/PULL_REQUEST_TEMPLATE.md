@@ -1,11 +1,8 @@
-<!--
-One concern per PR. If this description needs the word "also", it may be two PRs.
--->
+<!-- One concern per PR. If this description needs the word "also", it may be two PRs. -->
 
 ## What and why
 
-<!-- The problem you hit, the approach you took, and what you rejected. The diff
-already shows what changed; tell us why. -->
+<!-- The problem you hit, the approach you took, and what you rejected. The diff already shows what changed; tell us why. -->
 
 Closes #
 
@@ -18,9 +15,7 @@ Closes #
 
 ## Does this cross a line that needs a decision?
 
-Tick anything that applies — none of these block the PR, they just mean a
-maintainer should weigh in before merge. See
-[CONTRIBUTING.md](../blob/main/CONTRIBUTING.md).
+Tick anything that applies — none of these block the PR, they just mean a maintainer should weigh in before merge. See [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md).
 
 - [ ] adds or widens a contract in `packages/protocol`
 - [ ] adds a dependency to `packages/runtime`, or otherwise moves the trust boundary

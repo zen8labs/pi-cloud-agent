@@ -19,20 +19,13 @@ Everything else follows from this line.
               └──────── outbound HTTP only ────────────────┘
 ```
 
-The controller never dials into a sandbox. That single constraint is what keeps
-the sandbox provider contract at two methods, and what lets any backend —
-E2B today, Docker or Modal later — be interchangeable.
+The controller never dials into a sandbox. That single constraint is what keeps the sandbox provider contract at two methods, and what lets any backend — E2B today, Docker or Modal later — be interchangeable.
 
-The boundary is enforced mechanically, not by convention: `packages/runtime`
-declares a dependency on `packages/protocol` and nothing else, pnpm's isolated
-`node_modules` makes an undeclared import unresolvable, and `pnpm boundaries`
-fails CI on a declared one.
+The boundary is enforced mechanically, not by convention: `packages/runtime` declares a dependency on `packages/protocol` and nothing else, pnpm's isolated `node_modules` makes an undeclared import unresolvable, and `pnpm boundaries` fails CI on a declared one.
 
 ## The seven building blocks, and where they live
 
-The vocabulary for reasoning about a cloud agent, mapped onto the tree. Note that
-the packages are **not** split along these lines — they are split by what a
-contributor might substitute — so this table is how you find things.
+The vocabulary for reasoning about a cloud agent, mapped onto the tree. Note that the packages are **not** split along these lines — they are split by what a contributor might substitute — so this table is how you find things.
 
 | Building block | Where it lives |
 |---|---|
@@ -44,9 +37,7 @@ contributor might substitute — so this table is how you find things.
 | **Observability** — what happened | `run_events` + `/runs/:id/stream` + `apps/web` |
 | **Profiles** — the vertical | `packages/profiles` |
 
-Actuation having no implementation is the point, not an omission. A controller
-that posted the agent's findings would need to parse them, and then it could
-disagree with what the agent actually did.
+Actuation having no implementation is the point, not an omission. A controller that posted the agent's findings would need to parse them, and then it could disagree with what the agent actually did.
 
 ## Run lifecycle
 
@@ -71,11 +62,7 @@ trigger ──► runs row (queued)
             reclaimed
 ```
 
-Provisioning is a **short transaction**, not a long-lived task. Once
-`attachSandbox` commits, everything needed to finish or recover the run is on its
-row, and the process that started it can die without consequence. This is the
-central difference from the earlier design, where a coroutine held each run's
-lifecycle in memory and a restart force-failed live work.
+Provisioning is a **short transaction**, not a long-lived task. Once `attachSandbox` commits, everything needed to finish or recover the run is on its row, and the process that started it can die without consequence. This is the central difference from the earlier design, where a coroutine held each run's lifecycle in memory and a restart force-failed live work.
 
 → [docs/resumability.md](docs/resumability.md) for the reconciler's exact queries.
 
@@ -89,10 +76,7 @@ Three tables. That is the entire persistent state of the system.
 | `run_events` | append-only log, `(run_id, seq)` — the only observability source |
 | `repo_config` | per-repo, per-profile JSON the controller stores but never reads |
 
-`repo_config` is what keeps profile-specific settings out of the core. A profile
-publishes a Zod schema; the controller validates through the profile, stores the
-result opaquely, and the dashboard renders the schema. Adding a profile setting
-needs no migration and no API change.
+`repo_config` is what keeps profile-specific settings out of the core. A profile publishes a Zod schema; the controller validates through the profile, stores the result opaquely, and the dashboard renders the schema. Adding a profile setting needs no migration and no API change.
 
 ## Observability
 
@@ -101,20 +85,13 @@ One source of truth, two access patterns:
 - `GET /runs/:id/events?afterSeq=N` — history
 - `GET /runs/:id/stream` — Server-Sent Events, live
 
-Every data frame carries `id: <seq>`. A browser echoes the last one back as
-`Last-Event-ID` on reconnect, so resuming is exact rather than approximate, and
-history and live tail are the same code path. Status frames are derived from the
-run row and carry no id, which makes them safe to re-send.
+Every data frame carries `id: <seq>`. A browser echoes the last one back as `Last-Event-ID` on reconnect, so resuming is exact rather than approximate, and history and live tail are the same code path. Status frames are derived from the run row and carry no id, which makes them safe to re-send.
 
-Telemetry (tokens, tool calls, logs) is best-effort and never load-bearing. The
-terminal status report is delivered with retries and is the *only* thing that
-completes a run. A run that emits a thousand tokens and never reports a status is
-a timeout, not a success.
+Telemetry (tokens, tool calls, logs) is best-effort and never load-bearing. The terminal status report is delivered with retries and is the *only* thing that completes a run. A run that emits a thousand tokens and never reports a status is a timeout, not a success.
 
 ## The contracts
 
-All three live in `packages/protocol`, so an implementation package depends on the
-contract and never on another implementation.
+All three live in `packages/protocol`, so an implementation package depends on the contract and never on another implementation.
 
 | Contract | Resolver | Implementations |
 |---|---|---|
@@ -122,20 +99,12 @@ contract and never on another implementation.
 | `SandboxProvider` | `createSandboxProvider(name, env)` | `e2b` |
 | `VCSProvider` | `createVcsProvider(name, env)` | `github`, `gitlab`, `bitbucket` |
 
-`TaskSpec` is the pivot: a profile turns a normalized `Trigger` into the
-repository, the prompt, and an optional budget. Everything below that line is
-infrastructure; everything above it is a vertical.
+`TaskSpec` is the pivot: a profile turns a normalized `Trigger` into the repository, the prompt, and an optional budget. Everything below that line is infrastructure; everything above it is a vertical.
 
-Each factory validates its own slice of the environment, which is why adding a
-provider requires no change to the controller's configuration schema.
+Each factory validates its own slice of the environment, which is why adding a provider requires no change to the controller's configuration schema.
 
 ## Deployment shape
 
-The HTTP surface and the reconciler share a process because it is simpler, not
-because they must. They exchange nothing in memory — all coordination is through
-Postgres — so splitting them across machines is a deployment decision that needs
-no code change. That is the payoff for not having an in-process event bus.
+The HTTP surface and the reconciler share a process because it is simpler, not because they must. They exchange nothing in memory — all coordination is through Postgres — so splitting them across machines is a deployment decision that needs no code change. That is the payoff for not having an in-process event bus.
 
-The sandbox image is built separately (`pnpm sandbox:template`) and pins the agent
-harness to the version its bundle was typechecked against. Controller-only changes
-need a restart, not a template rebuild.
+The sandbox image is built separately (`pnpm sandbox:template`) and pins the agent harness to the version its bundle was typechecked against. Controller-only changes need a restart, not a template rebuild.

@@ -23,9 +23,7 @@ None of these require touching the controller.
 
 ## Elsewhere
 
-- [../ARCHITECTURE.md](../ARCHITECTURE.md) — the two trust zones, the run lifecycle,
-  and where each of the seven building blocks lives
+- [../ARCHITECTURE.md](../ARCHITECTURE.md) — the two trust zones, the run lifecycle, and where each of the seven building blocks lives
 - [../VISION.md](../VISION.md) — what this is for, and what it will refuse to become
 - [../AGENTS.md](../AGENTS.md) — the index coding agents read
-- each package has its own README: what it owns, its invariants, and a map of its
-  files
+- each package has its own README: what it owns, its invariants, and a map of its files

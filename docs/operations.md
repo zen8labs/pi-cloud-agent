@@ -14,15 +14,11 @@ pnpm controller           # :8080
 pnpm web                  # :3000
 ```
 
-`.env` at the repository root configures the controller. It is gitignored and
-holds live credentials — **never print its values.**
+`.env` at the repository root configures the controller. It is gitignored and holds live credentials — **never print its values.**
 
 ### The one setting people get wrong
 
-`CONTROL_PLANE_URL` must be reachable **from inside the sandbox**, because the
-sandbox is outbound-only and reports back over it. With a hosted provider like
-E2B, `http://localhost:8080` is unreachable and every run goes silent until the
-reconciler times it out.
+`CONTROL_PLANE_URL` must be reachable **from inside the sandbox**, because the sandbox is outbound-only and reports back over it. With a hosted provider like E2B, `http://localhost:8080` is unreachable and every run goes silent until the reconciler times it out.
 
 Use a tunnel:
 
@@ -31,22 +27,17 @@ cloudflared tunnel --url http://localhost:8080
 # then set CONTROL_PLANE_URL to the public https:// URL it prints
 ```
 
-A run that provisions, produces no events, and fails ten minutes later with
-"stopped reporting" is almost always this.
+A run that provisions, produces no events, and fails ten minutes later with "stopped reporting" is almost always this.
 
 ## When to rebuild the sandbox template
 
-Rebuild after changing `packages/runtime/**`, `Dockerfile.sandbox`, or the pinned
-agent harness version:
+Rebuild after changing `packages/runtime/**`, `Dockerfile.sandbox`, or the pinned agent harness version:
 
 ```bash
 pnpm sandbox:template
 ```
 
-Controller-only changes need a restart, not a rebuild. The build bundles the
-runtime to a single file and writes `dist/package.json` pinning the harness to the
-version the bundle was typechecked against, so the image cannot drift from the
-workspace.
+Controller-only changes need a restart, not a rebuild. The build bundles the runtime to a single file and writes `dist/package.json` pinning the harness to the version the bundle was typechecked against, so the image cannot drift from the workspace.
 
 ## Watching a run
 
@@ -94,10 +85,7 @@ events: git.cloned → git.checkout_ready → setup.skipped
         → agent.session_complete → status{done}
 ```
 
-The terminal evidence is a `status` event followed by the run row reaching
-`succeeded` or `failed`. **Token and tool-call events are telemetry and never
-control completion** — a run that streamed a thousand tokens and never reported a
-status is a timeout, not a success.
+The terminal evidence is a `status` event followed by the run row reaching `succeeded` or `failed`. **Token and tool-call events are telemetry and never control completion** — a run that streamed a thousand tokens and never reported a status is a timeout, not a success.
 
 ## Diagnosing by symptom
 
@@ -112,8 +100,7 @@ status is a timeout, not a success.
 | webhook returns 204 | understood and deliberately ignored | the profile's `accepts`, and `repo_config` |
 | `attempt` climbing | retryable provisioning failures | the provider's error in the logs |
 
-A 204 from a webhook is the one that looks like a bug and is not. Check whether a
-repository has turned the trigger off:
+A 204 from a webhook is the one that looks like a bug and is not. Check whether a repository has turned the trigger off:
 
 ```bash
 psql -c "select * from repo_config;"
@@ -125,19 +112,13 @@ psql -c "select * from repo_config;"
 curl -X POST localhost:8080/runs/$RUN_ID/cancel
 ```
 
-Cancelling only writes state. The reconciler reclaims the machine on its next
-tick, using the same path as a crash or a timeout — there is no separate teardown
-code to go wrong.
+Cancelling only writes state. The reconciler reclaims the machine on its next tick, using the same path as a crash or a timeout — there is no separate teardown code to go wrong.
 
 ## Restarts and deploys
 
-Restarting the controller is safe at any moment. In-flight runs keep working:
-their sandboxes are still running and still reporting, and whichever process comes
-up next finishes the bookkeeping. Nothing is force-failed.
+Restarting the controller is safe at any moment. In-flight runs keep working: their sandboxes are still running and still reporting, and whichever process comes up next finishes the bookkeeping. Nothing is force-failed.
 
-On `SIGINT`/`SIGTERM` the reconciler stops claiming and drains in-flight
-provisioning before exiting, so a sandbox whose id has not yet been stored is not
-leaked.
+On `SIGINT`/`SIGTERM` the reconciler stops claiming and drains in-flight provisioning before exiting, so a sandbox whose id has not yet been stored is not leaked.
 
 → [resumability.md](resumability.md) for why this works.
 
@@ -158,6 +139,4 @@ curl -sS -X POST http://localhost:8080/runs \
   -d '{"repo":"owner/repo","prompt":"Report the latest commit.","profile":"general"}'
 ```
 
-Run these after changing the sandbox image, the runtime, or the model
-configuration — they validate the one thing offline tests cannot: that the image,
-the harness, the gateway, and the callback path work together.
+Run these after changing the sandbox image, the runtime, or the model configuration — they validate the one thing offline tests cannot: that the image, the harness, the gateway, and the callback path work together.
