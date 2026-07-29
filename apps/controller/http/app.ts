@@ -33,8 +33,13 @@ export function createApp(deps: Deps): Hono<AppEnv> {
 
   // The dashboard is a separate origin and consumes the SSE stream from the
   // browser, so it needs CORS. Webhook and internal routes authenticate
-  // themselves and are unaffected.
-  app.use("*", cors({ origin: deps.config.web.corsOrigins, credentials: false }));
+  // themselves and are unaffected. A lone "*" means any origin; Hono only
+  // treats it as a wildcard as a bare string, not as an array element.
+  const corsOrigins = deps.config.web.corsOrigins;
+  app.use(
+    "*",
+    cors({ origin: corsOrigins.includes("*") ? "*" : corsOrigins, credentials: false }),
+  );
 
   app.onError((error, c) => {
     deps.log.error("unhandled request error", { path: c.req.path, error });
