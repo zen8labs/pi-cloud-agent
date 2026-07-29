@@ -28,6 +28,6 @@
     "@pi-cloud-agent/tsconfig": "workspace:*",
     "@types/node": "24.13.3",
     "drizzle-kit": "catalog:",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   }
 }
