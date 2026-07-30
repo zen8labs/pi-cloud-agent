@@ -21,13 +21,13 @@
     "drizzle-orm": "catalog:",
     "hono": "catalog:",
     "postgres": "catalog:",
-    "tsx": "4.23.1",
+    "tsx": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@pi-cloud-agent/tsconfig": "workspace:*",
-    "@types/node": "24.13.3",
+    "@types/node": "catalog:",
     "drizzle-kit": "catalog:",
-    "typescript": "5.9.3"
+    "typescript": "catalog:"
   }
 }
