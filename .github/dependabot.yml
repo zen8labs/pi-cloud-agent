@@ -1,16 +1,38 @@
 version: 2
 
-# Grouped and weekly on purpose. A daily per-package PR stream is noise that
-# maintainers learn to ignore, which is worse than updating a week later.
+# Grouped, weekly, and minor/patch only on purpose.
+#
+# A daily per-package PR stream is noise that maintainers learn to ignore, which
+# is worse than updating a week later. Majors are worse still: a major is a
+# migration whose commit set someone has to actually read, so it never files
+# itself. We go looking for those when we have a reason to.
+#
+# Tradeoff worth knowing: `ignore` also suppresses Dependabot *security* PRs, so
+# a CVE fixed only in a new major will not arrive as a pull request. Dependabot
+# *alerts* are repository settings and are unaffected, so they remain the
+# backstop -- keep them on. The same applies to the github-actions ecosystem
+# below: give the action majors a manual sweep once or twice a year so the runner
+# images do not go stale.
 updates:
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
+    # pnpm's `minimumReleaseAge` already blocks same-day installs; this stops the
+    # PR from being written in the first place.
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
     groups:
       dev-tooling:
+        update-types:
+          - minor
+          - patch
         patterns:
           - "@biomejs/*"
           - "turbo"
@@ -32,8 +54,18 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    open-pull-requests-limit: 1
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major
     groups:
       actions:
+        update-types:
+          - minor
+          - patch
         patterns:
           - "*"
     commit-message:
