@@ -4,15 +4,7 @@ Running it, watching it, and working out what went wrong.
 
 ## Local setup
 
-```bash
-pnpm install
-cp .env.example .env
-pnpm up                   # Postgres on 5532
-pnpm db:migrate
-pnpm sandbox:template     # build the sandbox image and push the E2B template
-pnpm controller           # :8080
-pnpm web                  # :3000
-```
+For first-time account setup, dependencies, E2B template creation, ngrok, and the first real run, follow [DEVELOPMENT.md](../DEVELOPMENT.md). This document assumes the development environment is configured and focuses on operating it.
 
 `.env` at the repository root configures the controller. It is gitignored and holds live credentials. **Never print its values.**
 
@@ -20,14 +12,13 @@ pnpm web                  # :3000
 
 `CONTROL_PLANE_URL` must be reachable **from inside the sandbox**, because the sandbox is outbound-only and reports back over it. With a hosted provider like E2B, `http://localhost:8080` is unreachable and every run goes silent until the reconciler times it out.
 
-Use a tunnel:
+Use the authenticated ngrok tunnel configured during development:
 
 ```bash
-cloudflared tunnel --url http://localhost:8080
-# then set CONTROL_PLANE_URL to the public https:// URL it prints
+ngrok http --url <your-domain>.ngrok.app 8080
 ```
 
-A run that provisions, produces no events, and fails ten minutes later with "stopped reporting" is almost always this.
+Set `CONTROL_PLANE_URL` to that HTTPS URL and restart the controller after any change. A run that provisions, produces no events, and fails ten minutes later with "stopped reporting" is almost always this.
 
 ## When to rebuild the sandbox template
 
@@ -128,7 +119,7 @@ Costs money; needs real credentials in `.env`.
 
 ```bash
 pnpm sandbox:template
-pnpm test:live
+LIVE_TEST_REPO=owner/repository pnpm test:live
 ```
 
 Or by hand:

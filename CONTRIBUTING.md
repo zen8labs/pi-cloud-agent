@@ -2,17 +2,9 @@
 
 Thanks for being here. This project is small on purpose, and that shapes what a good contribution looks like. Read [VISION.md](VISION.md) once before you start. It explains what this is for and, more usefully, what it will refuse to become.
 
-## The short version
+## Set up the project
 
-```bash
-pnpm install
-cp .env.example .env      # fill in E2B and model credentials
-pnpm up                   # Postgres on 5532
-pnpm db:migrate
-pnpm verify               # what CI runs
-```
-
-Then branch, commit, and open a pull request. `pnpm verify` passing locally means CI will almost certainly pass too.
+Follow [DEVELOPMENT.md](DEVELOPMENT.md) for the complete environment setup, including E2B, the sandbox template, model credentials, ngrok, Postgres, and a first real run. Then branch, make your change, and run `pnpm verify` before opening a pull request. A local pass means CI will almost certainly pass too.
 
 ## Where contributions land best
 

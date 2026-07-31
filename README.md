@@ -33,19 +33,9 @@ A remote dev environment. There is nothing to attach to; the controller cannot e
 
 The unit here is a **run**: an event starts it, it ends, and what survives is the outcome and the log.
 
-## Quickstart
+## Development
 
-Requires Node 22.19+, pnpm, and Docker.
-
-```bash
-pnpm install
-cp .env.example .env      # then fill in E2B and model credentials
-pnpm up                   # Postgres on 5532
-pnpm db:migrate
-pnpm sandbox:template     # build the sandbox image and E2B template
-pnpm controller           # :8080
-pnpm web                  # :3000
-```
+Follow [DEVELOPMENT.md](DEVELOPMENT.md) from account setup through the first verified run.
 
 ## Why it is this small
 
@@ -77,6 +67,7 @@ The split is by **substitutability and trust**, not by feature. `packages/runtim
 
 - [VISION.md](VISION.md): what this is for, and what it will refuse to become
 - [ARCHITECTURE.md](ARCHITECTURE.md): the two trust zones and the run lifecycle
+- [DEVELOPMENT.md](DEVELOPMENT.md): complete local setup, E2B template, ngrok, and first run
 - [AGENTS.md](AGENTS.md): index for coding agents, plus the enforced rules
 - [docs/](docs/): resumability, secrets, testing, operations, extension guides
 
@@ -84,12 +75,7 @@ The split is by **substitutability and trust**, not by feature. `packages/runtim
 
 Profiles, sandbox backends, and forges are the surfaces this project wants to grow, and none of them require touching the controller. Bug fixes, corrected docs, and deletions are equally welcome.
 
-```bash
-pnpm install && pnpm up && pnpm db:migrate
-pnpm verify      # what CI runs
-```
-
-[CONTRIBUTING.md](CONTRIBUTING.md) covers the setup, the rules CI enforces, and the short list of changes worth discussing before you write code. By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+[DEVELOPMENT.md](DEVELOPMENT.md) covers environment setup and validation. [CONTRIBUTING.md](CONTRIBUTING.md) covers the rules CI enforces and the short list of changes worth discussing before you write code. By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 

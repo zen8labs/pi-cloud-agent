@@ -23,8 +23,7 @@ Separated by what they need to run, so a fresh clone can always run something.
 | `e2e` | `pnpm test:e2e` | Postgres, Chromium | yes |
 | `live` | `pnpm test:live` | real E2B + model credentials | **no** |
 
-`pnpm verify` runs unit and integration. Configuration is in `vitest.config.ts`.
-Local integration tests create and use `pi_cloud_agent_test`, separate from the development database, so a running controller cannot claim their rows.
+`pnpm verify` runs unit and integration. Configuration is in `vitest.config.ts`. Local integration tests create and use `pi_cloud_agent_test`, separate from the development database, so a running controller cannot claim their rows.
 
 The `e2e` project is the browser layer: Playwright specs in `apps/web/e2e` against the real controller and dashboard (configuration in `apps/web/playwright.config.ts`). It assumes no forge or sandbox credentials — the run it creates cannot provision, so it asserts the failure is *surfaced*: the badge flips to failed and the reason renders. That exercises the whole loop (form, API, queue, reconciler, SSE, activity feed) short of a real sandbox. Locally it reuses running dev servers, and with real credentials the same run succeeds instead; both terminal states pass.
 
@@ -78,7 +77,9 @@ They exist to validate the one thing offline tests cannot: that the sandbox imag
 
 ```bash
 pnpm sandbox:template
-pnpm test:live
+LIVE_TEST_REPO=owner/repository pnpm test:live
 ```
+
+The repository must be public or cloneable by the configured forge credential. Without `LIVE_TEST_REPO`, the paid test is skipped.
 
 See [operations.md](operations.md) for what a healthy run looks like.
