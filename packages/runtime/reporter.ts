@@ -1,11 +1,6 @@
-import {
-  createRedactor,
-  type RunEventInput,
-  type RunStatusReport,
-  redactUrlCredentials,
-} from "@pi-cloud-agent/protocol";
+import type { RunEventInput, RunStatusReport } from "@pi-cloud-agent/protocol";
 import type { RuntimeConfig } from "./config";
-import { secretValues } from "./config";
+import { createRuntimeRedactor } from "./config";
 
 /**
  * Outbound-only reporting.
@@ -32,8 +27,7 @@ const TELEMETRY_TIMEOUT_MS = 10_000;
 const STATUS_ATTEMPTS = 4;
 
 export function createReporter(config: RuntimeConfig): Reporter {
-  const redact = createRedactor(secretValues());
-  const clean = (text: string) => redact(redactUrlCredentials(text));
+  const clean = createRuntimeRedactor();
   const headers = {
     Authorization: `Bearer ${config.callbackToken}`,
     "Content-Type": "application/json",

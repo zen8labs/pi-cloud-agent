@@ -1,6 +1,6 @@
 import { SANDBOX_ENV } from "@pi-cloud-agent/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { readConfig } from "./config";
+import { createRuntimeRedactor, readConfig } from "./config";
 import { createReporter } from "./reporter";
 
 /**
@@ -12,6 +12,7 @@ import { createReporter } from "./reporter";
 
 const MODEL_KEY = "model-key-abcdefghijklmnop";
 const SCM_TOKEN = "ghs_tokenvalue1234567890";
+const CALLBACK_TOKEN = "callback-token-value-1234";
 
 interface Sent {
   path: string;
@@ -27,7 +28,7 @@ beforeEach(() => {
   const env: Record<string, string> = {
     [SANDBOX_ENV.runId]: "run-1",
     [SANDBOX_ENV.controlPlaneUrl]: "https://controller.test",
-    [SANDBOX_ENV.callbackToken]: "callback-token-value-1234",
+    [SANDBOX_ENV.callbackToken]: CALLBACK_TOKEN,
     [SANDBOX_ENV.taskPrompt]: "do the thing",
     [SANDBOX_ENV.model]: "aigateway/test-model",
     [SANDBOX_ENV.modelBaseUrl]: "https://gateway.test/v1",
@@ -116,6 +117,14 @@ describe("reporter", () => {
     const reporter = createReporter(readConfig());
     await reporter.status({ status: "error", detail: `clone failed using ${SCM_TOKEN}` });
     expect(JSON.stringify(sent[0]?.body)).not.toContain(SCM_TOKEN);
+  });
+
+  it("uses the same redactor for stderr-bound failures", () => {
+    const clean = createRuntimeRedactor();
+    const output = clean(`model=${MODEL_KEY} callback=${CALLBACK_TOKEN}`);
+    expect(output).not.toContain(MODEL_KEY);
+    expect(output).not.toContain(CALLBACK_TOKEN);
+    expect(output).toContain("[redacted]");
   });
 });
 

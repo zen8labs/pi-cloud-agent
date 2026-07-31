@@ -1,5 +1,10 @@
 import { join } from "node:path";
-import { SANDBOX_ENV, SANDBOX_PATHS } from "@pi-cloud-agent/protocol";
+import {
+  createRedactor,
+  redactUrlCredentials,
+  SANDBOX_ENV,
+  SANDBOX_PATHS,
+} from "@pi-cloud-agent/protocol";
 
 /**
  * Everything this process knows, read once from the environment.
@@ -105,7 +110,7 @@ export function readConfig(): RuntimeConfig {
  * added by a future provider is redacted by default instead of by remembering to
  * update this file. See docs/secrets.md.
  */
-export function secretValues(): string[] {
+function secretValues(): string[] {
   const pattern = /(TOKEN|API_KEY|SECRET|PASSWORD)$/;
   const values: string[] = [];
   for (const [name, value] of Object.entries(process.env)) {
@@ -113,4 +118,10 @@ export function secretValues(): string[] {
     if (pattern.test(name) || name === SANDBOX_ENV.callbackToken) values.push(value);
   }
   return values;
+}
+
+/** Scrub every runtime-owned output path, including stderr and HTTP payloads. */
+export function createRuntimeRedactor(): (text: string) => string {
+  const redact = createRedactor(secretValues());
+  return (text) => redact(redactUrlCredentials(text));
 }

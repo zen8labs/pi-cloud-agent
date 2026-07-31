@@ -1,7 +1,9 @@
 import { runAgentSession } from "./agent";
-import { readConfig } from "./config";
+import { createRuntimeRedactor, readConfig } from "./config";
 import { createReporter } from "./reporter";
 import { configureGitCredentials, prepareCheckout, runSetupScript } from "./workspace";
+
+const clean = createRuntimeRedactor();
 
 /**
  * The sandbox entry point.
@@ -30,7 +32,7 @@ async function main(): Promise<void> {
     await reporter.flush();
     await reporter.status({ status: "done" });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
+    const detail = clean(error instanceof Error ? error.message : String(error));
     process.stderr.write(`run failed: ${detail}\n`);
     await reporter.flush().catch(() => undefined);
     await reporter.status({ status: "error", detail });
@@ -41,6 +43,6 @@ async function main(): Promise<void> {
 await main().catch((error) => {
   // Reaching here means even reporting failed. Say so on stderr, which the
   // sandbox provider captures, and let the reconciler handle the run.
-  process.stderr.write(`runtime could not report its outcome: ${String(error)}\n`);
+  process.stderr.write(`runtime could not report its outcome: ${clean(String(error))}\n`);
   process.exitCode = 1;
 });

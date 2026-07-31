@@ -64,7 +64,7 @@ const schema = z.object({
   RUN_WALL_CLOCK_SECONDS: z.coerce.number().int().positive().default(3600),
 
   WEB_REPOS: commaList,
-  WEB_CORS_ORIGINS: z.string().default("*"),
+  WEB_CORS_ORIGINS: z.string().default("http://localhost:3000"),
 });
 
 export type Env = Readonly<Record<string, string | undefined>>;

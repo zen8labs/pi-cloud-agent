@@ -9,10 +9,13 @@ import type { Reporter } from "./reporter";
 
 const CLONE_DEPTH = 100;
 const SETUP_TIMEOUT_MS = 300_000;
+const MAX_OUTPUT_CHARS = 1_000_000;
 
 interface CommandResult {
   code: number;
   output: string;
+  signal: NodeJS.Signals | null;
+  timedOut: boolean;
 }
 
 function run(
@@ -23,21 +26,47 @@ function run(
   return new Promise((resolve) => {
     const child = spawn(command, args, { cwd: options.cwd, env: process.env });
     let output = "";
+    let timedOut = false;
+    let settled = false;
     const collect = (chunk: Buffer) => {
       output += chunk.toString();
+      if (output.length > MAX_OUTPUT_CHARS) output = output.slice(-MAX_OUTPUT_CHARS);
     };
     child.stdout.on("data", collect);
     child.stderr.on("data", collect);
 
     const timer = options.timeoutMs
-      ? setTimeout(() => child.kill("SIGKILL"), options.timeoutMs)
+      ? setTimeout(() => {
+          timedOut = true;
+          child.kill("SIGKILL");
+        }, options.timeoutMs)
       : null;
 
-    child.on("close", (code) => {
+    const finish = (result: CommandResult) => {
+      if (settled) return;
+      settled = true;
       if (timer) clearTimeout(timer);
-      // Git echoes the remote URL on failure, and that URL carries the token.
-      resolve({ code: code ?? 0, output: redactUrlCredentials(output).trim() });
+      resolve(result);
+    };
+
+    child.on("error", (error) => {
+      collect(Buffer.from(`\n${error.message}`));
+      finish({
+        code: 1,
+        output: redactUrlCredentials(output).trim(),
+        signal: null,
+        timedOut,
+      });
     });
+    child.on("close", (code, signal) =>
+      finish({
+        // A process closed by a signal has no exit code. It did not succeed.
+        code: code ?? (timedOut ? 124 : 1),
+        output: redactUrlCredentials(output).trim(),
+        signal,
+        timedOut,
+      }),
+    );
   });
 }
 
@@ -171,6 +200,8 @@ export async function runSetupScript(config: RuntimeConfig, reporter: Reporter):
   }
   reporter.log("setup.failed", {
     exitCode: result.code,
+    signal: result.signal,
+    timedOut: result.timedOut,
     output: result.output.split("\n").slice(-50).join("\n"),
   });
 }

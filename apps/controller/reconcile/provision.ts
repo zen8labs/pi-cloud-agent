@@ -4,6 +4,7 @@ import {
   SANDBOX_PATHS,
   SandboxError,
   type SandboxProvider,
+  Secret,
   type TaskSpec,
 } from "@pi-cloud-agent/protocol";
 import { createVcsProvider } from "@pi-cloud-agent/vcs";
@@ -62,7 +63,10 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
       image: "",
       timeoutSeconds: config.sandbox.timeoutSeconds,
       env: { ...buildEnv(run, task, config), ...credentials.env },
-      secrets: credentials.secrets,
+      secrets: {
+        ...credentials.secrets,
+        [SANDBOX_ENV.callbackToken]: new Secret(run.callbackToken, "run callback token"),
+      },
       command: `node ${SANDBOX_PATHS.app}/run.js`,
     });
 
@@ -145,7 +149,6 @@ function buildEnv(run: RunRow, task: TaskSpec, config: Config): Record<string, s
   return {
     [SANDBOX_ENV.controlPlaneUrl]: config.controlPlaneUrl,
     [SANDBOX_ENV.runId]: run.id,
-    [SANDBOX_ENV.callbackToken]: run.callbackToken,
 
     [SANDBOX_ENV.profile]: task.profile,
     [SANDBOX_ENV.taskPrompt]: composePrompt(run.profile, task.prompt),

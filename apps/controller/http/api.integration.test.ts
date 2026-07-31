@@ -54,6 +54,30 @@ function post(path: string, body: unknown, headers: Record<string, string> = {})
   });
 }
 
+describe("browser boundary", () => {
+  it("allows the local dashboard origin without admitting arbitrary websites", async () => {
+    const allowed = await app.request("/healthz", {
+      headers: { Origin: "http://localhost:3000" },
+    });
+    expect(allowed.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
+
+    const denied = await app.request("/healthz", {
+      headers: { Origin: "https://untrusted.example" },
+    });
+    expect(denied.headers.get("access-control-allow-origin")).toBeNull();
+
+    const openApp = createApp({
+      config: testConfig({ WEB_CORS_ORIGINS: "*" }),
+      database,
+      log: silentLogger(),
+    });
+    const explicitWildcard = await openApp.request("/healthz", {
+      headers: { Origin: "https://operator.example" },
+    });
+    expect(explicitWildcard.headers.get("access-control-allow-origin")).toBe("*");
+  });
+});
+
 /** Read a response body at a named type, so a renamed field fails to compile. */
 async function json<T>(response: Response): Promise<T> {
   return (await response.json()) as T;

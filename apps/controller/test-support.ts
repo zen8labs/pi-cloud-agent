@@ -19,7 +19,7 @@ import { createLogger, type Logger } from "./logger";
 
 export const TEST_DATABASE_URL =
   process.env.TEST_DATABASE_URL ??
-  "postgres://pi_cloud_agent:pi_cloud_agent@localhost:5532/pi_cloud_agent";
+  "postgres://pi_cloud_agent:pi_cloud_agent@localhost:5532/pi_cloud_agent_test";
 
 /** Connect to the already-migrated test database. See test-global-setup.ts. */
 export function setupTestDatabase(): Database {

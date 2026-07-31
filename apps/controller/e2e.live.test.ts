@@ -28,11 +28,13 @@ import { manualTrigger } from "./test-support";
  */
 
 const REPO = process.env.LIVE_TEST_REPO ?? "";
+const SKIP_REASON = REPO.includes("/")
+  ? ""
+  : 'set LIVE_TEST_REPO="owner/name" to a repository the credential can clone';
 
 let config: ReturnType<typeof getConfig>;
 let database: Database;
 let reconciler: Reconciler;
-let skipReason = "";
 
 beforeAll(async () => {
   config = getConfig();
@@ -41,15 +43,12 @@ beforeAll(async () => {
   // unreachable from a hosted sandbox, and the run would go silent rather than
   // fail — so refuse up front with the reason, instead of burning ten minutes.
   if (/localhost|127\.0\.0\.1|0\.0\.0\.0/.test(config.controlPlaneUrl)) {
-    skipReason =
+    throw new Error(
       `CONTROL_PLANE_URL is ${config.controlPlaneUrl}, which a hosted sandbox cannot reach. ` +
-      "Start a tunnel and set it to the public URL — see docs/operations.md.";
-    return;
+        "Start a tunnel and set it to the public URL; see docs/operations.md.",
+    );
   }
-  if (!REPO.includes("/")) {
-    skipReason = 'set LIVE_TEST_REPO="owner/name" to a repository the credential can clone';
-    return;
-  }
+  await assertControlPlaneReachable(config.controlPlaneUrl);
 
   database = createDatabase(config.databaseUrl);
   await migrateDatabase(database);
@@ -70,15 +69,9 @@ afterAll(async () => {
 });
 
 describe("a real run, end to end", () => {
-  it(
-    "clones, runs the agent, reports done, and gets reclaimed",
+  it.skipIf(SKIP_REASON !== "")(
+    SKIP_REASON || "clones, runs the agent, reports done, and gets reclaimed",
     async () => {
-      if (skipReason) {
-        // A skipped live test must say why, or it reads as a pass.
-        console.warn(`skipping live test: ${skipReason}`);
-        return;
-      }
-
       const [owner, name] = REPO.split("/");
       const trigger = manualTrigger({
         owner,
@@ -140,3 +133,16 @@ describe("a real run, end to end", () => {
     10 * 60 * 1000,
   );
 });
+
+async function assertControlPlaneReachable(baseUrl: string): Promise<void> {
+  const healthUrl = `${baseUrl}/healthz`;
+  let response: Response;
+  try {
+    response = await fetch(healthUrl, { signal: AbortSignal.timeout(10_000) });
+  } catch (cause) {
+    throw new Error(`CONTROL_PLANE_URL is not reachable at ${healthUrl}`, { cause });
+  }
+  if (!response.ok) {
+    throw new Error(`CONTROL_PLANE_URL health check failed: ${response.status} ${healthUrl}`);
+  }
+}
