@@ -48,9 +48,12 @@ export function createNotifier(url: string = getConfig().databaseUrl) {
   const client = postgres(url, { max: 1, onnotice: () => {} });
 
   return {
-    async listen(channel: string, onNotify: (payload: string) => void): Promise<() => void> {
+    async listen(
+      channel: string,
+      onNotify: (payload: string) => void,
+    ): Promise<() => Promise<void>> {
       const subscription = await client.listen(channel, onNotify);
-      return () => void subscription.unlisten();
+      return async () => subscription.unlisten();
     },
     async close(): Promise<void> {
       await client.end();

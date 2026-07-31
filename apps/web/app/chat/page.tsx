@@ -1,10 +1,19 @@
 "use client";
 
 import type { ConfigResponse } from "@pi-cloud-agent/protocol";
+import { FolderGit2Icon, GitBranchIcon, SlidersHorizontalIcon } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { ChatComposer } from "@/components/ChatComposer";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { api } from "@/lib/api";
+import { saveSessionTitle } from "@/lib/session-titles";
 
 export default function ChatPage() {
   return (
@@ -14,18 +23,9 @@ export default function ChatPage() {
   );
 }
 
-/**
- * Start a run.
- *
- * The profile list comes from the controller rather than being written here, so
- * a new profile shows up in this form without touching the dashboard. Which
- * fields a profile needs is the one thing this page still knows: a review needs a
- * pull request, everything else needs a prompt.
- */
 function NewSession() {
   const router = useRouter();
   const params = useSearchParams();
-
   const [config, setConfig] = useState<ConfigResponse | null>(null);
   const [repos, setRepos] = useState<string[]>([]);
   const [repo, setRepo] = useState(params.get("repo") ?? "");
@@ -40,22 +40,22 @@ function NewSession() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api
-      .listRepos()
-      .then(setRepos)
-      .catch(() => setRepos([]));
-    api
-      .getConfig()
-      .then((loaded) => {
-        setConfig(loaded);
-        setProfile((current) => current || loaded.defaultProfile);
+    let alive = true;
+    Promise.all([api.getConfig(), api.listRepos()])
+      .then(([loadedConfig, loadedRepos]) => {
+        if (!alive) return;
+        setConfig(loadedConfig);
+        setRepos(loadedRepos);
+        setProfile((current) => current || loadedConfig.defaultProfile);
+        setRepo((current) => current || loadedRepos[0] || "__custom__");
       })
-      .catch(() => setConfig(null));
+      .catch((cause) => {
+        if (alive) setError(cause instanceof Error ? cause.message : String(cause));
+      });
+    return () => {
+      alive = false;
+    };
   }, []);
-
-  useEffect(() => {
-    if (!repo && repos.length > 0) setRepo(repos[0] ?? "");
-  }, [repos, repo]);
 
   const effectiveRepo = repo === "__custom__" ? customRepo.trim() : repo;
 
@@ -70,9 +70,10 @@ function NewSession() {
     api
       .listBranches(effectiveRepo)
       .then((result) => {
-        if (cancelled) return;
-        setBranches(result.branches);
-        setBranch(result.default ?? result.branches[0] ?? "");
+        if (!cancelled) {
+          setBranches(result.branches);
+          setBranch(result.default ?? result.branches[0] ?? "");
+        }
       })
       .catch(() => {
         if (!cancelled) {
@@ -91,8 +92,10 @@ function NewSession() {
   const needsPullRequest = profile === "pr-review";
   const canSubmit =
     Boolean(effectiveRepo) &&
-    (needsPullRequest ? prNumber.trim().length > 0 : prompt.trim().length > 0) &&
+    Boolean(profile) &&
+    (needsPullRequest ? Boolean(prNumber.trim()) : Boolean(prompt.trim())) &&
     !submitting;
+  const activeProfile = config?.profiles.find((entry) => entry.name === profile);
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -106,6 +109,7 @@ function NewSession() {
         branch: branch || null,
         prNumber: needsPullRequest ? Number(prNumber) : null,
       });
+      saveSessionTitle(run.id, prompt.trim() || `Review ${effectiveRepo}`);
       router.push(`/sessions/${run.id}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -113,89 +117,70 @@ function NewSession() {
     }
   };
 
-  const activeProfile = config?.profiles.find((entry) => entry.name === profile);
-
   return (
-    <div className="flex h-screen flex-col" style={{ background: "var(--color-canvas)" }}>
-      <div className="border-b border-[var(--color-line-strong)] bg-[var(--color-surface)] px-8 py-4">
-        <h1 className="text-lg font-semibold text-[var(--color-ink)]">New Session</h1>
-      </div>
-
-      <div
-        className="flex flex-1 items-start justify-center overflow-y-auto py-10"
-        style={{ background: "var(--color-canvas)" }}
-      >
-        <div className="w-full max-w-xl px-8">
-          <div className="mb-6 border border-[var(--color-line-strong)] bg-[var(--color-surface)]">
-            <div className="border-b border-[var(--color-line)] px-5 py-2.5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--color-faint)]">
-                Configuration
-              </p>
-            </div>
-
-            <div className="divide-y divide-[var(--color-line)]">
-              <RepoField
+    <div className="flex h-full min-h-0 flex-col bg-background">
+      <header className="flex h-14 shrink-0 items-center border-b border-border px-5">
+        <h1 className="text-sm font-medium">New task</h1>
+      </header>
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-4 py-10 sm:px-8">
+        <div className="w-full max-w-3xl">
+          <div className="mb-7 text-center">
+            <h2 className="text-2xl font-medium tracking-[-0.035em]">
+              What should Pi work on?
+            </h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Start a sandboxed session in one of your repositories.
+            </p>
+          </div>
+          {repo === "__custom__" && (
+            <input
+              aria-label="Repository path"
+              value={customRepo}
+              onChange={(event) => setCustomRepo(event.target.value)}
+              placeholder="owner/repo"
+              className="mb-2 h-9 w-full rounded-xl border border-input bg-background px-3 font-mono text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+            />
+          )}
+          <ChatComposer
+            value={prompt}
+            onChange={setPrompt}
+            onSubmit={submit}
+            placeholder={
+              needsPullRequest ? "Add an optional reviewer note…" : "Describe the task for Pi…"
+            }
+            model={config?.model}
+            submitLabel="Start"
+            submitEnabled={canSubmit}
+            submitting={submitting}
+            disabled={!effectiveRepo}
+            autoFocus
+            tools={
+              <ComposerOptions
                 repo={repo}
                 repos={repos}
-                customRepo={customRepo}
                 onRepoChange={setRepo}
-                onCustomRepoChange={setCustomRepo}
+                profile={profile}
+                profiles={config?.profiles.map((entry) => entry.name) ?? []}
+                onProfileChange={setProfile}
+                branch={branch}
+                branches={branches}
+                branchesLoading={branchesLoading}
+                onBranchChange={setBranch}
+                needsPullRequest={needsPullRequest}
+                prNumber={prNumber}
+                onPrNumberChange={setPrNumber}
               />
-
-              <Field label="Profile">
-                <Select value={profile} onChange={setProfile} className="w-52">
-                  {(config?.profiles ?? []).map((entry) => (
-                    <option key={entry.name} value={entry.name}>
-                      {entry.name}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-
-              {needsPullRequest ? (
-                <PullRequestField value={prNumber} onChange={setPrNumber} />
-              ) : (
-                <BranchField
-                  branch={branch}
-                  branches={branches}
-                  loading={branchesLoading}
-                  onChange={setBranch}
-                />
-              )}
-            </div>
-
-            {activeProfile && (
-              <div className="border-t border-[var(--color-line)] px-5 py-3">
-                <p className="text-[12px] text-[var(--color-muted)]">
-                  {activeProfile.description}
-                </p>
-              </div>
-            )}
-          </div>
-
-          <div className="mb-4">
-            <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--color-faint)]">
-              {needsPullRequest ? "Reviewer note (optional)" : "Task"}
-            </p>
-            <ChatComposer
-              value={prompt}
-              onChange={setPrompt}
-              onSubmit={submit}
-              placeholder={
-                needsPullRequest
-                  ? "Optional note for the reviewer…"
-                  : 'Describe the task — e.g. "What is this repository about?"'
-              }
-              model={config?.model}
-              submitLabel="Start"
-              submitting={submitting}
-              disabled={!effectiveRepo}
-              autoFocus
-            />
-          </div>
-
+            }
+          />
+          <p className="mt-3 px-2 text-center text-xs text-muted-foreground">
+            {activeProfile?.description ??
+              "Profiles and repositories load from the controller."}
+          </p>
           {error && (
-            <div className="border border-red-500/30 bg-red-500/8 px-4 py-3 font-mono text-[12px] text-red-400">
+            <div
+              role="alert"
+              className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+            >
               {error}
             </div>
           )}
@@ -205,147 +190,87 @@ function NewSession() {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-4 px-5 py-3">
-      <span className="text-[13px] font-medium text-[var(--color-muted)]">{label}</span>
-      {children}
-    </div>
-  );
-}
-
-const inputStyle = {
-  background: "var(--color-surface)",
-  color: "var(--color-ink)",
-  borderColor: "var(--color-line-strong)",
-} as const;
-
-function RepoField({
-  repo,
-  repos,
-  customRepo,
-  onRepoChange,
-  onCustomRepoChange,
-}: {
+type ComposerOptionsProps = {
   repo: string;
   repos: string[];
-  customRepo: string;
   onRepoChange: (value: string) => void;
-  onCustomRepoChange: (value: string) => void;
-}) {
-  return (
-    <Field label="Repository">
-      <div className="flex items-center gap-2">
-        <Select value={repo} onChange={onRepoChange} className="w-52">
-          {repos.length === 0 && <option value="">No repositories found</option>}
-          {repos.map((name) => (
-            <option key={name} value={name}>
-              {name}
-            </option>
-          ))}
-          <option value="__custom__">Custom…</option>
-        </Select>
-        {repo === "__custom__" && (
-          <input
-            value={customRepo}
-            onChange={(event) => onCustomRepoChange(event.target.value)}
-            placeholder="owner/repo"
-            style={inputStyle}
-            className="w-36 border px-3 py-2 font-mono text-[12px] placeholder:text-[var(--color-faint)] focus:border-[var(--color-accent)] focus:outline-none"
-          />
-        )}
-      </div>
-    </Field>
-  );
-}
-
-function PullRequestField({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <Field label="Pull request">
-      <input
-        value={value}
-        onChange={(event) => onChange(event.target.value.replace(/[^0-9]/g, ""))}
-        placeholder="#"
-        style={inputStyle}
-        className="w-24 border px-3 py-2 font-mono text-[12px] placeholder:text-[var(--color-faint)] focus:border-[var(--color-accent)] focus:outline-none"
-      />
-    </Field>
-  );
-}
-
-function BranchField({
-  branch,
-  branches,
-  loading,
-  onChange,
-}: {
+  profile: string;
+  profiles: string[];
+  onProfileChange: (value: string) => void;
   branch: string;
   branches: string[];
-  loading: boolean;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <Field label="Branch">
-      <Select
-        value={branch}
-        onChange={onChange}
-        disabled={loading || branches.length === 0}
-        className="w-52"
-      >
-        {loading && <option value="">Loading…</option>}
-        {!loading && branches.length === 0 && <option value="">{branch || "default"}</option>}
-        {branches.map((name) => (
-          <option key={name} value={name}>
-            {name}
-          </option>
-        ))}
-      </Select>
-    </Field>
-  );
-}
+  branchesLoading: boolean;
+  onBranchChange: (value: string) => void;
+  needsPullRequest: boolean;
+  prNumber: string;
+  onPrNumberChange: (value: string) => void;
+};
 
-function Select({
-  value,
-  onChange,
-  disabled,
-  className = "",
-  children,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  disabled?: boolean;
-  className?: string;
-  children: React.ReactNode;
-}) {
+function ComposerOptions(props: ComposerOptionsProps) {
+  const triggerClass =
+    "h-7 max-w-44 border-0 bg-transparent px-1.5 text-xs shadow-none dark:bg-transparent";
   return (
-    <div className={`relative ${className}`}>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        disabled={disabled}
-        style={inputStyle}
-        className="w-full appearance-none border px-3 py-2 pr-8 font-mono text-[12px] focus:border-[var(--color-accent)] focus:outline-none disabled:opacity-40"
+    <>
+      <FolderGit2Icon className="size-3.5 shrink-0 text-muted-foreground" />
+      <Select value={props.repo} onValueChange={(value) => props.onRepoChange(value ?? "")}>
+        <SelectTrigger aria-label="Repository" className={triggerClass}>
+          <SelectValue placeholder="Repository" />
+        </SelectTrigger>
+        <SelectContent align="start">
+          {props.repos.map((name) => (
+            <SelectItem key={name} value={name}>
+              {name}
+            </SelectItem>
+          ))}
+          <SelectItem value="__custom__">Custom repository…</SelectItem>
+        </SelectContent>
+      </Select>
+      <SlidersHorizontalIcon className="ml-1 size-3.5 shrink-0 text-muted-foreground" />
+      <Select
+        value={props.profile}
+        onValueChange={(value) => props.onProfileChange(value ?? "")}
       >
-        {children}
-      </select>
-      <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--color-faint)]">
-        <svg
-          viewBox="0 0 10 6"
-          className="h-2.5 w-2.5"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          aria-hidden="true"
-        >
-          <path d="M1 1l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </span>
-    </div>
+        <SelectTrigger aria-label="Profile" className={triggerClass}>
+          <SelectValue placeholder="Profile" />
+        </SelectTrigger>
+        <SelectContent>
+          {props.profiles.map((name) => (
+            <SelectItem key={name} value={name}>
+              {name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {props.needsPullRequest ? (
+        <input
+          aria-label="Pull request"
+          value={props.prNumber}
+          onChange={(event) => props.onPrNumberChange(event.target.value.replace(/\D/g, ""))}
+          placeholder="PR #"
+          inputMode="numeric"
+          className="h-7 w-16 rounded-md bg-transparent px-1.5 font-mono text-xs outline-none"
+        />
+      ) : (
+        <>
+          <GitBranchIcon className="ml-1 size-3.5 shrink-0 text-muted-foreground" />
+          <Select
+            value={props.branch}
+            onValueChange={(value) => props.onBranchChange(value ?? "")}
+            disabled={props.branchesLoading || props.branches.length === 0}
+          >
+            <SelectTrigger aria-label="Branch" className={triggerClass}>
+              <SelectValue placeholder={props.branchesLoading ? "Loading…" : "Branch"} />
+            </SelectTrigger>
+            <SelectContent>
+              {props.branches.map((name) => (
+                <SelectItem key={name} value={name}>
+                  {name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </>
+      )}
+    </>
   );
 }

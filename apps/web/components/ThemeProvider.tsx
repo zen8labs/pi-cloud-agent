@@ -25,13 +25,14 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     // After hydration, read what the inline script already applied so our
     // React state matches the actual rendered theme.
     const applied = document.documentElement.getAttribute("data-theme") as Theme | null;
-    if (applied === "dark") setTheme("dark");
+    setTheme(applied === "dark" ? "dark" : "light");
   }, []);
 
   const toggle = () => {
     setTheme((prev) => {
       const next = prev === "light" ? "dark" : "light";
       document.documentElement.setAttribute("data-theme", next);
+      document.documentElement.classList.toggle("dark", next === "dark");
       localStorage.setItem("pca-theme", next);
       return next;
     });

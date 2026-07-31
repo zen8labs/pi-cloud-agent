@@ -4,7 +4,7 @@ import { isActiveStatus, STATUS_LABELS } from "@/lib/format";
 export function StatusBadge({ status }: { status: RunStatus }) {
   return (
     <span
-      className="inline-flex items-center gap-1.5 px-2 py-0.5 font-mono text-[10px] font-medium uppercase tracking-wider"
+      className="inline-flex w-fit items-center gap-1.5 rounded-full px-2 py-1 font-mono text-[10px] font-medium uppercase tracking-wide"
       style={{
         color: `var(--status-${status}-fg)`,
         background: `var(--status-${status}-bg)`,

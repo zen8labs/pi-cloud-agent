@@ -1,18 +1,17 @@
 "use client";
 
 import type { ConfigResponse, ProfileInfo, RepoConfigResponse } from "@pi-cloud-agent/protocol";
+import { CheckIcon, LoaderCircleIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 
-/**
- * Per-repository settings, rendered from each profile's own schema.
- *
- * There is no form here describing what a pull request review can be configured
- * with — the controller sends the profile's JSON Schema and this page renders
- * whatever it finds. That is the visible half of keeping profile settings out of
- * the core: a new profile's options appear here with no change to the dashboard,
- * the API, or the database.
- */
+interface JsonSchemaField {
+  type?: string;
+  default?: unknown;
+  description?: string;
+  items?: { type?: string };
+}
+
 export default function SettingsPage() {
   const [config, setConfig] = useState<ConfigResponse | null>(null);
   const [stored, setStored] = useState<RepoConfigResponse | null>(null);
@@ -26,6 +25,7 @@ export default function SettingsPage() {
       ]);
       setConfig(loadedConfig);
       setStored(loadedStored);
+      setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
@@ -34,97 +34,93 @@ export default function SettingsPage() {
   useEffect(() => {
     void load();
   }, [load]);
-
   const configurable = (config?.profiles ?? []).filter(
     (profile) => Object.keys(properties(profile)).length > 0,
   );
 
   return (
-    <div
-      className="flex h-screen flex-col overflow-hidden"
-      style={{ background: "var(--color-canvas)" }}
-    >
-      <div className="border-b border-[var(--color-line-strong)] bg-[var(--color-surface)] px-8 py-4">
-        <h1 className="text-lg font-semibold text-[var(--color-ink)]">Settings</h1>
-      </div>
+    <div className="page-scroll">
+      <div className="page-wrap max-w-4xl">
+        <header>
+          <p className="eyebrow">Controller</p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-[-0.045em]">Settings</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+            Runtime configuration is read from the controller. Profile options below are
+            generated directly from each profile’s JSON Schema.
+          </p>
+        </header>
 
-      <div
-        className="flex-1 overflow-y-auto px-8 py-8"
-        style={{ background: "var(--color-canvas)" }}
-      >
-        <div className="max-w-3xl">
-          <section className="mb-8">
-            <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--color-faint)]">
-              Model
+        {error && (
+          <div
+            role="alert"
+            className="mt-6 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+          >
+            {error}
+          </div>
+        )}
+
+        <section className="surface-card mt-8 overflow-hidden">
+          <div className="border-b border-border px-5 py-4">
+            <h2 className="text-sm font-medium">Agent runtime</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Shared defaults for every new session.
             </p>
-            <div className="border border-[var(--color-line-strong)] bg-[var(--color-surface)] px-5 py-4">
-              <p className="font-mono text-[12px] text-[var(--color-ink)]">
-                {config?.model ?? "—"}
-              </p>
-              <p className="mt-1 text-[12px] text-[var(--color-muted)]">
-                One model, configured with <span className="font-mono">AGENT_MODEL</span>. Every
-                run records the model it used, so changing this does not rewrite history.
-              </p>
+          </div>
+          <div className="flex items-center justify-between gap-5 px-5 py-4">
+            <div>
+              <div className="text-sm">Model</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                Configured with AGENT_MODEL and recorded per run.
+              </div>
             </div>
-          </section>
+            <code className="rounded-md bg-muted px-2.5 py-1.5 font-mono text-xs">
+              {config?.model ?? "Loading…"}
+            </code>
+          </div>
+        </section>
 
-          {error && (
-            <div className="mb-6 border border-red-500/30 bg-red-500/8 px-4 py-3 font-mono text-[12px] text-red-400">
-              {error}
-            </div>
-          )}
+        {stored === null && !error && (
+          <div className="mt-8 flex items-center gap-2 text-sm text-muted-foreground">
+            <LoaderCircleIcon className="size-4 animate-spin" />
+            Loading repository settings…
+          </div>
+        )}
+        {stored?.repos.length === 0 && (
+          <div className="surface-card mt-8 px-5 py-5 text-sm text-muted-foreground">
+            No repositories are configured. Set{" "}
+            <code className="font-mono text-foreground">WEB_REPOS</code> or install the GitHub
+            App.
+          </div>
+        )}
 
-          {stored === null && !error && (
-            <p className="font-mono text-[12px] text-[var(--color-faint)]">Loading…</p>
-          )}
-
-          {stored !== null && stored.repos.length === 0 && (
-            <p className="font-mono text-[12px] text-[var(--color-muted)]">
-              No repositories yet. Set{" "}
-              <span className="text-[var(--color-ink)]">WEB_REPOS</span> or install the GitHub
-              App.
-            </p>
-          )}
-
-          {stored !== null &&
-            configurable.map((profile) => (
-              <section key={profile.name} className="mb-8">
-                <p className="mb-1 font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--color-faint)]">
-                  {profile.name}
-                </p>
-                <p className="mb-4 text-[13px] text-[var(--color-muted)]">
+        {stored &&
+          configurable.map((profile) => (
+            <section key={profile.name} className="mt-8">
+              <div className="mb-3">
+                <h2 className="text-sm font-medium">{profile.name}</h2>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
                   {profile.description}
                 </p>
-
-                <div className="border border-[var(--color-line-strong)] bg-[var(--color-surface)]">
-                  {stored.repos.map((repo) => (
-                    <RepoRow
-                      key={`${profile.name}:${repo}`}
-                      repo={repo}
-                      profile={profile}
-                      initial={
-                        stored.entries.find(
-                          (entry) => entry.repo === repo && entry.profile === profile.name,
-                        )?.config ?? defaults(profile)
-                      }
-                    />
-                  ))}
-                </div>
-              </section>
-            ))}
-        </div>
+              </div>
+              <div className="surface-card divide-y divide-border overflow-hidden">
+                {stored.repos.map((repo) => (
+                  <RepoRow
+                    key={`${profile.name}:${repo}`}
+                    repo={repo}
+                    profile={profile}
+                    initial={
+                      stored.entries.find(
+                        (entry) => entry.repo === repo && entry.profile === profile.name,
+                      )?.config ?? defaults(profile)
+                    }
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
       </div>
     </div>
   );
-}
-
-/* ── schema helpers ────────────────────────────────────────────────────────── */
-
-interface JsonSchemaField {
-  type?: string;
-  default?: unknown;
-  description?: string;
-  items?: { type?: string };
 }
 
 function properties(profile: ProfileInfo): Record<string, JsonSchemaField> {
@@ -147,8 +143,6 @@ function label(key: string): string {
     .trim();
 }
 
-/* ── rows ──────────────────────────────────────────────────────────────────── */
-
 function RepoRow({
   repo,
   profile,
@@ -160,7 +154,6 @@ function RepoRow({
 }) {
   const [value, setValue] = useState(initial);
   const [state, setState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
-
   const save = async (next: Record<string, unknown>) => {
     const previous = value;
     setValue(next);
@@ -174,14 +167,11 @@ function RepoRow({
     }
   };
 
-  const fields = Object.entries(properties(profile));
-
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-line)] px-5 py-3 transition-colors last:border-b-0 hover:bg-[var(--color-surface-2)]">
-      <span className="truncate font-mono text-[12px] text-[var(--color-ink)]">{repo}</span>
-
+    <div className="grid gap-4 px-5 py-4 lg:grid-cols-[minmax(180px,1fr)_minmax(0,2fr)_24px] lg:items-center">
+      <span className="truncate font-mono text-xs">{repo}</span>
       <div className="flex flex-wrap items-center gap-3">
-        {fields.map(([key, field]) => (
+        {Object.entries(properties(profile)).map(([key, field]) => (
           <FieldControl
             key={key}
             name={key}
@@ -191,8 +181,8 @@ function RepoRow({
             onChange={(next) => void save({ ...value, [key]: next })}
           />
         ))}
-        <SaveState state={state} />
       </div>
+      <SaveState state={state} />
     </div>
   );
 }
@@ -215,21 +205,24 @@ function FieldControl({
     return (
       <button
         type="button"
+        role="switch"
+        aria-checked={on}
         onClick={() => onChange(!on)}
         disabled={disabled}
-        title={field.description ?? `${on ? "Disable" : "Enable"} ${label(name)}`}
-        style={{
-          background: on ? "var(--color-accent)" : "var(--color-surface)",
-          color: on ? "var(--color-canvas)" : "var(--color-faint)",
-          borderColor: on ? "var(--color-accent)" : "var(--color-line-strong)",
-        }}
-        className="border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.06em] transition-colors disabled:opacity-40"
+        title={field.description}
+        className="flex shrink-0 items-center gap-2 whitespace-nowrap text-xs text-muted-foreground disabled:opacity-50"
       >
+        <span
+          className={`relative h-5 w-9 rounded-full transition-colors ${on ? "bg-primary" : "bg-muted"}`}
+        >
+          <span
+            className={`absolute top-0.5 size-4 rounded-full bg-background shadow-sm transition-transform ${on ? "translate-x-[18px]" : "translate-x-0.5"}`}
+          />
+        </span>
         {label(name)}
       </button>
     );
   }
-
   if (field.type === "array") {
     return (
       <TextControl
@@ -242,13 +235,12 @@ function FieldControl({
             text
               .split(",")
               .map((item) => item.trim())
-              .filter((item) => item.length > 0),
+              .filter(Boolean),
           )
         }
       />
     );
   }
-
   return (
     <TextControl
       name={name}
@@ -260,7 +252,6 @@ function FieldControl({
   );
 }
 
-/** Commit on blur or Enter rather than per keystroke: one save per intent. */
 function TextControl({
   name,
   value,
@@ -275,38 +266,36 @@ function TextControl({
   onCommit: (value: string) => void;
 }) {
   const [draft, setDraft] = useState(value);
-
   useEffect(() => setDraft(value), [value]);
-
   return (
-    <input
-      aria-label={label(name)}
-      value={draft}
-      placeholder={placeholder}
-      disabled={disabled}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={() => draft !== value && onCommit(draft)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") event.currentTarget.blur();
-      }}
-      style={{
-        background: "var(--color-surface)",
-        color: "var(--color-ink)",
-        borderColor: "var(--color-line-strong)",
-      }}
-      className="w-40 border px-3 py-1.5 font-mono text-[11px] placeholder:text-[var(--color-faint)] focus:border-[var(--color-accent)] focus:outline-none disabled:opacity-40"
-    />
+    <label className="grid gap-1.5 text-xs text-muted-foreground">
+      {label(name)}
+      <input
+        aria-label={label(name)}
+        value={draft}
+        placeholder={placeholder}
+        disabled={disabled}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={() => draft !== value && onCommit(draft)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+        }}
+        className="h-8 w-44 rounded-lg border border-input bg-background px-2.5 font-mono text-xs text-foreground outline-none focus:border-ring focus:ring-2 focus:ring-ring/30 disabled:opacity-50"
+      />
+    </label>
   );
 }
 
 function SaveState({ state }: { state: "idle" | "saving" | "saved" | "failed" }) {
-  if (state === "idle") return <span className="w-12" />;
-  const text = state === "saving" ? "saving…" : state === "saved" ? "saved" : "failed";
-  const color =
-    state === "failed"
-      ? "text-red-400"
-      : state === "saved"
-        ? "text-[var(--color-accent)]"
-        : "text-[var(--color-faint)]";
-  return <span className={`w-12 font-mono text-[11px] ${color}`}>{text}</span>;
+  if (state === "idle") return null;
+  if (state === "saving")
+    return (
+      <LoaderCircleIcon
+        className="size-4 animate-spin text-muted-foreground"
+        aria-label="Saving"
+      />
+    );
+  if (state === "saved")
+    return <CheckIcon className="size-4 text-emerald-500" aria-label="Saved" />;
+  return <XIcon className="size-4 text-destructive" aria-label="Save failed" />;
 }

@@ -127,12 +127,22 @@ describe("a real run, end to end", () => {
       expect(serialized).not.toContain(config.model.apiKey.expose());
 
       // And the machine was reclaimed rather than left running.
-      const reclaimed = await getRun(database, run.id);
+      const reclaimed = await waitForReclaim(run.id);
       expect(reclaimed?.sandboxStoppedAt).not.toBeNull();
     },
     10 * 60 * 1000,
   );
 });
+
+async function waitForReclaim(runId: string) {
+  const deadline = Date.now() + 30_000;
+  let current = await getRun(database, runId);
+  while (!current?.sandboxStoppedAt && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    current = await getRun(database, runId);
+  }
+  return current;
+}
 
 async function assertControlPlaneReachable(baseUrl: string): Promise<void> {
   const healthUrl = `${baseUrl}/healthz`;

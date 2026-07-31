@@ -26,13 +26,20 @@ function watchConsole(page: Page) {
   return errors;
 }
 
-test("the dashboard renders the run list", async ({ page }) => {
+async function ensureRepository(page: Page) {
+  const custom = page.getByPlaceholder("owner/repo");
+  if (await custom.isVisible()) {
+    await custom.fill("acme/widgets");
+  }
+}
+
+test("the chat shell renders session history in the sidebar", async ({ page }) => {
   const errors = watchConsole(page);
-  await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Sessions" })).toBeVisible();
-  // The footer count only appears after the first successful fetch, so this is
-  // also the CORS assertion: no working API, no count.
-  await expect(page.getByText(/\d+ of \d+ runs/)).toBeVisible();
+  await page.goto("/chat");
+  await expect(page.getByRole("heading", { name: "New task" })).toBeVisible();
+  await expect(
+    page.getByRole("complementary").getByRole("link", { name: "New task" }),
+  ).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -43,9 +50,9 @@ test("the new-session form gates submit on a repo and a prompt", async ({ page }
   await expect(page.getByText("Profile", { exact: true })).toBeVisible();
   await expect(start).toBeDisabled();
 
-  // With no configured repos (CI), the custom path is the only one.
-  await page.getByRole("combobox").first().selectOption("__custom__");
-  await page.getByPlaceholder("owner/repo").fill("acme/widgets");
+  // A configured repository is already selected. Credential-free CI exposes
+  // the custom path instead, so only that environment needs a path filled in.
+  await ensureRepository(page);
   await page.getByPlaceholder(/Describe the task/).fill(PROMPT);
   await expect(start).toBeEnabled();
 });
@@ -53,8 +60,7 @@ test("the new-session form gates submit on a repo and a prompt", async ({ page }
 test("a run reaches a terminal state and the session page shows it", async ({ page }) => {
   const errors = watchConsole(page);
   await page.goto("/chat");
-  await page.getByRole("combobox").first().selectOption("__custom__");
-  await page.getByPlaceholder("owner/repo").fill("acme/widgets");
+  await ensureRepository(page);
   await page.getByPlaceholder(/Describe the task/).fill(PROMPT);
   await page.getByRole("button", { name: "Start" }).click();
 

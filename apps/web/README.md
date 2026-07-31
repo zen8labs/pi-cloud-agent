@@ -2,7 +2,7 @@
 
 The operator dashboard: watch runs live, start new ones, configure profiles.
 
-Next.js App Router, React, Tailwind 4. Reaches the controller over HTTP at `NEXT_PUBLIC_API_BASE` and holds no server-side state of its own.
+Next.js App Router, React, Tailwind 4, Base UI, and local-source [AI Elements](https://elements.ai-sdk.dev/) conversation primitives. Reaches the controller over HTTP at `NEXT_PUBLIC_API_BASE` and holds no server-side state of its own. Pi remains the agent harness; AI Elements only owns presentation and interaction semantics.
 
 **Depends on:** `@pi-cloud-agent/protocol`, for types only. It has no database access and no credentials.
 
@@ -10,15 +10,21 @@ Next.js App Router, React, Tailwind 4. Reaches the controller over HTTP at `NEXT
 
 | Path | Role |
 |---|---|
-| `app/page.tsx` | the sessions list, filterable by status |
+| `app/page.tsx` | redirects the root route to the chat-first workspace |
 | `app/chat/page.tsx` | start a run; profiles come from the controller, not from here |
 | `app/sessions/[id]/page.tsx` | one run: live feed, details, follow-up |
 | `app/settings/page.tsx` | per-repo settings, rendered from each profile's JSON Schema |
 | `components/ActivityFeed.tsx` | folds the flat event log into a readable conversation |
+| `components/ChatComposer.tsx` | product wrapper around the AI Elements prompt primitives |
 | `components/StatusBadge.tsx` | the six run statuses, styled from CSS custom properties |
+| `components/ai-elements/` | source-owned conversation, message, and prompt primitives |
+| `components/SideNav.tsx` | primary navigation plus polling session history |
+| `components/ui/` | focused source-owned Base UI building blocks used by AI Elements |
+| `public/assets/z8l-logo.png` | the zen8labs application mark |
 | `lib/api.ts` | the controller's API, typed from the protocol package |
 | `lib/useRun.ts` | the resumable `EventSource` subscription |
 | `lib/format.ts` | time and status labels |
+| `lib/session-titles.ts` | local prompt-derived labels for sidebar history |
 
 ## Invariants
 
@@ -26,7 +32,7 @@ Next.js App Router, React, Tailwind 4. Reaches the controller over HTTP at `NEXT
 - **The settings page renders schemas, not forms.** It reads `configJsonSchema` from `GET /config`. A new profile's settings appear with no change to this app; if you find yourself writing a field specific to one profile, that is a bug.
 - **Dedupe stream events by `seq`.** Frames carry the event log's sequence number; `EventSource` can overlap during a reconnect and React strict mode double-invokes effects. `seq` makes dedupe exact rather than heuristic.
 - **A bare SSE `error` event means "reconnecting", not "failed".** Only a frame *with* data is a real server-side error. Treating both the same makes the UI flap on every network hiccup.
-- **A follow-up starts a new run.** One run is one sandbox and one session, so there is nothing to resume; the previous exchange is replayed in the prompt. Pretending otherwise would mean keeping a machine alive between messages.
+- **The composer is not the harness.** Today a follow-up starts a new run and replays the visible exchange. Keep that transport behind the session page's `FollowUp` seam so it can move to Pi's forthcoming multi-turn session API without replacing the conversation UI.
 
 ## Working on it
 

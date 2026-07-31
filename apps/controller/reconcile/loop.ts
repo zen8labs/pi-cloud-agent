@@ -91,7 +91,7 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
   let running = false;
   let timer: NodeJS.Timeout | null = null;
   let wake: (() => void) | null = null;
-  let unlisten: (() => void) | null = null;
+  let unlisten: (() => Promise<void>) | null = null;
   let notifier: ReturnType<typeof createNotifier> | null = null;
   // Constructing a reconciler must not open a connection — only `start` does.
   const inFlight = new Set<Promise<void>>();
@@ -221,7 +221,7 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
       running = false;
       wake?.();
       if (timer) clearTimeout(timer);
-      unlisten?.();
+      await unlisten?.();
       await notifier?.close();
       notifier = null;
       // In-flight provisioning is finished rather than abandoned: a sandbox whose

@@ -1,41 +1,37 @@
+import { GeistMono } from "geist/font/mono";
+import { GeistSans } from "geist/font/sans";
 import type { Metadata } from "next";
-import "./globals.css";
 import { SideNav } from "@/components/SideNav";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { cn } from "@/lib/utils";
+import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Pi Cloud Agent",
-  description: "Watch cloud agent runs and start new ones",
+  title: "Cloud Agent · zen8labs",
+  description: "Start, steer, and inspect Pi agent sessions",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={cn(GeistSans.variable, GeistMono.variable)}
+    >
       <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap"
-          rel="stylesheet"
-        />
-        {/*
-          Applies the saved theme before the first paint, which avoids a flash of
-          the wrong theme during hydration. The content is a fixed literal with no
-          interpolation, so there is no injection surface.
-        */}
         <script
-          // biome-ignore lint/security/noDangerouslySetInnerHtml: static literal, no user input
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: fixed theme bootstrap, no user input
           dangerouslySetInnerHTML={{
-            // biome-ignore lint/style/useNamingConvention: React dictates the __html key
-            __html: `try{var t=localStorage.getItem('pca-theme');if(t==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}`,
+            // biome-ignore lint/style/useNamingConvention: React owns this key
+            __html: `try{var t=localStorage.getItem('pca-theme')||'light';var r=document.documentElement;r.setAttribute('data-theme',t);r.classList.toggle('dark',t==='dark')}catch(e){}`,
           }}
         />
       </head>
-      <body className="min-h-screen antialiased">
+      <body>
         <ThemeProvider>
-          <div className="flex min-h-screen">
+          <div className="app-shell">
             <SideNav />
-            <main className="flex-1 overflow-hidden">{children}</main>
+            <main className="app-main">{children}</main>
           </div>
         </ThemeProvider>
       </body>

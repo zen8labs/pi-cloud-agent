@@ -1,206 +1,179 @@
 "use client";
 
+import type { RunSummary } from "@pi-cloud-agent/protocol";
+import { MoonIcon, PlusIcon, Settings2Icon, SunIcon } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useTheme } from "@/components/ThemeProvider";
-
-const links = [
-  {
-    href: "/",
-    label: "Sessions",
-    icon: SessionsIcon,
-    match: (p: string) => p === "/" || p.startsWith("/sessions"),
-  },
-  {
-    href: "/chat",
-    label: "New Session",
-    icon: PlusIcon,
-    match: (p: string) => p.startsWith("/chat"),
-  },
-  {
-    href: "/settings",
-    label: "Settings",
-    icon: SettingsIcon,
-    match: (p: string) => p.startsWith("/settings"),
-  },
-];
+import { api } from "@/lib/api";
+import { isActiveStatus } from "@/lib/format";
+import { loadSessionTitles } from "@/lib/session-titles";
+import { cn } from "@/lib/utils";
 
 export function SideNav() {
   const pathname = usePathname();
   const { theme, toggle } = useTheme();
-  // Defer theme-specific content until after hydration to avoid mismatch.
+  const [runs, setRuns] = useState<RunSummary[]>([]);
+  const [titles, setTitles] = useState<Record<string, string>>({});
   const [mounted, setMounted] = useState(false);
+
   useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      api
+        .listRuns(40)
+        .then((items) => {
+          if (alive) {
+            setRuns(items);
+            setTitles(loadSessionTitles(items.map((run) => run.id)));
+          }
+        })
+        .catch(() => {});
+    void load();
+    const timer = setInterval(load, 5000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, []);
+
+  const active = runs.filter((run) => isActiveStatus(run.status));
+  const recent = runs.filter((run) => !isActiveStatus(run.status));
 
   return (
-    <aside
-      className="flex w-[200px] shrink-0 flex-col border-r"
-      style={{ borderColor: "var(--color-line-strong)", background: "var(--color-surface)" }}
-    >
-      {/* Logo */}
-      <div
-        className="flex items-center gap-2.5 border-b px-4 py-4"
-        style={{ borderColor: "var(--color-line)" }}
-      >
-        <div
-          className="flex h-6 w-6 items-center justify-center text-[11px] font-bold"
-          style={{ background: "var(--color-accent)", color: "#fff" }}
-        >
-          PI
+    <>
+      <header className="mobile-nav">
+        <Brand />
+        <div className="flex items-center gap-1">
+          <MobileLink href="/chat" label="New task" active={pathname === "/chat"}>
+            <PlusIcon />
+          </MobileLink>
+          <MobileLink href="/settings" label="Settings" active={pathname === "/settings"}>
+            <Settings2Icon />
+          </MobileLink>
         </div>
-        <span
-          className="font-mono text-[13px] font-semibold tracking-tight"
-          style={{ color: "var(--color-ink)" }}
-        >
-          PI CLOUD AGENT
-        </span>
-      </div>
+      </header>
 
-      {/* Navigation */}
-      <nav className="flex flex-col gap-px p-2 pt-3">
-        <p
-          className="mb-1 px-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em]"
-          style={{ color: "var(--color-faint)" }}
-        >
-          Workspace
-        </p>
-        {links.map((l) => {
-          const active = l.match(pathname);
-          const Icon = l.icon;
-          return (
-            <Link
-              key={l.href}
-              href={l.href}
-              className="group flex items-center gap-2.5 border-l-2 py-2 pl-1.5 pr-2 text-[13px] font-medium transition-colors"
-              style={{
-                borderColor: active ? "var(--color-accent)" : "transparent",
-                background: active ? "var(--color-surface-2)" : "transparent",
-                color: active ? "var(--color-ink)" : "var(--color-muted)",
-              }}
-              onMouseEnter={(e) => {
-                if (!active) {
-                  (e.currentTarget as HTMLElement).style.background = "var(--color-surface-2)";
-                  (e.currentTarget as HTMLElement).style.color = "var(--color-ink)";
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!active) {
-                  (e.currentTarget as HTMLElement).style.background = "transparent";
-                  (e.currentTarget as HTMLElement).style.color = "var(--color-muted)";
-                }
-              }}
-            >
-              <Icon
-                className="h-3.5 w-3.5 shrink-0"
-                style={{ color: active ? "var(--color-accent)" : "var(--color-faint)" }}
-              />
-              {l.label}
-            </Link>
-          );
-        })}
-      </nav>
+      <aside className="side-nav">
+        <div className="px-4 pb-3 pt-5">
+          <Brand />
+        </div>
+        <div className="px-3">
+          <Link
+            href="/chat"
+            className={cn("side-nav-link", pathname === "/chat" && "is-active")}
+          >
+            <PlusIcon className="size-4" />
+            New task
+          </Link>
+        </div>
 
-      {/* Footer */}
-      <div className="mt-auto border-t px-4 py-3" style={{ borderColor: "var(--color-line)" }}>
-        {/* Theme toggle — content deferred until mounted to avoid hydration mismatch */}
-        <button
-          type="button"
-          onClick={toggle}
-          className="mb-3 flex w-full items-center justify-between border px-3 py-2 transition-colors"
-          style={{
-            borderColor: "var(--color-line-strong)",
-            background: "var(--color-surface-2)",
-            color: "var(--color-muted)",
-          }}
-        >
-          <span className="font-mono text-[10px] uppercase tracking-[0.08em]">
-            {mounted ? (theme === "light" ? "Light" : "Dark") : ""}
-          </span>
-          {mounted ? theme === "light" ? <SunIcon /> : <MoonIcon /> : null}
-        </button>
+        <div className="mt-5 min-h-0 flex-1 overflow-y-auto px-3 pb-4">
+          {active.length > 0 && (
+            <RunGroup label="Running" runs={active} pathname={pathname} titles={titles} />
+          )}
+          <RunGroup label="Recent" runs={recent} pathname={pathname} titles={titles} />
+        </div>
 
-        <p
-          className="font-mono text-[10px] uppercase tracking-[0.08em]"
-          style={{ color: "var(--color-faint)" }}
-        >
-          Cloud Agent
-        </p>
-        <p className="mt-0.5 font-mono text-[10px]" style={{ color: "var(--color-faint)" }}>
-          debug · no auth
-        </p>
-      </div>
-    </aside>
+        <div className="border-t border-border p-3">
+          <Link
+            href="/settings"
+            className={cn("side-nav-link", pathname === "/settings" && "is-active")}
+          >
+            <Settings2Icon className="size-4" />
+            Settings
+          </Link>
+          <button type="button" onClick={toggle} className="side-nav-link mt-1 w-full">
+            {mounted && theme === "light" ? (
+              <MoonIcon className="size-4" />
+            ) : (
+              <SunIcon className="size-4" />
+            )}
+            {mounted && theme === "light" ? "Dark mode" : "Light mode"}
+          </button>
+        </div>
+      </aside>
+    </>
   );
 }
 
-/** Shared svg chrome so each icon below is only its shapes. */
-function Icon({
-  className,
-  style,
-  strokeWidth = 1.5,
-  children,
-  ...rest
-}: React.SVGAttributes<SVGSVGElement> & { children: React.ReactNode }) {
+function RunGroup({
+  label,
+  runs,
+  pathname,
+  titles,
+}: {
+  label: string;
+  runs: RunSummary[];
+  pathname: string;
+  titles: Record<string, string>;
+}) {
+  if (runs.length === 0 && label === "Recent") {
+    return (
+      <p className="px-2 py-3 text-xs text-muted-foreground">Your sessions will appear here.</p>
+    );
+  }
   return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      {...rest}
-      className={className}
-      style={style}
-      strokeWidth={strokeWidth}
+    <section className="mb-5">
+      <h2 className="px-2 pb-1.5 text-xs font-medium text-muted-foreground/70">{label}</h2>
+      <div className="space-y-0.5">
+        {runs.map((run) => (
+          <Link
+            key={run.id}
+            href={`/sessions/${run.id}`}
+            title={run.repo}
+            className={cn("history-link", pathname === `/sessions/${run.id}` && "is-active")}
+          >
+            <span className="truncate">{titles[run.id] ?? sessionLabel(run)}</span>
+            {isActiveStatus(run.status) && (
+              <span className="size-1.5 shrink-0 animate-pulse-dot rounded-full bg-emerald-500" />
+            )}
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function sessionLabel(run: RunSummary): string {
+  const repository = run.repo.split("/").at(-1) || run.repo;
+  return run.prNumber === null
+    ? `${repository} · ${run.profile}`
+    : `${repository} · PR #${run.prNumber}`;
+}
+
+function Brand() {
+  return (
+    <Link href="/chat" className="flex items-center gap-2.5" aria-label="Cloud Agent home">
+      <span className="flex size-8 items-center justify-center rounded-[10px] bg-black dark:bg-white">
+        <Image src="/assets/z8l-logo.png" alt="" width={21} height={21} priority />
+      </span>
+      <span className="text-[15px] font-semibold tracking-[-0.02em]">Cloud Agent</span>
+    </Link>
+  );
+}
+
+function MobileLink({
+  href,
+  label,
+  active,
+  children,
+}: {
+  href: string;
+  label: string;
+  active: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      aria-label={label}
+      className={cn("mobile-nav-link", active && "mobile-nav-link-active")}
     >
       {children}
-    </svg>
-  );
-}
-
-type NavIconProps = { className?: string; style?: React.CSSProperties };
-
-function SessionsIcon(props: NavIconProps) {
-  return (
-    <Icon {...props}>
-      <rect x="2" y="2.5" width="12" height="3.5" rx="0.5" />
-      <rect x="2" y="10" width="12" height="3.5" rx="0.5" />
-    </Icon>
-  );
-}
-
-function PlusIcon(props: NavIconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M8 3v10M3 8h10" />
-    </Icon>
-  );
-}
-
-function SettingsIcon(props: NavIconProps) {
-  return (
-    <Icon {...props}>
-      <path d="M2 4.5h7M11.5 4.5h2.5M2 11.5h2.5M7 11.5h7" />
-      <circle cx="10" cy="4.5" r="1.6" />
-      <circle cx="5.5" cy="11.5" r="1.6" />
-    </Icon>
-  );
-}
-
-function SunIcon() {
-  return (
-    <Icon className="h-3.5 w-3.5" strokeWidth={1.4}>
-      <circle cx="8" cy="8" r="2.5" />
-      <path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.5 3.5l1 1M11.5 11.5l1 1M11.5 3.5l-1 1M3.5 11.5l-1 1" />
-    </Icon>
-  );
-}
-
-function MoonIcon() {
-  return (
-    <Icon className="h-3.5 w-3.5" strokeWidth={1.4} strokeLinejoin="round">
-      <path d="M13.5 10A6 6 0 016 2.5a6 6 0 100 11 6 6 0 007.5-3.5z" />
-    </Icon>
+    </Link>
   );
 }
