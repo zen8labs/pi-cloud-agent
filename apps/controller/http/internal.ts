@@ -2,12 +2,14 @@ import {
   redactUrlCredentials,
   runEventInputSchema,
   runStatusReportSchema,
+  sessionCheckpointSchema,
 } from "@pi-cloud-agent/protocol";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import type { Database } from "../db/client";
 import { appendEvent, completeRun, getRunByCallbackToken } from "../db/runs";
 import type { RunRow } from "../db/schema";
+import { getSessionForRun, saveSessionCheckpoint } from "../db/sessions";
 import type { AppEnv } from "./deps";
 
 /**
@@ -53,8 +55,14 @@ export function internalRoutes(): Hono<AppEnv> {
     const parsed = runStatusReportSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "unrecognized status" }, 422);
 
-    const { status, detail } = parsed.data;
+    let { status, detail } = parsed.data;
     const database = c.get("database");
+
+    const session = await getSessionForRun(database, run);
+    if (status === "done" && session && !session.agentCheckpoint) {
+      status = "error";
+      detail = "the turn completed without a durable Pi session checkpoint";
+    }
 
     // Recorded as an event first, so the reason survives even if the transition
     // below loses a race with the reconciler.
@@ -69,6 +77,26 @@ export function internalRoutes(): Hono<AppEnv> {
     );
 
     c.get("log").info("terminal status from sandbox", { runId: run.id, status, applied });
+    return c.json({ ok: true });
+  });
+
+  app.get("/runs/:runId/checkpoint", async (c) => {
+    const run = await requireRun(c, c.req.param("runId"));
+    if (run instanceof Response) return run;
+    const session = await getSessionForRun(c.get("database"), run);
+    if (!session) return c.json({ content: null });
+    if (session.activeRunId !== run.id)
+      return c.json({ error: "run is not session head" }, 409);
+    return c.json({ content: session.agentCheckpoint });
+  });
+
+  app.put("/runs/:runId/checkpoint", async (c) => {
+    const run = await requireRun(c, c.req.param("runId"));
+    if (run instanceof Response) return run;
+    const parsed = sessionCheckpointSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "invalid checkpoint" }, 422);
+    const saved = await saveSessionCheckpoint(c.get("database"), run, parsed.data.content);
+    if (!saved) return c.json({ error: "run is not an active session turn" }, 409);
     return c.json({ ok: true });
   });
 

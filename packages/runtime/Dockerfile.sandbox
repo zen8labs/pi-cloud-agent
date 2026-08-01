@@ -38,7 +38,10 @@ RUN npm install --omit=dev --no-audit --no-fund
 COPY dist/run.js /app/run.js
 
 # Where the repository is cloned and the agent works.
-RUN mkdir -p /workspace && chmod 1777 /workspace
+RUN mkdir -p /workspace/.pi-cloud-agent \
+    && chmod 1777 /workspace \
+    && chown user:user /workspace/.pi-cloud-agent \
+    && chmod 700 /workspace/.pi-cloud-agent
 
 # E2B runs a template's start command at build time, so the real per-run command
 # is issued on create instead — it needs values that only exist then. See

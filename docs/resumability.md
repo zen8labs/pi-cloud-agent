@@ -54,7 +54,9 @@ Events are written only by the sandbox callback route. Status only by the transi
 | `status = 'queued'` | claim and provision |
 | in flight and `deadline_at < now()` | fail, then stop the machine |
 | in flight, has a sandbox, and `last_event_at` is stale | fail, then stop the machine |
-| terminal, has a sandbox, `sandbox_stopped_at is null` | stop the machine, stamp it |
+| terminal standalone run, has a sandbox, `sandbox_stopped_at is null` | stop the machine, stamp it |
+| terminal session turn, `sandbox_stopped_at is null` | suspend its filesystem, clear `active_run_id`, stamp the turn |
+| idle session, parked workspace expired | delete the workspace reference |
 | `provisioning`, no sandbox, `claim_expires_at < now()` | return to `queued` |
 
 Ordering is deliberate: teardown runs *before* new work, so a busy queue can never starve the reclamation of machines that are still costing money.
@@ -92,9 +94,17 @@ Adding Redis or a broker would mean holding work in a second system when it is a
 
 `LISTEN/NOTIFY` makes claiming and streaming feel instant, but it is only a wake-up hint. Every listener also polls, so a dropped notification costs latency, not correctness. Unlike an in-memory bus it works across processes, which is what makes splitting the API from the reconciler a deployment choice.
 
+## Resumable turns are a separate layer
+
+Controller restart safety and conversation continuation solve different failures. A `sessions` row is the durable parent of ordered runs. It holds the active run guard, latest Pi JSONL checkpoint, and optional provider workspace reference. Creating a follow-up is one guarded transaction: it succeeds only when `active_run_id is null`, increments the turn number, and queues an ordinary run.
+
+The runtime downloads the checkpoint before invoking Pi and uploads the updated checkpoint before reporting `done`. The controller refuses successful completion without that checkpoint. After the run is terminal, the reconciler suspends the filesystem; a later turn resumes it and skips clone/setup. If it has expired, the run creates a fresh sandbox and clone but still restores the Pi checkpoint.
+
+Nothing depends on controller memory, sandbox memory, or an agent process staying alive. The exact ownership and failure cases are specified in [sessions.md](sessions.md).
+
 ## What is not solved
 
-- **A run is not resumable mid-session.** If a sandbox dies, the run fails; it is not restarted from where the agent had got to. Resuming an agent's reasoning needs harness-level session persistence, which is a different problem.
+- **A run is not resumable mid-turn.** If a sandbox dies while Pi is executing, that turn fails; the next user turn can continue from the last completed Pi checkpoint, not the interrupted reasoning step.
 - **Retries only cover provisioning.** A transient sandbox API failure returns the run to the queue up to three attempts. A failure *inside* the agent is a real outcome and is reported as one.
 - **`stop` failures are not retried forever.** A provider that cannot kill a machine will not start succeeding on the next tick, and retrying would turn one stuck sandbox into an endless loop. The run is stamped as reclaimed and the provider's own timeout is the backstop.
 
@@ -103,3 +113,5 @@ Adding Redis or a broker would mean holding work in a second system when it is a
 `apps/controller/db/runs.integration.test.ts` covers the SQL properties: exclusive claiming, guarded transitions, gapless sequences under concurrency.
 
 `apps/controller/reconcile/reconciler.integration.test.ts` drives the loop one tick at a time and simulates crashes by starting a fresh reconciler over existing state, including the case that used to break: *a live run must survive a restart untouched*.
+
+`apps/controller/db/sessions.integration.test.ts` covers the one-active-turn guard, checkpoint ownership, turn ordering, and parking. The reconciler suite additionally proves suspend then resume uses the same workspace without another create.

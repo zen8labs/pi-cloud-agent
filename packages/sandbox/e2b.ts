@@ -3,8 +3,9 @@ import {
   type SandboxProvider,
   type SandboxRef,
   type SandboxSpec,
+  WorkspaceNotFoundError,
 } from "@pi-cloud-agent/protocol";
-import { Sandbox } from "e2b";
+import { Sandbox, SandboxNotFoundError } from "e2b";
 import { z } from "zod";
 
 /**
@@ -68,6 +69,49 @@ export function createE2BProvider(
       }
 
       return { provider: "e2b", id: sandbox.sandboxId };
+    },
+
+    async resume(ref, spec): Promise<SandboxRef> {
+      const envs = flatten(spec);
+      const timeoutMs = spec.timeoutSeconds * 1000;
+      let sandbox: Sandbox;
+      try {
+        sandbox = await Sandbox.connect(ref.id, { apiKey, timeoutMs });
+        await sandbox.commands.run(spec.command, {
+          background: true,
+          envs,
+          timeoutMs,
+        });
+      } catch (cause) {
+        if (cause instanceof SandboxNotFoundError) {
+          throw new WorkspaceNotFoundError(`e2b: workspace "${ref.id}" no longer exists`, {
+            cause,
+          });
+        }
+        throw new SandboxError(`e2b: could not resume workspace "${ref.id}"`, {
+          retryable: isRetryable(cause),
+          cause,
+        });
+      }
+      return { provider: "e2b", id: sandbox.sandboxId };
+    },
+
+    async suspend(ref) {
+      try {
+        // The runtime has exited. Preserve its filesystem, not process memory or
+        // the per-turn credentials that were injected into that process.
+        await Sandbox.pause(ref.id, { apiKey, keepMemory: false });
+      } catch (cause) {
+        throw new SandboxError(`e2b: could not suspend workspace "${ref.id}"`, {
+          retryable: false,
+          cause,
+        });
+      }
+      return { provider: "e2b", id: ref.id };
+    },
+
+    async deleteWorkspace(ref): Promise<void> {
+      await Sandbox.kill(ref.id, { apiKey });
     },
 
     async stop(ref: SandboxRef): Promise<void> {

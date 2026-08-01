@@ -62,6 +62,7 @@ const schema = z.object({
   SANDBOX_PROVIDER: z.string().default("e2b"),
   SANDBOX_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(3900),
   RUN_WALL_CLOCK_SECONDS: z.coerce.number().int().positive().default(3600),
+  SESSION_WORKSPACE_RETENTION_SECONDS: z.coerce.number().int().positive().default(604_800),
 
   WEB_REPOS: commaList,
   WEB_CORS_ORIGINS: z.string().default("http://localhost:3000"),
@@ -91,6 +92,7 @@ export interface Config {
     timeoutSeconds: number;
   };
   runWallClockSeconds: number;
+  sessionWorkspaceRetentionSeconds: number;
   web: {
     repos: string[];
     corsOrigins: string[];
@@ -133,6 +135,7 @@ function build(env: Env): Config {
       timeoutSeconds: value.SANDBOX_TIMEOUT_SECONDS,
     },
     runWallClockSeconds: value.RUN_WALL_CLOCK_SECONDS,
+    sessionWorkspaceRetentionSeconds: value.SESSION_WORKSPACE_RETENTION_SECONDS,
     web: {
       repos: value.WEB_REPOS,
       corsOrigins: value.WEB_CORS_ORIGINS.split(",")

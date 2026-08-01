@@ -62,12 +62,18 @@ export async function createRun(database: Database, input: CreateRunInput): Prom
 export async function claimNextRun(
   database: Database,
   leaseSeconds: number,
+  /** Runs a caller has already claimed in this pass and must not be handed twice. */
+  excludeIds: string[] = [],
 ): Promise<RunRow | null> {
   return database.transaction(async (tx) => {
     const [candidate] = await tx
       .select({ id: runs.id })
       .from(runs)
-      .where(eq(runs.status, "queued"))
+      .where(
+        excludeIds.length > 0
+          ? and(eq(runs.status, "queued"), notInArray(runs.id, excludeIds))
+          : eq(runs.status, "queued"),
+      )
       .orderBy(asc(runs.createdAt))
       .limit(1)
       .for("update", { skipLocked: true });
@@ -337,6 +343,7 @@ export async function findSandboxesToStop(
     .where(
       and(
         inArray(runs.status, [...TERMINAL_STATUSES]),
+        isNull(runs.sessionId),
         isNotNull(runs.sandboxId),
         isNull(runs.sandboxStoppedAt),
       ),

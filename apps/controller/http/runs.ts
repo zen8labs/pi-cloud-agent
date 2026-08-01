@@ -1,22 +1,17 @@
 import { randomBytes } from "node:crypto";
-import { DEFAULT_PROFILE, getProfile } from "@pi-cloud-agent/profiles";
 import {
-  createRunRequestSchema,
   isTerminal,
-  parseRepoFullName,
-  type RepoRef,
   type RunDetail,
   type RunStatus,
   type RunSummary,
-  type Trigger,
 } from "@pi-cloud-agent/protocol";
-import { createVcsProvider } from "@pi-cloud-agent/vcs";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { Database } from "../db/client";
 import { completeRun, createRun, getRun, listEvents, listRuns } from "../db/runs";
 import type { RunRow } from "../db/schema";
 import type { AppEnv } from "./deps";
+import { readManualRequest } from "./manual";
 
 /** The operator API: start runs, read them, watch them, stop them. */
 export function runRoutes(): Hono<AppEnv> {
@@ -30,66 +25,26 @@ export function runRoutes(): Hono<AppEnv> {
   });
 
   app.post("/", async (c) => {
-    const parsed = createRunRequestSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) {
-      return c.json({ error: "invalid request", issues: parsed.error.issues }, 422);
-    }
-    const body = parsed.data;
-    const name = parseRepoFullName(body.repo);
-    if (!name) return c.json({ error: 'repo must be "owner/name"' }, 422);
-
     const config = c.get("config");
-    const vcs = createVcsProvider(body.provider, config.env);
-
-    // Resolve the real default branch rather than assuming `main` — a repo on
-    // `master` would otherwise fail to clone for a reason nobody can see.
-    const branch =
-      body.branch?.trim() || (await vcs.getDefaultBranch(body.repo).catch(() => null)) || "";
-
-    const repo: RepoRef = {
-      provider: body.provider,
-      host: body.host,
-      owner: name.owner,
-      name: name.name,
-      cloneUrl: `https://${body.host}/${body.repo}.git`,
-      defaultBranch: branch || "main",
-      baseSha: "",
-      headSha: "",
-      headBranch: branch,
-      prNumber: body.prNumber ?? null,
-    };
-
-    const trigger: Trigger = { kind: "manual", repo, prompt: body.prompt };
-    const profileName = body.profile || DEFAULT_PROFILE;
-
-    let profile: ReturnType<typeof getProfile>;
-    try {
-      profile = getProfile(profileName);
-    } catch (error) {
-      return c.json({ error: error instanceof Error ? error.message : String(error) }, 422);
-    }
-
-    // Ask the profile whether this makes sense before writing a row that can
-    // only fail later. `accepts` is also the validation surface — a pr-review run
-    // without a PR number is rejected here rather than in a sandbox.
-    if (!profile.accepts(trigger, {})) {
-      return c.json(
-        { error: `the "${profileName}" profile does not accept this request` },
-        422,
-      );
-    }
+    const resolved = await readManualRequest(await c.req.json().catch(() => null), config);
+    if (!resolved.ok) return c.json(resolved.error, 422);
+    const { body, request: manual } = resolved;
 
     const run = await createRun(c.get("database"), {
-      profile: profileName,
+      profile: manual.profile,
       provider: body.provider,
       repoFullName: body.repo,
-      trigger,
+      trigger: manual.trigger,
       // Pinned at creation, so a run stays reproducible if configuration changes.
       model: config.model.id,
       callbackToken: randomBytes(32).toString("hex"),
     });
 
-    c.get("log").info("run queued", { runId: run.id, profile: profileName, repo: body.repo });
+    c.get("log").info("run queued", {
+      runId: run.id,
+      profile: manual.profile,
+      repo: body.repo,
+    });
     return c.json(toSummary(run), 201);
   });
 
@@ -171,7 +126,9 @@ async function tailRun(
       await stream.writeSSE({
         id: String(event.seq),
         event: event.type,
-        data: JSON.stringify(event.data),
+        // `at` rides alongside the payload so replayed frames keep real
+        // timestamps; consumers treat it as metadata, not event data.
+        data: JSON.stringify({ ...event.data, at: event.at }),
       });
     }
     return seq;
@@ -215,15 +172,16 @@ function toSummary(run: RunRow): RunSummary {
     profile: run.profile,
     provider: run.provider,
     repo: run.repoFullName,
-    prNumber: run.trigger.repo.prNumber,
     model: run.model,
     error: run.error,
     createdAt: run.createdAt.toISOString(),
     updatedAt: run.updatedAt.toISOString(),
+    sessionId: run.sessionId,
+    turnNumber: run.turnNumber,
   };
 }
 
-function toDetail(run: RunRow): RunDetail {
+export function toDetail(run: RunRow): RunDetail {
   return {
     ...toSummary(run),
     prompt: run.trigger.prompt ?? null,

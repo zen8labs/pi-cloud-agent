@@ -1,21 +1,21 @@
 "use client";
 
-import type { RunSummary } from "@pi-cloud-agent/protocol";
-import { MoonIcon, PlusIcon, Settings2Icon, SunIcon } from "lucide-react";
+import type { SessionSummary } from "@pi-cloud-agent/protocol";
+import { MoonIcon, PanelLeftIcon, PlusIcon, SunIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useNavCollapse } from "@/components/nav-collapse";
 import { useTheme } from "@/components/ThemeProvider";
 import { api } from "@/lib/api";
-import { isActiveStatus } from "@/lib/format";
 import { loadSessionTitles } from "@/lib/session-titles";
 import { cn } from "@/lib/utils";
 
 export function SideNav() {
   const pathname = usePathname();
   const { theme, toggle } = useTheme();
-  const [runs, setRuns] = useState<RunSummary[]>([]);
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [titles, setTitles] = useState<Record<string, string>>({});
   const [mounted, setMounted] = useState(false);
 
@@ -24,11 +24,11 @@ export function SideNav() {
     let alive = true;
     const load = () =>
       api
-        .listRuns(40)
+        .listSessions(40)
         .then((items) => {
           if (alive) {
-            setRuns(items);
-            setTitles(loadSessionTitles(items.map((run) => run.id)));
+            setSessions(items);
+            setTitles(loadSessionTitles(items.map((item) => item.id)));
           }
         })
         .catch(() => {});
@@ -40,8 +40,8 @@ export function SideNav() {
     };
   }, []);
 
-  const active = runs.filter((run) => isActiveStatus(run.status));
-  const recent = runs.filter((run) => !isActiveStatus(run.status));
+  const active = sessions.filter((session) => session.status !== "idle");
+  const recent = sessions.filter((session) => session.status === "idle");
 
   return (
     <>
@@ -51,46 +51,54 @@ export function SideNav() {
           <MobileLink href="/chat" label="New task" active={pathname === "/chat"}>
             <PlusIcon />
           </MobileLink>
-          <MobileLink href="/settings" label="Settings" active={pathname === "/settings"}>
-            <Settings2Icon />
-          </MobileLink>
         </div>
       </header>
 
       <aside className="side-nav">
-        <div className="px-4 pb-3 pt-5">
+        <div className="flex items-center justify-between px-3.5 pb-2 pt-4">
           <Brand />
+          <CollapseButton />
         </div>
-        <div className="px-3">
+        <div className="px-2.5">
           <Link
             href="/chat"
             className={cn("side-nav-link", pathname === "/chat" && "is-active")}
           >
-            <PlusIcon className="size-4" />
+            <PlusIcon className="size-3.5" />
             New task
           </Link>
         </div>
 
-        <div className="mt-5 min-h-0 flex-1 overflow-y-auto px-3 pb-4">
+        <div className="mt-4 min-h-0 flex-1 overflow-y-auto px-2.5 pb-4">
           {active.length > 0 && (
-            <RunGroup label="Running" runs={active} pathname={pathname} titles={titles} />
+            <SessionGroup
+              label="Running"
+              sessions={active}
+              pathname={pathname}
+              titles={titles}
+            />
           )}
-          <RunGroup label="Recent" runs={recent} pathname={pathname} titles={titles} />
+          {recent.length > 0 && (
+            <SessionGroup
+              label="Recent"
+              sessions={recent}
+              pathname={pathname}
+              titles={titles}
+            />
+          )}
+          {sessions.length === 0 && (
+            <p className="px-2 py-3 text-xs text-muted-foreground/80">
+              Your sessions will appear here.
+            </p>
+          )}
         </div>
 
-        <div className="border-t border-border p-3">
-          <Link
-            href="/settings"
-            className={cn("side-nav-link", pathname === "/settings" && "is-active")}
-          >
-            <Settings2Icon className="size-4" />
-            Settings
-          </Link>
-          <button type="button" onClick={toggle} className="side-nav-link mt-1 w-full">
+        <div className="border-t border-border px-2.5 py-2.5">
+          <button type="button" onClick={toggle} className="side-nav-link w-full">
             {mounted && theme === "light" ? (
-              <MoonIcon className="size-4" />
+              <MoonIcon className="size-3.5" />
             ) : (
-              <SunIcon className="size-4" />
+              <SunIcon className="size-3.5" />
             )}
             {mounted && theme === "light" ? "Dark mode" : "Light mode"}
           </button>
@@ -100,36 +108,36 @@ export function SideNav() {
   );
 }
 
-function RunGroup({
+function SessionGroup({
   label,
-  runs,
+  sessions,
   pathname,
   titles,
 }: {
   label: string;
-  runs: RunSummary[];
+  sessions: SessionSummary[];
   pathname: string;
   titles: Record<string, string>;
 }) {
-  if (runs.length === 0 && label === "Recent") {
-    return (
-      <p className="px-2 py-3 text-xs text-muted-foreground">Your sessions will appear here.</p>
-    );
-  }
   return (
-    <section className="mb-5">
-      <h2 className="px-2 pb-1.5 text-xs font-medium text-muted-foreground/70">{label}</h2>
-      <div className="space-y-0.5">
-        {runs.map((run) => (
+    <section className="mb-4">
+      <h2 className="nav-label">{label}</h2>
+      <div className="space-y-px">
+        {sessions.map((session) => (
           <Link
-            key={run.id}
-            href={`/sessions/${run.id}`}
-            title={run.repo}
-            className={cn("history-link", pathname === `/sessions/${run.id}` && "is-active")}
+            key={session.id}
+            href={`/sessions/${session.id}`}
+            title={session.repo}
+            className={cn(
+              "history-link",
+              pathname === `/sessions/${session.id}` && "is-active",
+            )}
           >
-            <span className="truncate">{titles[run.id] ?? sessionLabel(run)}</span>
-            {isActiveStatus(run.status) && (
-              <span className="size-1.5 shrink-0 animate-pulse-dot rounded-full bg-emerald-500" />
+            <span className="truncate">
+              {titles[session.id] || session.title || sessionLabel(session)}
+            </span>
+            {session.status !== "idle" && (
+              <span className="ml-auto size-1.5 shrink-0 animate-pulse-dot rounded-full bg-emerald-500" />
             )}
           </Link>
         ))}
@@ -138,21 +146,33 @@ function RunGroup({
   );
 }
 
-function sessionLabel(run: RunSummary): string {
-  const repository = run.repo.split("/").at(-1) || run.repo;
-  return run.prNumber === null
-    ? `${repository} · ${run.profile}`
-    : `${repository} · PR #${run.prNumber}`;
+function sessionLabel(session: SessionSummary): string {
+  const repository = session.repo.split("/").at(-1) || session.repo;
+  return `${repository} · ${session.profile}`;
 }
 
 function Brand() {
   return (
-    <Link href="/chat" className="flex items-center gap-2.5" aria-label="Cloud Agent home">
-      <span className="flex size-8 items-center justify-center rounded-[10px] bg-black dark:bg-white">
-        <Image src="/assets/z8l-logo.png" alt="" width={21} height={21} priority />
+    <Link href="/chat" className="flex items-center gap-2 px-0.5" aria-label="Cloud Agent home">
+      <span className="flex size-[26px] items-center justify-center rounded-lg border border-border bg-white">
+        <Image src="/assets/z8l-logo.png" alt="" width={16} height={16} priority />
       </span>
-      <span className="text-[15px] font-semibold tracking-[-0.02em]">Cloud Agent</span>
+      <span className="text-[13px] font-semibold tracking-[-0.01em]">Cloud Agent</span>
     </Link>
+  );
+}
+
+function CollapseButton() {
+  const { toggle } = useNavCollapse();
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      aria-label="Collapse sidebar"
+      className="grid size-6 place-items-center rounded-md text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+    >
+      <PanelLeftIcon className="size-4" />
+    </button>
   );
 }
 

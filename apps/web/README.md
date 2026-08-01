@@ -1,6 +1,6 @@
 # @pi-cloud-agent/web
 
-The operator dashboard: watch runs live, start new ones, configure profiles.
+The operator dashboard: watch runs live, start new ones.
 
 Next.js App Router, React, Tailwind 4, Base UI, and local-source [AI Elements](https://elements.ai-sdk.dev/) conversation primitives. Reaches the controller over HTTP at `NEXT_PUBLIC_API_BASE` and holds no server-side state of its own. Pi remains the agent harness; AI Elements only owns presentation and interaction semantics.
 
@@ -12,8 +12,7 @@ Next.js App Router, React, Tailwind 4, Base UI, and local-source [AI Elements](h
 |---|---|
 | `app/page.tsx` | redirects the root route to the chat-first workspace |
 | `app/chat/page.tsx` | start a run; profiles come from the controller, not from here |
-| `app/sessions/[id]/page.tsx` | one run: live feed, details, follow-up |
-| `app/settings/page.tsx` | per-repo settings, rendered from each profile's JSON Schema |
+| `app/sessions/[id]/page.tsx` | ordered turns: merged activity, live latest run, real follow-up |
 | `components/ActivityFeed.tsx` | folds the flat event log into a readable conversation |
 | `components/ChatComposer.tsx` | product wrapper around the AI Elements prompt primitives |
 | `components/StatusBadge.tsx` | the six run statuses, styled from CSS custom properties |
@@ -23,16 +22,16 @@ Next.js App Router, React, Tailwind 4, Base UI, and local-source [AI Elements](h
 | `public/assets/z8l-logo.png` | the zen8labs application mark |
 | `lib/api.ts` | the controller's API, typed from the protocol package |
 | `lib/useRun.ts` | the resumable `EventSource` subscription |
+| `lib/useSession.ts` | polls durable session metadata and combines every turn's event history |
 | `lib/format.ts` | time and status labels |
 | `lib/session-titles.ts` | local prompt-derived labels for sidebar history |
 
 ## Invariants
 
 - **No locally declared response shapes.** Everything comes from `@pi-cloud-agent/protocol`, so a field the server renames stops compiling here instead of turning into `undefined` on screen. This is the whole reason a protocol package exists. Do not restate a type to save an import.
-- **The settings page renders schemas, not forms.** It reads `configJsonSchema` from `GET /config`. A new profile's settings appear with no change to this app; if you find yourself writing a field specific to one profile, that is a bug.
 - **Dedupe stream events by `seq`.** Frames carry the event log's sequence number; `EventSource` can overlap during a reconnect and React strict mode double-invokes effects. `seq` makes dedupe exact rather than heuristic.
 - **A bare SSE `error` event means "reconnecting", not "failed".** Only a frame *with* data is a real server-side error. Treating both the same makes the UI flap on every network hiccup.
-- **The composer is not the harness.** Today a follow-up starts a new run and replays the visible exchange. Keep that transport behind the session page's `FollowUp` seam so it can move to Pi's forthcoming multi-turn session API without replacing the conversation UI.
+- **The composer is not the harness.** A follow-up creates a new run under the same durable session. Pi history and the repository workspace are restored below the API boundary; the browser never reconstructs or replays conversation text.
 
 ## Working on it
 

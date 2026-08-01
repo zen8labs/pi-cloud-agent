@@ -1,6 +1,6 @@
 # @pi-cloud-agent/sandbox
 
-Where a run's compute comes from. Two methods:
+Where a run's compute comes from. Standalone runs use two methods:
 
 ```ts
 create(spec: SandboxSpec): Promise<SandboxRef>
@@ -9,6 +9,11 @@ stop(ref: SandboxRef): Promise<void>
 
 It stays this small because of one constraint: **the sandbox is outbound-only.** The controller never dials in, so no backend has to expose port forwarding, tunnels, or reachability. Snapshots and warm pools are optimizations *behind* these two methods, not additions to them.
 
+Durable chat sessions additionally use `resume`, `suspend`, and
+`deleteWorkspace`. These remain provider control-plane operations; they do not
+open an inbound application connection to the sandbox. See
+[../../docs/sessions.md](../../docs/sessions.md).
+
 **Depends on:** `@pi-cloud-agent/protocol`, `zod`, and each backend's own SDK.
 
 ## Files
@@ -16,13 +21,16 @@ It stays this small because of one constraint: **the sandbox is outbound-only.**
 | File | Role |
 |---|---|
 | `index.ts` | the `FACTORIES` registry, `createSandboxProvider`, `sandboxProviderNames` |
-| `e2b.ts` | E2B: one hosted microVM per run |
+| `e2b.ts` | E2B: create/kill plus filesystem-only pause/resume |
 | `registry.test.ts` | the registry contract: construction and its failure messages |
 
 ## Invariants
 
 - **`stop` is idempotent.** The reconciler may call it for a machine that is already dead; that is the normal path after a timeout.
 - **`create` returns a working machine or throws.** A machine that exists but whose command never started is the worst outcome. It burns a slot and a credential and then goes silent. Reclaim it yourself and throw.
+- **`resume` starts one fresh runtime process.** If the opaque workspace no longer exists, throw `WorkspaceNotFoundError` so the controller can continue cold from the Pi checkpoint.
+- **`suspend` retains filesystem state, not process memory.** Per-run credentials must not survive into the next turn.
+- **`deleteWorkspace` is idempotent.** Expiry can race another reconciler pass.
 - **Classify failures with `SandboxError.retryable`.** `true` returns the run to the queue (up to three attempts); `false` fails it immediately. Getting this wrong means either burning attempts on a missing image or failing runs on a transient blip.
 - **Secrets are opened here and only here.** `spec.secrets` holds `Secret` objects; `expose()` is called at the boundary where they must become plain strings to cross into the machine.
 - **Never derive behavior from `spec.runId`.** It is correlation only. A provider that special-cases a run is a provider that cannot be swapped.

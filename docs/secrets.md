@@ -13,7 +13,8 @@ And then it runs code from a repository. **Once that happens, both credentials a
 |---|---|
 | narrow scope (one repository) | yes, with a GitHub App |
 | short TTL (~1 hour) | yes, with a GitHub App |
-| isolation (one machine per run, destroyed after) | yes |
+| isolation (one workspace per standalone run or durable session; never reassigned) | yes |
+| process memory discarded between session turns | yes, for the E2B filesystem-only pause |
 | the sandbox never holding the token at all | **not yet**: see below |
 
 A GitHub App is preferred for exactly this reason. A personal access token is accepted so a local setup works without registering an App, and it is strictly worse: broad and long-lived. GitLab has no mintable equivalent, so its token is a PAT, worth knowing before pointing it at a sandbox.
@@ -36,7 +37,7 @@ JSON.stringify({ token }) // {"token":"[redacted github token]"}
 token.expose()            // the value, the only way to get it
 ```
 
-It is opened at exactly one place: the sandbox provider's `create`, where credentials have to become plain strings to cross into the machine. This is not a security boundary; it is a guardrail that turns the accidental paths (string interpolation, serialization, a log line built from a template) from a code-review question into a compile-or-test failure.
+It is opened at exactly one place: the sandbox provider boundary (`create` or `resume`), where credentials have to become plain strings to cross into the machine. This is not a security boundary; it is a guardrail that turns the accidental paths (string interpolation, serialization, a log line built from a template) from a code-review question into a compile-or-test failure.
 
 ### Redaction happens where the secrets are known
 
@@ -48,7 +49,13 @@ The controller adds a second, cheap pass on ingest that strips `user:token@` out
 
 ### The callback token is not a credential for anything else
 
-Each run gets a random 32-byte bearer token, compared in constant time, and it authenticates exactly two endpoints for exactly one run. There is no endpoint for a sandbox to fetch a credential, read another run, or influence scheduling.
+Each run gets a random 32-byte bearer token, compared in constant time. It authenticates events, terminal status, and that active session turn's checkpoint read/write routes for exactly one run. It cannot read another run or overwrite a stale session head.
+
+### Durable session state is sensitive
+
+A parked filesystem may contain arbitrary repository data, and Pi's JSONL checkpoint may contain prompts, source excerpts, tool arguments, and tool output. They have the same trust classification. E2B suspension retains only the filesystem, not process memory; every turn gets fresh credentials. The git helper stores environment-variable references rather than token values, but untrusted repository code can deliberately write any credential it sees, so a workspace is never reused across sessions and is deleted after `SESSION_WORKSPACE_RETENTION_SECONDS`.
+
+The checkpoint is size-limited, stored without interpretation, and available only to the active run through its per-run bearer token. A production deployment should encrypt database storage and backups and apply a session deletion/retention policy appropriate to the repository data.
 
 ## Where this is going
 
@@ -74,9 +81,9 @@ mintForRun({ provider, repoFullName, host, vcs }): Promise<RunCredentials>
 
 ## The operator API has no authentication
 
-This is a deliberate gap in this phase, not an oversight. `POST /runs` starts a run and `GET /runs` lists them, with no authentication, because the intended deployment is localhost or a private network. Adding a half-designed auth layer would give a false sense of protection.
+This is a deliberate gap in this phase, not an oversight. The `/runs` and `/sessions` operator APIs have no authentication because the intended deployment is localhost or a private network. Adding a half-designed auth layer would give a false sense of protection.
 
-**Do not expose the controller publicly without adding real authentication first.** Webhook routes verify signatures and the sandbox callbacks verify a per-run token, so those are safe to expose; the operator API is not.
+**Do not expose the controller publicly without adding real authentication first.** The sandbox callbacks verify a per-run token, so they are safe to expose; the operator API is not.
 
 ## Where this is tested
 

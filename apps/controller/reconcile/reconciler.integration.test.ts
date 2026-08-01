@@ -3,50 +3,71 @@ import {
   SandboxError,
   type SandboxProvider,
   type SandboxSpec,
+  WorkspaceNotFoundError,
 } from "@pi-cloud-agent/protocol";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, type Database } from "../db/client";
-import { setRepoConfig } from "../db/repo-config";
 import { appendEvent, attachSandbox, claimNextRun, completeRun, getRun } from "../db/runs";
 import { runs } from "../db/schema";
+import { createSessionTurn, getSession } from "../db/sessions";
 import type { CredentialBroker } from "../secrets/broker";
 import {
   resetTables,
   seedRun,
+  seedSession,
   setupTestDatabase,
   silentLogger,
   testConfig,
 } from "../test-support";
 import { createReconciler, type Reconciler } from "./loop";
 
-/**
- * The reconciler, driven one tick at a time against real state.
- *
- * This is the file that demonstrates the central claim of the redesign: the
- * controller holds nothing in memory, so a crash is indistinguishable from a slow
- * tick. Several tests below simulate a crash simply by never calling the rest of
- * the provisioning path and then ticking again — which is exactly what a restart
- * looks like from the database's point of view.
- */
+/** The reconciler, driven one tick at a time against real durable state. */
 
 let database: Database;
 
 /** A sandbox provider that records what it was asked to do. */
-function fakeProvider(behavior: { failWith?: SandboxError } = {}): SandboxProvider & {
+function fakeProvider(
+  behavior: { failWith?: SandboxError; resumeMissing?: boolean } = {},
+): SandboxProvider & {
   created: SandboxSpec[];
+  resumeSpecs: SandboxSpec[];
   stopped: string[];
+  resumed: string[];
+  suspended: string[];
+  deleted: string[];
 } {
   const created: SandboxSpec[] = [];
+  const resumeSpecs: SandboxSpec[] = [];
   const stopped: string[] = [];
+  const resumed: string[] = [];
+  const suspended: string[] = [];
+  const deleted: string[] = [];
   return {
     name: "fake",
     created,
+    resumeSpecs,
     stopped,
+    resumed,
+    suspended,
+    deleted,
     async create(spec) {
       if (behavior.failWith) throw behavior.failWith;
       created.push(spec);
       return { provider: "fake", id: `sb-${created.length}` };
+    },
+    async resume(ref, spec) {
+      if (behavior.resumeMissing) throw new WorkspaceNotFoundError("workspace expired");
+      resumed.push(ref.id);
+      resumeSpecs.push(spec);
+      return { provider: "fake", id: ref.id };
+    },
+    async suspend(ref) {
+      suspended.push(ref.id);
+      return { provider: "fake", id: ref.id };
+    },
+    async deleteWorkspace(ref) {
+      deleted.push(ref.id);
     },
     async stop(ref) {
       stopped.push(ref.id);
@@ -74,13 +95,7 @@ function reconciler(
   });
 }
 
-/**
- * One full pass, including the provisioning it starts.
- *
- * `tick` deliberately detaches provisioning so a slow sandbox API cannot delay
- * timeouts, which means "the tick returned" is not "the work finished". Draining
- * makes the difference observable instead of racing it with a sleep.
- */
+/** One full pass, including detached provisioning. */
 async function tick(loop: Reconciler): Promise<void> {
   await loop.tick();
   await loop.drain();
@@ -127,65 +142,6 @@ describe("provisioning", () => {
     expect(provider.created[0]?.command).toContain("run.js");
   });
 
-  it("prepends the profile's skill, so the sandbox needs no profile code", async () => {
-    await seedRun(database, {
-      profile: "pr-review",
-      trigger: {
-        kind: "pr_opened",
-        repo: {
-          provider: "github",
-          host: "github.com",
-          owner: "acme",
-          name: "widgets",
-          cloneUrl: "https://github.com/acme/widgets.git",
-          defaultBranch: "main",
-          baseSha: "base",
-          headSha: "head",
-          headBranch: "feature",
-          prNumber: 11,
-        },
-      },
-    });
-    const provider = fakeProvider();
-
-    await tick(reconciler(provider));
-
-    const prompt = provider.created[0]?.env[SANDBOX_ENV.taskPrompt] ?? "";
-    expect(prompt).toContain("# PR review");
-    expect(prompt).toContain("Review pull request #11");
-  });
-
-  it("applies the repo's stored profile config when building the task", async () => {
-    await setRepoConfig(
-      database,
-      { provider: "github", repoFullName: "acme/widgets", profile: "pr-review" },
-      { branch: "release" },
-    );
-    await seedRun(database, {
-      profile: "pr-review",
-      trigger: {
-        kind: "pr_opened",
-        repo: {
-          provider: "github",
-          host: "github.com",
-          owner: "acme",
-          name: "widgets",
-          cloneUrl: "https://github.com/acme/widgets.git",
-          defaultBranch: "main",
-          baseSha: "base",
-          headSha: "head",
-          headBranch: "feature",
-          prNumber: 12,
-        },
-      },
-    });
-    const provider = fakeProvider();
-
-    await tick(reconciler(provider));
-
-    expect(provider.created[0]?.env[SANDBOX_ENV.repoDefaultBranch]).toBe("release");
-  });
-
   it("fails a run permanently when the sandbox cannot be created", async () => {
     const run = await seedRun(database);
     const provider = fakeProvider({
@@ -227,6 +183,69 @@ describe("provisioning", () => {
 });
 
 describe("completion and teardown", () => {
+  it("suspends a session workspace and resumes it for the next turn", async () => {
+    const { session, run } = await seedSession(database);
+    const provider = fakeProvider();
+    const loop = reconciler(provider);
+
+    await tick(loop);
+    expect(provider.created[0]?.env[SANDBOX_ENV.sessionId]).toBe(session.id);
+    expect(provider.created[0]?.env[SANDBOX_ENV.workspaceResumed]).toBe("false");
+
+    await completeRun(database, run.id, "succeeded");
+    let releaseBoth = () => {};
+    const bothSuspended = new Promise<void>((resolve) => {
+      releaseBoth = resolve;
+    });
+    provider.suspend = async (ref) => {
+      provider.suspended.push(ref.id);
+      if (provider.suspended.length === 2) releaseBoth();
+      await bothSuspended;
+      return ref;
+    };
+    await Promise.all([loop.tick(), reconciler(provider).tick()]);
+
+    expect(provider.suspended).toEqual(["sb-1", "sb-1"]);
+    expect(provider.deleted).toEqual([]);
+    expect(provider.stopped).toEqual([]);
+    expect((await getSession(database, session.id))?.sandboxId).toBe("sb-1");
+
+    const followUp = await createSessionTurn(
+      database,
+      session.id,
+      "Read the file created in the previous turn.",
+      "follow-up-token",
+    );
+    await tick(loop);
+
+    expect(provider.created).toHaveLength(1);
+    expect(provider.resumed).toEqual(["sb-1"]);
+    expect(provider.resumeSpecs[0]?.runId).toBe(followUp.id);
+    expect(provider.resumeSpecs[0]?.env[SANDBOX_ENV.workspaceResumed]).toBe("true");
+    expect(provider.resumeSpecs[0]?.env[SANDBOX_ENV.taskPrompt]).toBe(
+      "Read the file created in the previous turn.",
+    );
+    expect((await getRun(database, followUp.id))?.sandboxId).toBe("sb-1");
+  });
+
+  it("cold-starts from the durable checkpoint when a parked workspace disappeared", async () => {
+    const { session, run } = await seedSession(database);
+    const healthy = fakeProvider();
+    const firstLoop = reconciler(healthy);
+    await tick(firstLoop);
+    await completeRun(database, run.id, "succeeded");
+    await tick(firstLoop);
+
+    const followUp = await createSessionTurn(database, session.id, "Continue cold.", "token");
+    const missing = fakeProvider({ resumeMissing: true });
+    await tick(reconciler(missing));
+
+    expect(missing.created).toHaveLength(1);
+    expect(missing.created[0]?.env[SANDBOX_ENV.workspaceResumed]).toBe("false");
+    expect((await getRun(database, followUp.id))?.status).toBe("running");
+    expect((await getSession(database, session.id))?.sandboxId).toBeNull();
+  });
+
   it("reclaims the machine of a run that has finished", async () => {
     const run = await seedRun(database);
     const provider = fakeProvider();
@@ -321,8 +340,6 @@ describe("recovery", () => {
   });
 
   it("recovers a run whose worker died between claiming and provisioning", async () => {
-    // A crash in that window is the one case that used to strand a run. Simulate
-    // it by claiming with an already-expired lease and never provisioning.
     const run = await seedRun(database);
     await claimNextRun(database, -1);
 
@@ -337,8 +354,6 @@ describe("recovery", () => {
   });
 
   it("leaves a live run alone across a restart", async () => {
-    // The regression that matters most: the previous design force-failed every
-    // in-flight run on startup because completion lived in memory.
     const run = await seedRun(database);
     const provider = fakeProvider();
 

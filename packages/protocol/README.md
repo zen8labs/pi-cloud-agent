@@ -19,8 +19,8 @@ Nothing here executes anything or touches the network.
 | `secret.ts` | `Secret`, `createRedactor`, `redactUrlCredentials` |
 | `env.ts` | `SANDBOX_ENV` and `SANDBOX_PATHS`: the controller/sandbox environment contract |
 | `profile.ts` | `ProfileDefinition`, the config-erased `Profile`, and `defineProfile` |
-| `sandbox.ts` | `SandboxProvider` (two methods), `SandboxSpec`, `SandboxError` |
-| `vcs.ts` | `VCSProvider`, `WebhookVerificationError` |
+| `sandbox.ts` | `SandboxProvider` lifecycle, `SandboxSpec`, `SandboxRef`, `WorkspaceRef`, `SandboxError` |
+| `vcs.ts` | `VCSProvider` |
 | `api.ts` | the controller's HTTP request/response shapes, shared with the dashboard |
 
 ## Invariants

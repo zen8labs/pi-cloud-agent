@@ -6,7 +6,7 @@ Tests are grouped by **the behavior they defend**, not by the file they cover. T
 
 Three questions decide whether something deserves a test:
 
-1. **Would a bug here be silent?** Redaction, webhook verification, and guarded state transitions all fail quietly and expensively. They get thorough tests.
+1. **Would a bug here be silent?** Redaction and guarded state transitions both fail quietly and expensively. They get thorough tests.
 2. **Is the behavior in the code, or in the SQL?** Exclusive claiming and gapless sequence numbers are properties of `for update skip locked` and a row lock. A fake database would test the fake, so these run against real Postgres.
 3. **Does the test describe a promise to a caller?** `getRun` returning a row is an implementation detail. "The first terminal decision wins permanently" is a promise.
 
@@ -34,16 +34,16 @@ Integration tests share one database and truncate between tests, so they run in 
 | File | The guarantee it defends |
 |---|---|
 | `packages/protocol/secret.test.ts` | a credential cannot reach output by accident |
-| `packages/vcs/webhooks.test.ts` | a forged or unverifiable delivery is refused; an understood event becomes exactly one trigger |
 | `packages/profiles/profiles.test.ts` | profiles own their triggering policy and their config, and `accepts` never green-lights what `buildTask` would refuse |
 | `packages/sandbox/registry.test.ts` | a misconfigured provider fails at startup, naming the variable and the alternatives |
 | `packages/runtime/reporter.test.ts` | secrets do not leave the sandbox; telemetry loss cannot fail a run; the terminal status retries |
 | `apps/controller/db/runs.integration.test.ts` | the SQL properties: exclusive claim, guarded transitions, gapless sequences under concurrency |
-| `apps/controller/reconcile/reconciler.integration.test.ts` | the resumability claims, including that a live run survives a restart untouched |
-| `apps/controller/http/api.integration.test.ts` | the HTTP contract, grouped by who is allowed to do what |
+| `apps/controller/db/sessions.integration.test.ts` | one active turn, ordered runs, checkpoint ownership, and workspace parking |
+| `apps/controller/reconcile/reconciler.integration.test.ts` | restart safety plus workspace suspend/resume and cold fallback |
+| `apps/controller/http/api.integration.test.ts` | the HTTP contract, including authenticated checkpoint callbacks and session turns |
 | `apps/web/e2e/smoke.spec.ts` | the whole loop renders: the list, the form, the session page, and a terminal state arrives with its reason |
 
-The refusal cases matter more than the happy paths. `webhooks.test.ts` has more tests for rejection than for acceptance, deliberately.
+The refusal cases matter more than the happy paths.
 
 ## Conventions
 
@@ -73,7 +73,7 @@ it("completeRun returns false when already terminal", …)     // no
 
 `*.live.test.ts` boots a real sandbox against real credentials from `.env` and costs money. They are excluded from CI and never run automatically.
 
-They exist to validate the one thing offline tests cannot: that the sandbox image, the harness, the model gateway, and the callback path work together. Run them after changing the sandbox image, the runtime, or the model configuration.
+They exist to validate the one thing offline tests cannot: that the sandbox image, harness, model gateway, callback path, Pi checkpoint, and provider pause/resume behavior work together. The live flow creates an uncommitted proof file in turn one and reads it in turn two while asserting the same Pi session and provider workspace continue without another clone.
 
 ```bash
 pnpm sandbox:template

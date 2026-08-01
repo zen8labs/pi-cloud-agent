@@ -2,7 +2,7 @@
 
 > **This is the untrusted zone.** Everything here runs inside the sandbox, alongside code cloned from a repository nobody has reviewed.
 
-One process per run: clone the repository, optionally run its setup hook, run one agent session, report outward. Then the machine is destroyed.
+One process per run: create or reuse the repository checkout, optionally run its setup hook on a fresh clone, open the durable Pi checkpoint, execute one turn, save the checkpoint, and report outward. The process always exits. Standalone compute is destroyed; a session filesystem may be suspended for a later process.
 
 **Depends on:** `@pi-cloud-agent/protocol` and the agent harness. **Nothing else, ever.** No database client, no VCS client, no sandbox provider, no credential broker. `pnpm boundaries` fails CI if a dependency is added, and pnpm's isolated `node_modules` makes an undeclared import unresolvable in the first place.
 
@@ -15,7 +15,8 @@ It reaches exactly one thing: `CONTROL_PLANE_URL`, outbound only.
 | `run.ts` | the entry point: four steps, exactly one terminal report |
 | `config.ts` | reads `SANDBOX_ENV` into a typed object; `secretValues()` for redaction |
 | `workspace.ts` | git credential helper, clone and checkout, the repo's setup hook |
-| `agent.ts` | one agent session, relaying its native events as telemetry |
+| `agent.ts` | one agent turn, relaying Pi's native events as telemetry |
+| `session-state.ts` | authenticated download/open/upload of the Pi JSONL checkpoint |
 | `reporter.ts` | the only outbound path: telemetry and the terminal status |
 | `build.ts` | bundles to `dist/run.js` and pins the harness version for the image |
 | `Dockerfile.sandbox` | the sandbox image: Node, `git`, `gh`, the bundle |

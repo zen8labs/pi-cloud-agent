@@ -98,6 +98,9 @@ E2B_TEMPLATE=pi-cloud-agent
 AGENT_MODEL=aigateway/MiniMax/MiniMax-M2.7
 AIGATEWAY_BASE_URL=https://<your-openai-compatible-gateway>/v1
 AIGATEWAY_API_KEY=<your-model-api-key>
+
+# Optional: how long an idle session's filesystem remains resumable (default 7 days)
+SESSION_WORKSPACE_RETENTION_SECONDS=604800
 ```
 
 `AGENT_MODEL` has the form `provider/model`. The provider prefix is local configuration; everything after the first slash is sent to the gateway as the model name.
@@ -116,7 +119,7 @@ Build and publish the template:
 pnpm sandbox:template
 ```
 
-This builds `packages/runtime`, creates the `pi-cloud-agent` E2B template with 4 CPUs and 4096 MiB of memory, and snapshots an inert `sleep infinity` process. The controller starts the real runtime after sandbox creation because per-run prompts and credentials do not exist at template-build time.
+This builds `packages/runtime`, creates the `pi-cloud-agent` E2B template with 4 CPUs and 4096 MiB of memory, and snapshots an inert `sleep infinity` process. The controller starts the real runtime after sandbox creation or workspace resume because per-run prompts and credentials do not exist at template-build time.
 
 The E2B CLI writes account-specific template metadata to `packages/runtime/e2b.toml`. That generated file is gitignored: keep it local and do not commit its team or template IDs.
 
@@ -139,7 +142,6 @@ GITHUB_TOKEN=<fine-grained-personal-access-token>
 # Preferred long-term option
 GITHUB_APP_ID=<app-id>
 GITHUB_APP_PRIVATE_KEY=<private-key>
-GITHUB_WEBHOOK_SECRET=<webhook-secret>
 ```
 
 To populate the dashboard repository selector explicitly:

@@ -65,6 +65,10 @@ psql -c "select id, status, sandbox_id, last_event_at, deadline_at, claim_expire
 # machines that should have been reclaimed
 psql -c "select id, status, sandbox_provider, sandbox_id
          from runs where sandbox_id is not null and sandbox_stopped_at is null;"
+
+# durable sessions and their parked workspaces
+psql -c "select id, active_run_id, latest_run_id, turn_count, sandbox_id, workspace_expires_at
+         from sessions order by updated_at desc limit 10;"
 ```
 
 ## What a healthy run looks like
@@ -87,15 +91,9 @@ The terminal evidence is a `status` event followed by the run row reaching `succ
 | `running`, no events, fails with "stopped reporting" | `CONTROL_PLANE_URL` unreachable from the sandbox | the tunnel |
 | events stop mid-run, then "wall-clock budget" | the agent genuinely ran long | `RUN_WALL_CLOCK_SECONDS` |
 | `git.clone_branch_failed` then a successful clone | the named branch is gone; fell back to the default | benign |
-| webhook returns 401 | signature mismatch | the forge's configured secret vs `*_WEBHOOK_SECRET` |
-| webhook returns 204 | understood and deliberately ignored | the profile's `accepts`, and `repo_config` |
 | `attempt` climbing | retryable provisioning failures | the provider's error in the logs |
-
-A 204 from a webhook is the one that looks like a bug and is not. Check whether a repository has turned the trigger off:
-
-```bash
-psql -c "select * from repo_config;"
-```
+| session stays `parking` | reconciler has not suspended or released the terminal turn | controller logs and `runs.sandbox_stopped_at` |
+| follow-up clones again | parked workspace expired or disappeared | `sessions.workspace_expires_at`, `git.cloned`; Pi history still resumes |
 
 ## Cancelling and cleanup
 
@@ -130,4 +128,18 @@ curl -sS -X POST http://localhost:8080/runs \
   -d '{"repo":"owner/repo","prompt":"Report the latest commit.","profile":"general"}'
 ```
 
-Run these after changing the sandbox image, the runtime, or the model configuration. They validate the one thing offline tests cannot: that the image, the harness, the gateway, and the callback path work together.
+For an interactive session, create it once and add turns to the same id:
+
+```bash
+SESSION_ID=$(curl -sS -X POST http://localhost:8080/sessions \
+  -H 'Content-Type: application/json' \
+  -d '{"repo":"owner/repo","prompt":"Create an uncommitted proof file.","profile":"general"}' \
+  | jq -r '.id')
+
+# Wait until GET /sessions/$SESSION_ID reports status=idle, then:
+curl -sS -X POST "http://localhost:8080/sessions/$SESSION_ID/turns" \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"Read the proof file from the previous turn."}'
+```
+
+The live test performs this as two real turns and verifies the Pi session id, uncommitted file, provider workspace id, and absence of a second clone. Run it after changing the sandbox image, runtime, session checkpointing, provider lifecycle, or model configuration.

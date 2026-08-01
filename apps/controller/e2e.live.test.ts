@@ -1,10 +1,17 @@
 import { randomBytes } from "node:crypto";
 import { isTerminal } from "@pi-cloud-agent/protocol";
+import { createSandboxProvider } from "@pi-cloud-agent/sandbox";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getConfig } from "./config";
 import { closeDatabase, createDatabase, type Database } from "./db/client";
 import { migrateDatabase } from "./db/migrate-runner";
-import { createRun, getRun, listEvents } from "./db/runs";
+import { getRun, listEvents } from "./db/runs";
+import {
+  clearSessionWorkspace,
+  createSessionTurn,
+  createSessionWithRun,
+  getSession,
+} from "./db/sessions";
 import { createLogger } from "./logger";
 import { createReconciler, type Reconciler } from "./reconcile/loop";
 import { createCredentialBroker } from "./secrets/broker";
@@ -53,13 +60,7 @@ beforeAll(async () => {
   database = createDatabase(config.databaseUrl);
   await migrateDatabase(database);
 
-  const log = createLogger("live-test", { level: "info" });
-  reconciler = createReconciler({
-    config,
-    database,
-    broker: createCredentialBroker(config, log),
-    log,
-  });
+  reconciler = newReconciler();
   await reconciler.start();
 });
 
@@ -68,80 +69,157 @@ afterAll(async () => {
   if (database) await closeDatabase(database);
 });
 
-describe("a real run, end to end", () => {
+describe("a real resumable session, end to end", () => {
   it.skipIf(SKIP_REASON !== "")(
-    SKIP_REASON || "clones, runs the agent, reports done, and gets reclaimed",
+    SKIP_REASON || "continues Pi history and an uncommitted workspace across real turns",
     async () => {
       const [owner, name] = REPO.split("/");
+      const proof = `pi-resume-${randomBytes(8).toString("hex")}`;
+      const proofFile = `.pi-resume-proof-${proof}.txt`;
       const trigger = manualTrigger({
         owner,
         name,
         cloneUrl: `https://github.com/${REPO}.git`,
       });
-      trigger.prompt = "Report the subject of the latest commit, then stop.";
+      trigger.prompt =
+        `Create the uncommitted file ${proofFile} containing exactly ${proof}. ` +
+        "Read it back, report the exact value, do not commit it, then stop.";
 
-      const run = await createRun(database, {
+      const { session, run } = await createSessionWithRun(database, {
+        title: "Live resumability proof",
         profile: "general",
         provider: "github",
         repoFullName: REPO,
+        repo: trigger.repo,
         trigger,
         model: config.model.id,
         callbackToken: randomBytes(32).toString("hex"),
       });
 
-      // The reconciler is running, so this waits on the same path production
-      // uses: durable state, polled.
-      const deadline = Date.now() + 9 * 60 * 1000;
-      let final = run;
-      while (Date.now() < deadline) {
-        await new Promise((resolve) => setTimeout(resolve, 3000));
-        const current = await getRun(database, run.id);
-        if (!current) throw new Error("the run disappeared");
-        final = current;
-        if (isTerminal(current.status)) break;
+      try {
+        const first = await waitForTerminal(run.id);
+        expect(first.status, `first turn failed: ${first.error ?? "(no error recorded)"}`).toBe(
+          "succeeded",
+        );
+        const firstIdle = await waitForSessionIdle(session.id);
+        expect(firstIdle.sandboxId).toBe(first.sandboxId);
+
+        const firstEvents = await listEvents(database, run.id, 0);
+        const firstLogs = logNames(firstEvents);
+        expect(firstLogs).toContain("git.cloned");
+        expect(firstLogs).toContain("agent.session_created");
+        expect(firstLogs).toContain("agent.session_checkpointed");
+        expect(firstEvents.at(-1)?.type).toBe("status");
+
+        // Prove a controller process can disappear while the session is idle.
+        await reconciler.stop();
+        reconciler = newReconciler();
+        await reconciler.start();
+
+        const followUp = await createSessionTurn(
+          database,
+          session.id,
+          `Read ${proofFile}. Reply with its exact content and explain whether it was already present.`,
+          randomBytes(32).toString("hex"),
+        );
+        const second = await waitForTerminal(followUp.id);
+        expect(
+          second.status,
+          `second turn failed: ${second.error ?? "(no error recorded)"}`,
+        ).toBe("succeeded");
+        const secondIdle = await waitForSessionIdle(session.id);
+
+        const secondEvents = await listEvents(database, followUp.id, 0);
+        const secondLogs = logNames(secondEvents);
+        expect(secondLogs).toContain("git.workspace_resumed");
+        expect(secondLogs).toContain("agent.session_restored");
+        expect(secondLogs).not.toContain("git.cloned");
+        expect(second.sandboxId).toBe(first.sandboxId);
+        expect(secondIdle.sandboxId).toBe(firstIdle.sandboxId);
+        expect(piSessionId(secondEvents)).toBe(piSessionId(firstEvents));
+        expect(tokenText(secondEvents)).toContain(proof);
+        expect(new Set(secondEvents.map((event) => event.type))).toContain("tool_call");
+
+        const serialized = JSON.stringify([...firstEvents, ...secondEvents]);
+        expect(serialized).not.toContain(config.model.apiKey.expose());
+      } finally {
+        await cleanupSession(session.id);
       }
-
-      expect(final.status, `run failed: ${final.error ?? "(no error recorded)"}`).toBe(
-        "succeeded",
-      );
-
-      const events = await listEvents(database, run.id, 0);
-      const types = new Set(events.map((event) => event.type));
-      const logged = new Set(
-        events.filter((e) => e.type === "log").map((e) => String(e.data.event ?? "")),
-      );
-
-      // The checkout happened inside the sandbox.
-      expect(logged).toContain("git.cloned");
-      // The harness actually started and finished.
-      expect(logged).toContain("agent.session_start");
-      expect(logged).toContain("agent.session_complete");
-      // The model produced output and used at least one tool.
-      expect(types).toContain("token");
-      expect(types).toContain("tool_call");
-      // Completion came from the sandbox's terminal report, not inferred.
-      expect(events.at(-1)?.type).toBe("status");
-
-      // No credential survived into the durable log.
-      const serialized = JSON.stringify(events);
-      expect(serialized).not.toContain(config.model.apiKey.expose());
-
-      // And the machine was reclaimed rather than left running.
-      const reclaimed = await waitForReclaim(run.id);
-      expect(reclaimed?.sandboxStoppedAt).not.toBeNull();
     },
-    10 * 60 * 1000,
+    20 * 60 * 1000,
   );
 });
 
-async function waitForReclaim(runId: string) {
-  const deadline = Date.now() + 30_000;
+function newReconciler(): Reconciler {
+  const log = createLogger("live-test", { level: "info" });
+  return createReconciler({
+    config,
+    database,
+    broker: createCredentialBroker(config, log),
+    log,
+  });
+}
+
+async function waitForTerminal(runId: string) {
+  const deadline = Date.now() + 9 * 60 * 1000;
   let current = await getRun(database, runId);
-  while (!current?.sandboxStoppedAt && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 250));
+  while (current && !isTerminal(current.status) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 3000));
     current = await getRun(database, runId);
   }
+  if (!current) throw new Error("the live run disappeared");
   return current;
+}
+
+async function waitForSessionIdle(sessionId: string) {
+  const deadline = Date.now() + 60_000;
+  let session = await getSession(database, sessionId);
+  while (session?.activeRunId && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    session = await getSession(database, sessionId);
+  }
+  if (!session || session.activeRunId) throw new Error("the live session did not become idle");
+  if (!session.sandboxId) throw new Error("the live session became idle without a workspace");
+  return session;
+}
+
+function logNames(events: Awaited<ReturnType<typeof listEvents>>): Set<string> {
+  return new Set(
+    events
+      .filter((event) => event.type === "log")
+      .map((event) => String(event.data.event ?? "")),
+  );
+}
+
+function piSessionId(events: Awaited<ReturnType<typeof listEvents>>): string {
+  const started = events.find(
+    (event) => event.type === "log" && event.data.event === "agent.session_start",
+  );
+  const id = started?.data.sessionId;
+  if (typeof id !== "string" || id === "") throw new Error("Pi session id was not reported");
+  return id;
+}
+
+function tokenText(events: Awaited<ReturnType<typeof listEvents>>): string {
+  return events
+    .filter((event) => event.type === "token")
+    .map((event) => String(event.data.content ?? ""))
+    .join("");
+}
+
+async function cleanupSession(sessionId: string): Promise<void> {
+  const session = await getSession(database, sessionId);
+  if (!session) return;
+  const latest = session.latestRunId ? await getRun(database, session.latestRunId) : null;
+  const provider = createSandboxProvider(config.sandbox.provider, config.env);
+  const ref = session.sandboxId
+    ? { provider: session.sandboxProvider ?? provider.name, id: session.sandboxId }
+    : latest?.sandboxId
+      ? { provider: latest.sandboxProvider ?? provider.name, id: latest.sandboxId }
+      : null;
+  if (!ref) return;
+  await provider.deleteWorkspace(ref).catch(() => provider.stop(ref));
+  if (session.sandboxId) await clearSessionWorkspace(database, session.id, session.sandboxId);
 }
 
 async function assertControlPlaneReachable(baseUrl: string): Promise<void> {

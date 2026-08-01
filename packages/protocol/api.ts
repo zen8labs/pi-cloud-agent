@@ -19,10 +19,22 @@ export const createRunRequestSchema = z.object({
   host: z.string().default("github.com"),
   /** Branch to clone. Omitted means "ask the provider for the default". */
   branch: z.string().nullish(),
-  prNumber: z.number().int().positive().nullish(),
 });
 
 export type CreateRunRequest = z.input<typeof createRunRequestSchema>;
+export type CreateRunBody = z.output<typeof createRunRequestSchema>;
+
+export const createSessionTurnRequestSchema = z.object({
+  prompt: z.string().trim().min(1),
+});
+
+export type CreateSessionTurnRequest = z.infer<typeof createSessionTurnRequestSchema>;
+
+export const sessionCheckpointSchema = z.object({
+  content: z.string().max(20_000_000),
+});
+
+export type SessionCheckpoint = z.infer<typeof sessionCheckpointSchema>;
 
 export interface RunSummary {
   id: string;
@@ -30,12 +42,13 @@ export interface RunSummary {
   profile: string;
   provider: string;
   repo: string;
-  prNumber: number | null;
   /** Resolved when the run was created, so it stays accurate if config changes. */
   model: string;
   error: string | null;
   createdAt: string;
   updatedAt: string;
+  sessionId: string | null;
+  turnNumber: number | null;
 }
 
 export interface RunDetail extends RunSummary {
@@ -52,6 +65,31 @@ export interface RunListResponse {
 
 export interface RunEventsResponse {
   events: RunEvent[];
+}
+
+export type SessionStatus = "idle" | "queued" | "provisioning" | "running" | "parking";
+
+export interface SessionSummary {
+  id: string;
+  status: SessionStatus;
+  title: string;
+  profile: string;
+  provider: string;
+  repo: string;
+  model: string;
+  activeRunId: string | null;
+  latestRunId: string;
+  workspaceAvailable: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SessionDetail extends SessionSummary {
+  runs: RunDetail[];
+}
+
+export interface SessionListResponse {
+  sessions: SessionSummary[];
 }
 
 export interface ProfileInfo {
@@ -76,27 +114,4 @@ export interface ReposResponse {
 export interface BranchesResponse {
   branches: string[];
   default: string | null;
-}
-
-export const repoConfigRequestSchema = z.object({
-  repo: z.string().min(3),
-  provider: z.string().default("github"),
-  profile: z.string().min(1),
-  /** Validated by the profile's own schema, not here. */
-  config: z.record(z.string(), z.unknown()),
-});
-
-export type RepoConfigRequest = z.infer<typeof repoConfigRequestSchema>;
-
-export interface RepoConfigEntry {
-  repo: string;
-  provider: string;
-  profile: string;
-  config: Record<string, unknown>;
-}
-
-export interface RepoConfigResponse {
-  entries: RepoConfigEntry[];
-  repos: string[];
-  source: ReposResponse["source"];
 }

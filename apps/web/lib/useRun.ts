@@ -32,26 +32,40 @@ function parseFrameData(raw: MessageEvent): Record<string, unknown> {
   }
 }
 
+/** Frames carry the log row's `at` alongside the payload; it is metadata, not data. */
+function frame(raw: MessageEvent): { seq: number; data: Record<string, unknown>; at: string } {
+  const seq = raw.lastEventId ? Number(raw.lastEventId) : 0;
+  const data = parseFrameData(raw);
+  const at = typeof data.at === "string" ? data.at : new Date().toISOString();
+  delete data.at;
+  return { seq, data, at };
+}
+
 function feedHandler(type: RunEvent["type"], ctx: StreamCtx) {
   return (raw: MessageEvent) => {
     if (!ctx.alive) return;
-    const seq = raw.lastEventId ? Number(raw.lastEventId) : 0;
+    const { seq, data, at } = frame(raw);
     if (ctx.seen.has(seq)) return;
     ctx.seen.add(seq);
-    const data = parseFrameData(raw);
-    ctx.setEvents((prev) => [...prev, { seq, type, data, at: new Date().toISOString() }]);
+    ctx.setEvents((prev) => [...prev, { seq, type, data, at }]);
   };
 }
 
 function statusHandler(ctx: StreamCtx) {
   return (raw: MessageEvent) => {
     if (!ctx.alive) return;
-    const data = parseFrameData(raw) as { status?: RunStatus; error?: string | null };
+    const { seq, data, at } = frame(raw);
     // An unparseable status frame is ignored; the next one supersedes it.
     if (!data.status) return;
-    ctx.liveStatus = data.status;
-    const { status, error } = data;
+    const status = data.status as RunStatus;
+    const error = (data.error as string | null | undefined) ?? null;
+    ctx.liveStatus = status;
     ctx.setRun((prev) => (prev ? { ...prev, status, error: error ?? prev.error } : prev));
+    // Derived status frames carry no id; only the persisted log event joins the
+    // feed, so terminal closure renders once, in sequence.
+    if (!raw.lastEventId || ctx.seen.has(seq)) return;
+    ctx.seen.add(seq);
+    ctx.setEvents((prev) => [...prev, { seq, type: "status", data, at }]);
   };
 }
 
@@ -102,6 +116,12 @@ export function useRun(id: string) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!id) {
+      setEvents([]);
+      setRun(null);
+      setError(null);
+      return;
+    }
     const ctx: StreamCtx = {
       alive: true,
       seen: new Set(),

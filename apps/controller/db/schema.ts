@@ -1,4 +1,4 @@
-import type { RunEventType, RunStatus, Trigger } from "@pi-cloud-agent/protocol";
+import type { RepoRef, RunEventType, RunStatus, Trigger } from "@pi-cloud-agent/protocol";
 import { sql } from "drizzle-orm";
 import {
   index,
@@ -12,7 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 /**
- * Three tables. That is the entire persistent state of the system.
+ * Four tables. That is the entire persistent state of the system.
  *
  * `runs` is simultaneously the queue, the lifecycle record, and the crash
  * recovery journal — which is deliberate. Because every fact the controller
@@ -23,10 +23,49 @@ import {
 
 const timestamptz = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
 
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    title: text("title").notNull(),
+    profile: text("profile").notNull(),
+    provider: text("provider").notNull(),
+    repoFullName: text("repo_full_name").notNull(),
+    repo: jsonb("repo").notNull().$type<RepoRef>(),
+    model: text("model").notNull(),
+
+    /** Exactly one run may own a session workspace at a time. */
+    activeRunId: uuid("active_run_id"),
+    latestRunId: uuid("latest_run_id").notNull(),
+    turnCount: integer("turn_count").notNull().default(1),
+
+    /** Pi's native JSONL session. Opaque to the controller. */
+    agentCheckpoint: text("agent_checkpoint"),
+
+    /** Provider-owned workspace retained while the session is idle. */
+    sandboxProvider: text("sandbox_provider"),
+    sandboxId: text("sandbox_id"),
+    workspaceExpiresAt: timestamptz("workspace_expires_at"),
+
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("sessions_updated_idx").on(table.updatedAt.desc()),
+    index("sessions_workspace_expiry_idx")
+      .on(table.workspaceExpiresAt)
+      .where(sql`${table.sandboxId} is not null and ${table.activeRunId} is null`),
+  ],
+);
+
 export const runs = pgTable(
   "runs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+
+    /** Null for standalone background runs; set for interactive turns. */
+    sessionId: uuid("session_id").references(() => sessions.id, { onDelete: "cascade" }),
+    turnNumber: integer("turn_number"),
 
     /** Which profile owns this run's behavior. */
     profile: text("profile").notNull(),
@@ -106,27 +145,6 @@ export const runEvents = pgTable(
   ],
 );
 
-/**
- * Per-repo, per-profile configuration, stored opaquely.
- *
- * The controller never reads inside `config` — the owning profile validates it
- * with its own schema and interprets it. This is what keeps profile-specific
- * settings (which branch to review, which events should trigger) out of the
- * core, and it means a new profile's settings appear in the dashboard without a
- * migration. See docs/adding-a-profile.md.
- */
-export const repoConfig = pgTable(
-  "repo_config",
-  {
-    provider: text("provider").notNull(),
-    repoFullName: text("repo_full_name").notNull(),
-    profile: text("profile").notNull(),
-    config: jsonb("config").notNull().default({}).$type<Record<string, unknown>>(),
-    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
-  },
-  (table) => [primaryKey({ columns: [table.provider, table.repoFullName, table.profile] })],
-);
-
 export type RunRow = typeof runs.$inferSelect;
+export type SessionRow = typeof sessions.$inferSelect;
 export type RunEventRow = typeof runEvents.$inferSelect;
-export type RepoConfigRow = typeof repoConfig.$inferSelect;

@@ -1,16 +1,19 @@
 # Adding a sandbox provider
 
-A sandbox provider answers one question: *where does this run's compute come from?* The contract is two methods, and it stays that small because of one constraint: **the sandbox is outbound-only**. The controller never dials in, so no provider has to expose port forwarding, tunnels, or reachability.
+A sandbox provider answers two questions: *where does this turn's compute come from, and how is an idle session workspace retained?* The controller still never dials into the runtime. Every lifecycle operation goes through the provider's control-plane SDK, and the agent remains outbound-only.
 
 ```ts
 export interface SandboxProvider {
   readonly name: string;
   create(spec: SandboxSpec): Promise<SandboxRef>;
+  resume(ref: WorkspaceRef, spec: SandboxSpec): Promise<SandboxRef>;
+  suspend(ref: SandboxRef): Promise<WorkspaceRef>;
+  deleteWorkspace(ref: WorkspaceRef): Promise<void>;
   stop(ref: SandboxRef): Promise<void>;
 }
 ```
 
-Every backend worth having (E2B, Modal, Daytona, Fly, plain Docker) can start a container from an image with an environment and a command, and kill it. Snapshots, warm pools, and pre-cloned volumes are optimizations *behind* these two methods, not additions to them.
+`create`/`stop` are the standalone lifecycle. `suspend`/`resume`/`deleteWorkspace` are the durable-session lifecycle. A backend may implement the latter with a filesystem-only pause, snapshot, archive, or detached volume. The opaque `WorkspaceRef` is the only provider-specific state stored by the controller.
 
 ## 1. Write it
 
@@ -55,6 +58,26 @@ export function createMyBackendProvider(
       return { provider: "my-backend", id: machine.id };
     },
 
+    async resume(ref, spec) {
+      const envs = { ...spec.env };
+      for (const [key, secret] of Object.entries(spec.secrets)) envs[key] = secret.expose();
+      const machine = await restoreFilesystem(ref.id, {
+        envs,
+        command: spec.command,
+        timeoutMs: spec.timeoutSeconds * 1000,
+      });
+      return { provider: "my-backend", id: machine.id };
+    },
+
+    async suspend(ref) {
+      const workspace = await snapshotFilesystem(ref.id);
+      return { provider: "my-backend", id: workspace.id };
+    },
+
+    async deleteWorkspace(ref) {
+      await deleteSnapshot(ref.id);
+    },
+
     async stop(ref) {
       await kill(ref.id);
     },
@@ -78,6 +101,12 @@ Select it with `SANDBOX_PROVIDER=my-backend`. Nothing else in the system changes
 
 **`stop` is idempotent.** The reconciler may call it for a machine that is already dead. That is the normal path after a timeout. Killing a nonexistent sandbox must resolve, not throw.
 
+**`deleteWorkspace` is idempotent.** Expiry and a concurrent follow-up can race. Deleting an already-missing workspace must resolve.
+
+**`suspend` retains filesystem state, not credentials in process memory.** A later turn receives fresh secrets. If a provider cannot discard memory independently, its implementation needs a snapshot or volume boundary that does.
+
+**`resume` starts exactly one new runtime command.** Report a missing or expired reference with `WorkspaceNotFoundError`; the controller will clear it and cold-create from the durable Pi checkpoint. Do not classify a missing workspace as a generic permanent failure.
+
 **`create` either returns a working machine or throws.** A machine that exists but whose command never started is the worst outcome: it burns a slot and a credential and goes silent. If you can detect it, reclaim the machine yourself and throw. The E2B provider does exactly this when `commands.run` fails.
 
 **Classify failures.** Throw `SandboxError` with `retryable`:
@@ -98,7 +127,7 @@ Your sandbox must be able to reach `CONTROL_PLANE_URL` over HTTPS. That is the o
 
 For a local Docker provider that means the controller has to be reachable from inside the container: `http://host.docker.internal:8080` on macOS and Windows, or `--add-host=host.docker.internal:host-gateway` on Linux.
 
-If you ever find yourself needing to connect *into* the sandbox, stop: that would change the contract for every provider. Consult the maintainer ([../AGENTS.md](../AGENTS.md)) before going down that path.
+If you ever find yourself needing an application route, polling bridge, or agent server inside the sandbox, stop: that would move the trust boundary. Provider SDK calls that pause or reconnect compute do not violate the outbound-only runtime rule. Consult the maintainer ([../AGENTS.md](../AGENTS.md)) before changing that boundary.
 
 ## The image
 
@@ -110,7 +139,7 @@ Whatever it points at needs Node, `git`, `gh`, and the bundled runtime at `/app/
 
 `packages/sandbox/registry.test.ts` covers the registry contract: construction, the unknown-name error, and failing at startup when configuration is missing. Add your provider to those cases.
 
-Do not write a unit test that mocks your backend's SDK; it would only test the mock. Real behavior is verified by the live tests ([testing.md](testing.md)), and by a run that actually works.
+Do not write a unit test that mocks your backend's SDK; it would only test the mock. Real behavior is verified by the live tests ([testing.md](testing.md)). A provider is not complete until two paid turns prove an uncommitted file and the Pi session both survive suspend/resume.
 
 ```bash
 pnpm vitest run packages/sandbox/registry.test.ts

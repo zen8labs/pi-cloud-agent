@@ -1,8 +1,8 @@
 const PREFIX = "pca-session-title:";
 
-export function saveSessionTitle(runId: string, prompt: string): void {
+export function saveSessionTitle(sessionId: string, prompt: string): void {
   try {
-    localStorage.setItem(`${PREFIX}${runId}`, prompt.trim());
+    localStorage.setItem(`${PREFIX}${sessionId}`, prompt.trim());
   } catch {
     // History keeps its repository fallback when storage is unavailable.
   }

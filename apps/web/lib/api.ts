@@ -2,12 +2,14 @@ import type {
   BranchesResponse,
   ConfigResponse,
   CreateRunRequest,
-  RepoConfigResponse,
   RunDetail,
   RunEvent,
   RunEventsResponse,
   RunListResponse,
   RunSummary,
+  SessionDetail,
+  SessionListResponse,
+  SessionSummary,
 } from "@pi-cloud-agent/protocol";
 
 /**
@@ -69,6 +71,20 @@ export const api = {
   createRun: (body: CreateRunRequest): Promise<RunSummary> =>
     request<RunSummary>("/runs", { method: "POST", body: JSON.stringify(body) }),
 
+  listSessions: (limit = 100): Promise<SessionSummary[]> =>
+    request<SessionListResponse>(`/sessions?limit=${limit}`).then((r) => r.sessions),
+
+  getSession: (id: string): Promise<SessionDetail> => request<SessionDetail>(`/sessions/${id}`),
+
+  createSession: (body: CreateRunRequest): Promise<SessionSummary> =>
+    request<SessionSummary>("/sessions", { method: "POST", body: JSON.stringify(body) }),
+
+  createSessionTurn: (id: string, prompt: string): Promise<RunDetail> =>
+    request<RunDetail>(`/sessions/${id}/turns`, {
+      method: "POST",
+      body: JSON.stringify({ prompt }),
+    }),
+
   cancelRun: (id: string): Promise<{ status: string }> =>
     request<{ status: string }>(`/runs/${id}/cancel`, { method: "POST" }),
 
@@ -80,16 +96,6 @@ export const api = {
 
   listBranches: (repo: string): Promise<BranchesResponse> =>
     request<BranchesResponse>(`/repos/${repo}/branches`),
-
-  getRepoConfig: (): Promise<RepoConfigResponse> =>
-    request<RepoConfigResponse>("/settings/repo-config"),
-
-  setRepoConfig: (body: {
-    repo: string;
-    profile: string;
-    config: Record<string, unknown>;
-  }): Promise<unknown> =>
-    request("/settings/repo-config", { method: "PUT", body: JSON.stringify(body) }),
 };
 
 export function streamUrl(id: string): string {

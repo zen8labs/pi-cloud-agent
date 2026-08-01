@@ -5,7 +5,8 @@ import { type Config, configFrom } from "./config";
 import { createDatabase, type Database } from "./db/client";
 
 import { createRun } from "./db/runs";
-import type { RunRow } from "./db/schema";
+import type { RunRow, SessionRow } from "./db/schema";
+import { createSessionWithRun } from "./db/sessions";
 import { createLogger, type Logger } from "./logger";
 
 /**
@@ -27,7 +28,7 @@ export function setupTestDatabase(): Database {
 }
 
 export async function resetTables(database: Database): Promise<void> {
-  await database.execute(sql`truncate table run_events, runs, repo_config cascade`);
+  await database.execute(sql`truncate table run_events, runs, sessions cascade`);
 }
 
 export function testConfig(overrides: Record<string, string> = {}): Config {
@@ -37,8 +38,7 @@ export function testConfig(overrides: Record<string, string> = {}): Config {
     AGENT_MODEL: "aigateway/test-model",
     AIGATEWAY_BASE_URL: "https://gateway.test/v1",
     AIGATEWAY_API_KEY: "test-model-key-0123456789",
-    GITHUB_WEBHOOK_SECRET: "test-webhook-secret",
-    GITHUB_TOKEN: "test-github-token-0123456789",
+    GITHUB_TOKEN: "****************************",
     RUN_WALL_CLOCK_SECONDS: "600",
     LOG_LEVEL: "error",
     ...overrides,
@@ -82,6 +82,22 @@ export async function seedRun(
     profile: overrides.profile ?? "general",
     provider: trigger.repo.provider,
     repoFullName: `${trigger.repo.owner}/${trigger.repo.name}`,
+    trigger,
+    model: "aigateway/test-model",
+    callbackToken: randomBytes(16).toString("hex"),
+  });
+}
+
+export async function seedSession(
+  database: Database,
+): Promise<{ session: SessionRow; run: RunRow }> {
+  const trigger = manualTrigger();
+  return createSessionWithRun(database, {
+    title: "Summarize this repository",
+    profile: "general",
+    provider: trigger.repo.provider,
+    repoFullName: `${trigger.repo.owner}/${trigger.repo.name}`,
+    repo: trigger.repo,
     trigger,
     model: "aigateway/test-model",
     callbackToken: randomBytes(16).toString("hex"),

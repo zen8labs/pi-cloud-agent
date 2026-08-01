@@ -24,8 +24,8 @@ async function main(): Promise<void> {
 
   try {
     await configureGitCredentials(config, reporter);
-    await prepareCheckout(config, reporter);
-    await runSetupScript(config, reporter);
+    const workspace = await prepareCheckout(config, reporter);
+    if (workspace === "created") await runSetupScript(config, reporter);
     await runAgentSession(config, reporter);
 
     // Drain telemetry first so the feed is complete before the run closes.

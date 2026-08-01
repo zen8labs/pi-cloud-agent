@@ -8,7 +8,7 @@ We want to build the 80% once, in the open, small enough to audit, and hand the 
 
 The philosophy comes from [pi](https://mariozechner.at/posts/2025-11-30-pi-coding-agent/), which rethought the *local* coding agent from first principles: strip it to the irreducible parts, refuse the bloat, and make everything else an *extension* you add rather than core you fork. We take that philosophy and Pi's embeddable agent loop, then apply both to a different problem: **cloud agents**.
 
-A *cloud agent* is an agent that runs headless. It's triggered by an event (a PR, a chat message, a schedule), works inside an ephemeral sandbox, and actuates its own outcomes (posts comments, pushes commits) while a human watches the results rather than typing turn by turn.
+A *cloud agent* is an agent that runs headless. It's triggered by an event (a PR, a chat message, a schedule), works inside isolated compute, and actuates its own outcomes (posts comments, pushes commits). Background work needs no operator loop; a chat-triggered session may accept later turns without keeping the agent process alive between them.
 
 Today every vendor ships a monolithic cloud agent. We want the opposite: a **minimal, task-agnostic core** that anyone extends into their own vertical (PR review, complete-a-PR, deep research, spreadsheet work…) by dropping in a *profile*, not by rewriting the core. An OSS core, with an ecosystem of profiles on top.
 
@@ -28,7 +28,7 @@ Everything we build should slot into one of these seven and stay out of the othe
 
 ## What's irreducible
 
-The smallest thing that is still a cloud agent: **a trigger creates a run, a sandbox boots with the repo, the harness runs the model with a handful of tools until it's done, a broker supplies scoped creds, the agent actuates its result, and the whole run is observable.** That's it. A model, file/shell tools, a loop, an isolated box, short-lived creds, and a record of what happened.
+The smallest thing that is still a cloud agent: **a trigger creates a run, a sandbox boots with the repo, the harness runs the model with a handful of tools until it's done, a broker supplies scoped creds, the agent actuates its result, and the whole run is observable.** A session may durably connect several such runs, but it does not change the execution primitive. That's it: a model, file/shell tools, a loop, an isolated box, short-lived creds, and a record of what happened.
 
 Notably *not* irreducible: MCP, sub-agents, to-do plan tracking. Useful sometimes, but they are extensions, not the core.
 

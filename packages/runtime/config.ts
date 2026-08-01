@@ -18,6 +18,8 @@ export interface RuntimeConfig {
   runId: string;
   controlPlaneUrl: string;
   callbackToken: string;
+  sessionId: string;
+  workspaceResumed: boolean;
 
   prompt: string;
   profile: string;
@@ -72,6 +74,8 @@ export function readConfig(): RuntimeConfig {
     runId: required(SANDBOX_ENV.runId),
     controlPlaneUrl: required(SANDBOX_ENV.controlPlaneUrl).replace(/\/$/, ""),
     callbackToken: required(SANDBOX_ENV.callbackToken),
+    sessionId: optional(SANDBOX_ENV.sessionId),
+    workspaceResumed: optional(SANDBOX_ENV.workspaceResumed) === "true",
 
     prompt: required(SANDBOX_ENV.taskPrompt),
     profile: optional(SANDBOX_ENV.profile, "general"),

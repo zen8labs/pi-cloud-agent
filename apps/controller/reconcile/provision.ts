@@ -4,15 +4,17 @@ import {
   SANDBOX_PATHS,
   SandboxError,
   type SandboxProvider,
+  type SandboxRef,
   Secret,
   type TaskSpec,
+  WorkspaceNotFoundError,
 } from "@pi-cloud-agent/protocol";
 import { createVcsProvider } from "@pi-cloud-agent/vcs";
 import type { Config } from "../config";
 import type { Database } from "../db/client";
-import { getRepoConfig } from "../db/repo-config";
 import { attachSandbox, completeRun, markRunning, requeueRun } from "../db/runs";
 import type { RunRow } from "../db/schema";
+import { clearSessionWorkspace, getSessionForRun } from "../db/sessions";
 import type { Logger } from "../logger";
 import type { CredentialBroker } from "../secrets/broker";
 
@@ -44,7 +46,7 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
   const log = deps.log.child({ runId: run.id, profile: run.profile, repo: run.repoFullName });
 
   try {
-    const task = await buildTask(run, database);
+    const task = buildTask(run);
     const vcs = createVcsProvider(run.provider, config.env);
     const credentials = await broker.mintForRun({
       provider: run.provider,
@@ -58,17 +60,20 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
       config.runWallClockSeconds,
     );
 
-    const ref = await sandbox.create({
+    const session = await getSessionForRun(database, run);
+    const workspaceResumed = Boolean(session?.sandboxId);
+    const spec = {
       runId: run.id,
       image: "",
       timeoutSeconds: config.sandbox.timeoutSeconds,
-      env: { ...buildEnv(run, task, config), ...credentials.env },
+      env: { ...buildEnv(run, task, config, workspaceResumed), ...credentials.env },
       secrets: {
         ...credentials.secrets,
         [SANDBOX_ENV.callbackToken]: new Secret(run.callbackToken, "run callback token"),
       },
       command: `node ${SANDBOX_PATHS.app}/run.js`,
-    });
+    };
+    const ref = await startSandbox(session, spec, sandbox, database, log);
 
     // First durable write after the machine exists. Until this commits, a crash
     // would leak the sandbox; after it, the reconciler will always find it.
@@ -91,9 +96,37 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
     }
 
     await markRunning(database, run.id);
-    log.info("sandbox running", { sandboxId: ref.id, wallClockSeconds });
+    log.info("sandbox running", { sandboxId: ref.id, wallClockSeconds, workspaceResumed });
   } catch (error) {
     await handleFailure(run, error, deps, log);
+  }
+}
+
+async function startSandbox(
+  session: Awaited<ReturnType<typeof getSessionForRun>>,
+  spec: Parameters<SandboxProvider["create"]>[0],
+  sandbox: SandboxProvider,
+  database: Database,
+  log: Logger,
+): Promise<SandboxRef> {
+  if (!session?.sandboxId) return sandbox.create(spec);
+  const workspace = {
+    provider: session.sandboxProvider ?? sandbox.name,
+    id: session.sandboxId,
+  };
+  try {
+    return await sandbox.resume(workspace, spec);
+  } catch (error) {
+    if (!(error instanceof WorkspaceNotFoundError)) throw error;
+    await clearSessionWorkspace(database, session.id, workspace.id);
+    log.warn("stored session workspace is gone; continuing from checkpoint", {
+      sessionId: session.id,
+      workspaceId: workspace.id,
+    });
+    return sandbox.create({
+      ...spec,
+      env: { ...spec.env, [SANDBOX_ENV.workspaceResumed]: "false" },
+    });
   }
 }
 
@@ -122,19 +155,13 @@ async function handleFailure(
 /**
  * Ask the owning profile what the agent should do.
  *
- * The controller reads the stored config but never looks inside it — the profile
- * validates and interprets its own settings. Enrichment happens here rather than
- * in the profile because "this webhook did not include a commit SHA" is a fact
- * about forges, not about reviewing code.
+ * The controller never looks inside a profile's config — the profile validates
+ * and interprets its own settings, and an empty object means "apply your
+ * defaults".
  */
-async function buildTask(run: RunRow, database: Database): Promise<TaskSpec> {
+function buildTask(run: RunRow): TaskSpec {
   const profile = getProfile(run.profile);
-  const storedConfig = await getRepoConfig(database, {
-    provider: run.provider,
-    repoFullName: run.repoFullName,
-    profile: run.profile,
-  });
-  return profile.buildTask(run.trigger, storedConfig);
+  return profile.buildTask(run.trigger, {});
 }
 
 /**
@@ -144,14 +171,24 @@ async function buildTask(run: RunRow, database: Database): Promise<TaskSpec> {
  * — so a rename here is a type error in the runtime rather than a run that starts
  * with an empty prompt.
  */
-function buildEnv(run: RunRow, task: TaskSpec, config: Config): Record<string, string> {
+function buildEnv(
+  run: RunRow,
+  task: TaskSpec,
+  config: Config,
+  workspaceResumed: boolean,
+): Record<string, string> {
   const { repo } = task;
   return {
     [SANDBOX_ENV.controlPlaneUrl]: config.controlPlaneUrl,
     [SANDBOX_ENV.runId]: run.id,
+    [SANDBOX_ENV.sessionId]: run.sessionId ?? "",
+    [SANDBOX_ENV.workspaceResumed]: String(workspaceResumed),
 
     [SANDBOX_ENV.profile]: task.profile,
-    [SANDBOX_ENV.taskPrompt]: composePrompt(run.profile, task.prompt),
+    [SANDBOX_ENV.taskPrompt]:
+      run.turnNumber && run.turnNumber > 1
+        ? task.prompt
+        : composePrompt(run.profile, task.prompt),
 
     [SANDBOX_ENV.model]: run.model,
     [SANDBOX_ENV.modelBaseUrl]: config.model.baseUrl,
@@ -167,7 +204,6 @@ function buildEnv(run: RunRow, task: TaskSpec, config: Config): Record<string, s
     [SANDBOX_ENV.repoBaseSha]: repo.baseSha,
     [SANDBOX_ENV.repoHeadSha]: repo.headSha,
     [SANDBOX_ENV.repoHeadBranch]: repo.headBranch,
-    [SANDBOX_ENV.prNumber]: repo.prNumber === null ? "" : String(repo.prNumber),
   };
 }
 

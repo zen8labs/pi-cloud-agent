@@ -105,17 +105,21 @@ export async function configureGitCredentials(
 /**
  * Clone, then move to the exact revision the trigger named.
  *
- * Branches are tried head-first, then the default, then a plain clone: a webhook
+ * Branches are tried head-first, then the default, then a plain clone: a trigger
  * can name a branch that has already been deleted by the time the run starts, and
  * failing the whole run for that would be needlessly brittle. A named head SHA,
- * on the other hand, is not optional — a review of the wrong commit is worse than
- * no review.
+ * on the other hand, is not optional — running against the wrong commit is worse
+ * than not running.
  */
 export async function prepareCheckout(
   config: RuntimeConfig,
   reporter: Reporter,
-): Promise<void> {
+): Promise<"created" | "resumed"> {
   const { repo } = config;
+  if (await reuseCheckout(repo.path, reporter)) return "resumed";
+  if (config.workspaceResumed) {
+    throw new Error("the provider resumed a workspace without the repository checkout");
+  }
   const candidates = [...new Set([repo.headBranch, repo.defaultBranch].filter(Boolean))];
 
   let cloned = false;
@@ -172,6 +176,15 @@ export async function prepareCheckout(
   }
 
   reporter.log("git.checkout_ready", { path: repo.path, headSha: repo.headSha || null });
+  return "created";
+}
+
+async function reuseCheckout(path: string, reporter: Reporter): Promise<boolean> {
+  if (!existsSync(join(path, ".git"))) return false;
+  const origin = await run("git", ["remote", "get-url", "origin"], { cwd: path });
+  if (origin.code !== 0) throw new Error(`could not verify resumed checkout: ${origin.output}`);
+  reporter.log("git.workspace_resumed", { path });
+  return true;
 }
 
 /**

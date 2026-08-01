@@ -1,19 +1,24 @@
 import type { Secret } from "./secret";
 
 /**
- * Isolated compute, in two methods.
+ * Isolated compute. Standalone runs use `create`/`stop`; durable sessions use
+ * `suspend`/`resume`/`deleteWorkspace` between turns.
  *
- * `create` boots a machine from an image and starts one command in it; `stop`
- * destroys it. That is the entire contract, and it stays this small because the
- * sandbox is outbound-only: the controller never dials in, so no provider has
- * to expose port forwarding, tunnels, or reachability. Snapshots and warm pools
- * are optimizations *behind* these two methods, not additions to them.
+ * Every operation goes through the provider's control-plane SDK. The agent
+ * sandbox remains outbound-only: no application route, tunnel, or agent server
+ * is exposed inside it.
  *
  * See docs/adding-a-sandbox-provider.md.
  */
 export interface SandboxProvider {
   readonly name: string;
   create(spec: SandboxSpec): Promise<SandboxRef>;
+  /** Restore a session workspace and start exactly one new runtime command. */
+  resume(ref: WorkspaceRef, spec: SandboxSpec): Promise<SandboxRef>;
+  /** Persist the filesystem without retaining process memory or credentials. */
+  suspend(ref: SandboxRef): Promise<WorkspaceRef>;
+  /** Permanently remove a suspended workspace. Must be idempotent. */
+  deleteWorkspace(ref: WorkspaceRef): Promise<void>;
   /** Must be idempotent: the reconciler may call it for an already-dead box. */
   stop(ref: SandboxRef): Promise<void>;
 }
@@ -39,6 +44,12 @@ export interface SandboxRef {
   id: string;
 }
 
+/** An opaque provider-owned workspace checkpoint stored on a session row. */
+export interface WorkspaceRef {
+  provider: string;
+  id: string;
+}
+
 /**
  * A provider failed. `retryable` distinguishes "the API blipped, try again"
  * from "this template does not exist, stop" — the reconciler uses it to decide
@@ -51,5 +62,13 @@ export class SandboxError extends Error {
     super(message, { cause: options.cause });
     this.name = "SandboxError";
     this.retryable = options.retryable;
+  }
+}
+
+/** The stored workspace reference expired or was deleted outside the controller. */
+export class WorkspaceNotFoundError extends SandboxError {
+  constructor(message: string, options: { cause?: unknown } = {}) {
+    super(message, { retryable: false, cause: options.cause });
+    this.name = "WorkspaceNotFoundError";
   }
 }

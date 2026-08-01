@@ -12,6 +12,9 @@ export const SANDBOX_ENV = {
   runId: "RUN_ID",
   callbackToken: "RUN_CALLBACK_TOKEN",
 
+  sessionId: "SESSION_ID",
+  workspaceResumed: "WORKSPACE_RESUMED",
+
   profile: "PROFILE",
   taskPrompt: "TASK_PROMPT",
 
@@ -30,7 +33,6 @@ export const SANDBOX_ENV = {
   repoBaseSha: "REPO_BASE_SHA",
   repoHeadSha: "REPO_HEAD_SHA",
   repoHeadBranch: "REPO_HEAD_BRANCH",
-  prNumber: "PR_NUMBER",
 
   /** Git credentials, consumed by the checkout's credential helper. */
   scmToken: "SCM_TOKEN",
@@ -42,6 +44,7 @@ export type SandboxEnvKey = keyof typeof SANDBOX_ENV;
 /** Where the sandbox image puts things. Fixed by the image, not configurable. */
 export const SANDBOX_PATHS = {
   workspace: "/workspace",
+  state: "/workspace/.pi-cloud-agent",
   app: "/app",
   /** Optional repo-provided hook, run after clone. */
   setupScript: ".pi-cloud-agent/setup.sh",

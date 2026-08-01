@@ -11,7 +11,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsx build.ts",
-    "template:build": "pnpm build && e2b template build -c 'sleep infinity' -d Dockerfile.sandbox --name pi-cloud-agent --cpu-count 4 --memory-mb 4096"
+    "template:build": "pnpm build && e2b template create pi-cloud-agent -c 'sleep infinity' --ready-cmd 'true' -d Dockerfile.sandbox --cpu-count 4 --memory-mb 4096"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "catalog:",

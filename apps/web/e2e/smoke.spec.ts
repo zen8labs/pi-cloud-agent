@@ -64,7 +64,8 @@ test("a run reaches a terminal state and the session page shows it", async ({ pa
   await page.getByPlaceholder(/Describe the task/).fill(PROMPT);
   await page.getByRole("button", { name: "Start" }).click();
 
-  await expect(page).toHaveURL(/\/sessions\/[0-9a-f-]+/);
+  // The first navigation may compile the dynamic session route in a cold dev server.
+  await expect(page).toHaveURL(/\/sessions\/[0-9a-f-]+/, { timeout: 30_000 });
   await expect(page.getByRole("heading", { name: PROMPT })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Details" })).toBeVisible();
 

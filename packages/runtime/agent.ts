@@ -1,12 +1,12 @@
 import {
   createAgentSession,
   ModelRuntime,
-  SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { SANDBOX_ENV } from "@pi-cloud-agent/protocol";
 import type { RuntimeConfig } from "./config";
 import type { Reporter } from "./reporter";
+import { loadSessionManager, saveSessionCheckpoint } from "./session-state";
 
 /**
  * One Pi session, start to finish.
@@ -58,14 +58,13 @@ export async function runAgentSession(
     throw new Error(`Pi did not register ${config.model.provider}/${config.model.name}`);
   }
 
+  const sessionManager = await loadSessionManager(config, reporter);
   const { session, extensionsResult } = await createAgentSession({
     cwd: config.repo.path,
     model,
     thinkingLevel: "medium",
     modelRuntime,
-    // Nothing about this session should outlive the sandbox, and writing session
-    // state into the checkout would put it in front of the agent's own tools.
-    sessionManager: SessionManager.inMemory(config.repo.path),
+    sessionManager,
     settingsManager: SettingsManager.inMemory({
       compaction: { enabled: true },
       retry: { enabled: true, maxRetries: 3 },
@@ -153,6 +152,7 @@ export async function runAgentSession(
       throw new Error(last.errorMessage || `the agent stopped: ${last.stopReason}`);
     }
 
+    await saveSessionCheckpoint(config, session.sessionFile, reporter);
     reporter.log("agent.session_complete", { sessionId: session.sessionId });
   } finally {
     unsubscribe();

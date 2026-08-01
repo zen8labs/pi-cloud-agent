@@ -11,6 +11,8 @@ vi.mock("node:fs", () => ({ existsSync: vi.fn() }));
 
 const config: RuntimeConfig = {
   runId: "run-1",
+  sessionId: "",
+  workspaceResumed: false,
   controlPlaneUrl: "https://controller.test",
   callbackToken: "callback-token-value-1234",
   prompt: "test",

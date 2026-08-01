@@ -29,9 +29,7 @@ function NewSession() {
   const [config, setConfig] = useState<ConfigResponse | null>(null);
   const [repos, setRepos] = useState<string[]>([]);
   const [repo, setRepo] = useState(params.get("repo") ?? "");
-  const [customRepo, setCustomRepo] = useState("");
   const [profile, setProfile] = useState(params.get("profile") ?? "");
-  const [prNumber, setPrNumber] = useState("");
   const [prompt, setPrompt] = useState("");
   const [branches, setBranches] = useState<string[]>([]);
   const [branch, setBranch] = useState("");
@@ -47,7 +45,7 @@ function NewSession() {
         setConfig(loadedConfig);
         setRepos(loadedRepos);
         setProfile((current) => current || loadedConfig.defaultProfile);
-        setRepo((current) => current || loadedRepos[0] || "__custom__");
+        setRepo((current) => current || loadedRepos[0] || "");
       })
       .catch((cause) => {
         if (alive) setError(cause instanceof Error ? cause.message : String(cause));
@@ -57,10 +55,8 @@ function NewSession() {
     };
   }, []);
 
-  const effectiveRepo = repo === "__custom__" ? customRepo.trim() : repo;
-
   useEffect(() => {
-    if (!effectiveRepo.includes("/")) {
+    if (!repo.includes("/")) {
       setBranches([]);
       setBranch("");
       return;
@@ -68,7 +64,7 @@ function NewSession() {
     let cancelled = false;
     setBranchesLoading(true);
     api
-      .listBranches(effectiveRepo)
+      .listBranches(repo)
       .then((result) => {
         if (!cancelled) {
           setBranches(result.branches);
@@ -87,14 +83,9 @@ function NewSession() {
     return () => {
       cancelled = true;
     };
-  }, [effectiveRepo]);
+  }, [repo]);
 
-  const needsPullRequest = profile === "pr-review";
-  const canSubmit =
-    Boolean(effectiveRepo) &&
-    Boolean(profile) &&
-    (needsPullRequest ? Boolean(prNumber.trim()) : Boolean(prompt.trim())) &&
-    !submitting;
+  const canSubmit = Boolean(repo) && Boolean(profile) && Boolean(prompt.trim()) && !submitting;
   const activeProfile = config?.profiles.find((entry) => entry.name === profile);
 
   const submit = async () => {
@@ -102,15 +93,14 @@ function NewSession() {
     setSubmitting(true);
     setError(null);
     try {
-      const run = await api.createRun({
-        repo: effectiveRepo,
+      const session = await api.createSession({
+        repo,
         profile,
-        prompt: prompt.trim() || "Review this pull request.",
+        prompt: prompt.trim(),
         branch: branch || null,
-        prNumber: needsPullRequest ? Number(prNumber) : null,
       });
-      saveSessionTitle(run.id, prompt.trim() || `Review ${effectiveRepo}`);
-      router.push(`/sessions/${run.id}`);
+      saveSessionTitle(session.id, prompt.trim());
+      router.push(`/sessions/${session.id}`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
       setSubmitting(false);
@@ -119,40 +109,24 @@ function NewSession() {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <header className="flex h-14 shrink-0 items-center border-b border-border px-5">
-        <h1 className="text-sm font-medium">New task</h1>
+      <header className="flex h-12 shrink-0 items-center px-4">
+        <h1 className="text-[13px] font-medium">New task</h1>
       </header>
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-4 py-10 sm:px-8">
-        <div className="w-full max-w-3xl">
-          <div className="mb-7 text-center">
-            <h2 className="text-2xl font-medium tracking-[-0.035em]">
-              What should Pi work on?
-            </h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Start a sandboxed session in one of your repositories.
-            </p>
+        <div className="w-full max-w-2xl">
+          <div className="mb-6 text-center">
+            <h2 className="text-xl font-medium tracking-[-0.02em]">What are you up to?</h2>
           </div>
-          {repo === "__custom__" && (
-            <input
-              aria-label="Repository path"
-              value={customRepo}
-              onChange={(event) => setCustomRepo(event.target.value)}
-              placeholder="owner/repo"
-              className="mb-2 h-9 w-full rounded-xl border border-input bg-background px-3 font-mono text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
-            />
-          )}
           <ChatComposer
             value={prompt}
             onChange={setPrompt}
             onSubmit={submit}
-            placeholder={
-              needsPullRequest ? "Add an optional reviewer note…" : "Describe the task for Pi…"
-            }
+            placeholder="Describe the task for Pi…"
             model={config?.model}
             submitLabel="Start"
             submitEnabled={canSubmit}
             submitting={submitting}
-            disabled={!effectiveRepo}
+            disabled={!repo}
             autoFocus
             tools={
               <ComposerOptions
@@ -166,9 +140,6 @@ function NewSession() {
                 branches={branches}
                 branchesLoading={branchesLoading}
                 onBranchChange={setBranch}
-                needsPullRequest={needsPullRequest}
-                prNumber={prNumber}
-                onPrNumberChange={setPrNumber}
               />
             }
           />
@@ -201,14 +172,11 @@ type ComposerOptionsProps = {
   branches: string[];
   branchesLoading: boolean;
   onBranchChange: (value: string) => void;
-  needsPullRequest: boolean;
-  prNumber: string;
-  onPrNumberChange: (value: string) => void;
 };
 
 function ComposerOptions(props: ComposerOptionsProps) {
   const triggerClass =
-    "h-7 max-w-44 border-0 bg-transparent px-1.5 text-xs shadow-none dark:bg-transparent";
+    "h-7 min-w-0 max-w-36 shrink border-0 bg-transparent px-1.5 text-xs shadow-none dark:bg-transparent";
   return (
     <>
       <FolderGit2Icon className="size-3.5 shrink-0 text-muted-foreground" />
@@ -222,7 +190,6 @@ function ComposerOptions(props: ComposerOptionsProps) {
               {name}
             </SelectItem>
           ))}
-          <SelectItem value="__custom__">Custom repository…</SelectItem>
         </SelectContent>
       </Select>
       <SlidersHorizontalIcon className="ml-1 size-3.5 shrink-0 text-muted-foreground" />
@@ -241,36 +208,23 @@ function ComposerOptions(props: ComposerOptionsProps) {
           ))}
         </SelectContent>
       </Select>
-      {props.needsPullRequest ? (
-        <input
-          aria-label="Pull request"
-          value={props.prNumber}
-          onChange={(event) => props.onPrNumberChange(event.target.value.replace(/\D/g, ""))}
-          placeholder="PR #"
-          inputMode="numeric"
-          className="h-7 w-16 rounded-md bg-transparent px-1.5 font-mono text-xs outline-none"
-        />
-      ) : (
-        <>
-          <GitBranchIcon className="ml-1 size-3.5 shrink-0 text-muted-foreground" />
-          <Select
-            value={props.branch}
-            onValueChange={(value) => props.onBranchChange(value ?? "")}
-            disabled={props.branchesLoading || props.branches.length === 0}
-          >
-            <SelectTrigger aria-label="Branch" className={triggerClass}>
-              <SelectValue placeholder={props.branchesLoading ? "Loading…" : "Branch"} />
-            </SelectTrigger>
-            <SelectContent>
-              {props.branches.map((name) => (
-                <SelectItem key={name} value={name}>
-                  {name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </>
-      )}
+      <GitBranchIcon className="ml-1 size-3.5 shrink-0 text-muted-foreground" />
+      <Select
+        value={props.branch}
+        onValueChange={(value) => props.onBranchChange(value ?? "")}
+        disabled={props.branchesLoading || props.branches.length === 0}
+      >
+        <SelectTrigger aria-label="Branch" className={triggerClass}>
+          <SelectValue placeholder={props.branchesLoading ? "Loading…" : "Branch"} />
+        </SelectTrigger>
+        <SelectContent>
+          {props.branches.map((name) => (
+            <SelectItem key={name} value={name}>
+              {name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </>
   );
 }

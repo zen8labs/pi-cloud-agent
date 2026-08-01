@@ -8,10 +8,11 @@ Everything else follows from this line.
 ┌─ TRUSTED ───────────────────────────────┐      ┌─ UNTRUSTED ──────────────────┐
 │ apps/controller                         │      │ packages/runtime             │
 │                                         │      │                              │
-│  • verifies webhook signatures          │      │  • clones the repository     │
+│  • authenticates sandbox callbacks      │      │  • clones the repository     │
 │  • owns Postgres                        │      │  • runs repository code      │
 │  • mints repo-scoped credentials        │      │  • runs one agent session    │
-│  • decides what runs and when           │      │  • posts events outward      │
+│  • owns durable session checkpoints     │      │  • posts events/checkpoints  │
+│  • decides what runs and when           │      │    outward                   │
 │  • never executes repository code       │      │  • holds no database, no     │
 │                                         │      │    forge client, no broker   │
 └─────────────────────────────────────────┘      └──────────────────────────────┘
@@ -19,7 +20,7 @@ Everything else follows from this line.
               └──────── outbound HTTP only ────────────────┘
 ```
 
-The controller never dials into a sandbox. That single constraint is what keeps the sandbox provider contract at two methods, and what lets any backend (E2B today, Docker or Modal later) be interchangeable.
+The controller never dials into a sandbox. The provider lifecycle may create, pause, or reconnect compute, but the runtime always starts from inside the sandbox and calls outward. This keeps E2B today and Docker, Modal, or Daytona later interchangeable without an agent server.
 
 The boundary is enforced mechanically, not by convention: `packages/runtime` declares a dependency on `packages/protocol` and nothing else, pnpm's isolated `node_modules` makes an undeclared import unresolvable, and `pnpm boundaries` fails CI on a declared one.
 
@@ -29,7 +30,7 @@ The vocabulary for reasoning about a cloud agent, mapped onto the tree. Note tha
 
 | Building block | Where it lives |
 |---|---|
-| **Trigger**: why a run exists | `apps/controller/http/webhooks.ts`, `http/runs.ts`, normalization in `packages/vcs` |
+| **Trigger**: why a run exists | `apps/controller/http/manual.ts`, shared by `http/runs.ts` and `http/sessions.ts` |
 | **Sandbox**: isolated compute | `packages/sandbox` |
 | **Harness**: the agent loop | `packages/runtime/agent.ts` (Pi, embedded as a library) |
 | **Secret broker**: credentials for one run | `apps/controller/secrets/broker.ts` |
@@ -46,7 +47,7 @@ trigger ──► runs row (queued)
               │
               │  reconciler tick: claim with `for update skip locked`
               ▼
-         provisioning ──► profile.buildTask(trigger, repoConfig)
+         provisioning ──► profile.buildTask(trigger)
               │           broker.mintForRun()
               │           sandbox.create()
               │           attachSandbox(id, deadline)   ← first durable write
@@ -57,9 +58,10 @@ trigger ──► runs row (queued)
               ▼                                          │ (outbound only)
       succeeded / failed / cancelled ◄───────────────────┘
               │
-              │  reconciler tick: stop the machine, stamp sandbox_stopped_at
+              │  standalone: stop compute
+              │  session: suspend filesystem and clear active_run_id
               ▼
-            reclaimed
+       reclaimed / session idle
 ```
 
 Provisioning is a **short transaction**, not a long-lived task. Once `attachSandbox` commits, everything needed to finish or recover the run is on its row, and the process that started it can die without consequence. This is the central difference from the earlier design, where a coroutine held each run's lifecycle in memory and a restart force-failed live work.
@@ -72,11 +74,11 @@ Three tables. That is the entire persistent state of the system.
 
 | Table | Role |
 |---|---|
+| `sessions` | ordered turns, the latest Pi JSONL checkpoint, and the parked workspace reference |
 | `runs` | the queue, the lifecycle record, and the crash-recovery journal at once |
 | `run_events` | append-only log, `(run_id, seq)`. The only observability source |
-| `repo_config` | per-repo, per-profile JSON the controller stores but never reads |
 
-`repo_config` is what keeps profile-specific settings out of the core. A profile publishes a Zod schema; the controller validates through the profile, stores the result opaquely, and the dashboard renders the schema. Adding a profile setting needs no migration and no API change.
+Session state and runtime lifetime are deliberately separate. Postgres owns the conversation checkpoint; the sandbox provider owns a filesystem reference; live compute exists only while a turn runs. If the parked workspace expires, the next turn cold-clones the repository and still opens the same Pi session. See [docs/sessions.md](docs/sessions.md).
 
 ## Observability
 
@@ -95,7 +97,7 @@ All three live in `packages/protocol`, so an implementation package depends on t
 
 | Contract | Resolver | Implementations |
 |---|---|---|
-| `Profile` | `getProfile(name)` | `general`, `pr-review` |
+| `Profile` | `getProfile(name)` | `general` (`pr-review` kept dormant as a rebuild seed) |
 | `SandboxProvider` | `createSandboxProvider(name, env)` | `e2b` |
 | `VCSProvider` | `createVcsProvider(name, env)` | `github`, `gitlab`, `bitbucket` |
 
