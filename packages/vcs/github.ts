@@ -1,13 +1,7 @@
 import { createSign } from "node:crypto";
-import {
-  type ParsedWebhook,
-  type RepoRef,
-  Secret,
-  type VCSProvider,
-  WebhookVerificationError,
-} from "@pi-cloud-agent/protocol";
+import { Secret, type VCSProvider } from "@pi-cloud-agent/protocol";
 import { z } from "zod";
-import { fetchJson, header, verifyHmacSignature } from "./http";
+import { fetchJson } from "./http";
 
 /**
  * GitHub, including Enterprise via GITHUB_API_BASE.
@@ -23,7 +17,6 @@ const envSchema = z.object({
   GITHUB_API_BASE: z.string().default("https://api.github.com"),
   GITHUB_APP_ID: z.string().default(""),
   GITHUB_APP_PRIVATE_KEY: z.string().default(""),
-  GITHUB_WEBHOOK_SECRET: z.string().default(""),
   GITHUB_TOKEN: z.string().default(""),
 });
 
@@ -129,51 +122,8 @@ export function createGitHubProvider(
   return {
     name: "github",
 
-    verifyAndParseWebhook(headers: Headers, body: string): ParsedWebhook {
-      // Verify before parsing: an unauthenticated body should never reach JSON
-      // handling, let alone anything that acts on it.
-      verifyHmacSignature({
-        secret: config.GITHUB_WEBHOOK_SECRET,
-        signature: header(headers, "x-hub-signature-256"),
-        body,
-        prefix: "sha256=",
-        headerName: "X-Hub-Signature-256",
-      });
-
-      let payload: GitHubWebhookPayload;
-      try {
-        payload = JSON.parse(body) as GitHubWebhookPayload;
-      } catch (cause) {
-        throw new WebhookVerificationError(`webhook body is not JSON: ${String(cause)}`);
-      }
-
-      switch (header(headers, "x-github-event")) {
-        case "pull_request":
-          return parsePullRequestEvent(payload);
-        case "issue_comment":
-          return parseIssueCommentEvent(payload);
-        default:
-          return null;
-      }
-    },
-
     async mintRepoToken(repoFullName: string): Promise<Secret> {
       return new Secret(await repoToken(repoFullName), `github token for ${repoFullName}`);
-    },
-
-    async resolvePullRequest(repo: RepoRef, prNumber: number): Promise<RepoRef> {
-      const fullName = `${repo.owner}/${repo.name}`;
-      const pull = await fetchJson<GitHubPullRequest>(
-        `${apiBase}/repos/${repo.owner}/${repo.name}/pulls/${prNumber}`,
-        { headers: await apiHeaders(fullName) },
-      );
-      return {
-        ...repo,
-        baseSha: pull.base?.sha ?? repo.baseSha,
-        headSha: pull.head?.sha ?? repo.headSha,
-        headBranch: pull.head?.ref ?? repo.headBranch,
-        prNumber,
-      };
     },
 
     async getDefaultBranch(repoFullName: string): Promise<string | null> {
@@ -230,88 +180,6 @@ export function createGitHubProvider(
       }
     },
   };
-}
-
-// ── webhook parsing ──────────────────────────────────────────────────────────
-
-interface GitHubRepository {
-  name: string;
-  owner?: { login?: string };
-  html_url?: string;
-  clone_url?: string;
-  default_branch?: string;
-}
-
-interface GitHubPullRequest {
-  number?: number;
-  head?: { sha?: string; ref?: string };
-  base?: { sha?: string };
-}
-
-interface GitHubWebhookPayload {
-  action?: string;
-  repository?: GitHubRepository;
-  pull_request?: GitHubPullRequest;
-  issue?: { number?: number; pull_request?: unknown };
-  comment?: { body?: string };
-}
-
-const PR_ACTIONS: Record<string, "pr_opened" | "pr_updated"> = {
-  opened: "pr_opened",
-  reopened: "pr_opened",
-  synchronize: "pr_updated",
-};
-
-function parsePullRequestEvent(payload: GitHubWebhookPayload): ParsedWebhook {
-  const kind = PR_ACTIONS[payload.action ?? ""];
-  if (!kind || !payload.repository) return null;
-  return { kind, repo: toRepoRef(payload.repository, payload.pull_request) };
-}
-
-function parseIssueCommentEvent(payload: GitHubWebhookPayload): ParsedWebhook {
-  // Only new comments on an actual pull request can be commands. Plain issue
-  // comments have no `pull_request` key.
-  if (payload.action !== "created") return null;
-  if (!payload.issue?.pull_request || !payload.repository) return null;
-  return {
-    kind: "pr_comment",
-    // A comment payload carries no SHAs; the controller enriches via
-    // resolvePullRequest before the sandbox needs an exact revision.
-    repo: toRepoRef(payload.repository, undefined, payload.issue.number),
-    command: payload.comment?.body,
-  };
-}
-
-function toRepoRef(
-  repository: GitHubRepository,
-  pull?: GitHubPullRequest,
-  fallbackPrNumber?: number,
-): RepoRef {
-  const owner = repository.owner?.login ?? "";
-  const name = repository.name;
-  // Enterprise installations report their own host in html_url.
-  const host = hostFromUrl(repository.html_url) ?? "github.com";
-  return {
-    provider: "github",
-    host,
-    owner,
-    name,
-    cloneUrl: repository.clone_url ?? `https://${host}/${owner}/${name}.git`,
-    defaultBranch: repository.default_branch ?? "main",
-    baseSha: pull?.base?.sha ?? "",
-    headSha: pull?.head?.sha ?? "",
-    headBranch: pull?.head?.ref ?? "",
-    prNumber: pull?.number ?? fallbackPrNumber ?? null,
-  };
-}
-
-function hostFromUrl(url: string | undefined): string | null {
-  if (!url) return null;
-  try {
-    return new URL(url).host;
-  } catch {
-    return null;
-  }
 }
 
 async function listAppRepos(

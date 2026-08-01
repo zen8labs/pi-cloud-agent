@@ -1,6 +1,5 @@
 "use client";
 
-import { CpuIcon } from "lucide-react";
 import {
   PromptInput,
   PromptInputFooter,
@@ -55,20 +54,16 @@ export function ChatComposer({
         autoFocus={autoFocus}
         className={compact ? "min-h-12" : undefined}
       />
-      <PromptInputFooter className="flex-wrap">
-        <PromptInputTools className="flex-wrap">
+      <PromptInputFooter>
+        <PromptInputTools className="min-w-0 flex-1">
           {tools}
           {model && (
-            <span className="flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-muted-foreground">
-              <CpuIcon className="size-3.5 shrink-0" />
-              <span className="max-w-44 truncate">{model}</span>
+            <span className="max-w-40 shrink truncate rounded-md px-1.5 py-1 text-[11px] text-muted-foreground/80">
+              {model}
             </span>
           )}
         </PromptInputTools>
-        <div className="ml-auto flex items-center gap-2">
-          <span className="hidden text-[11px] text-muted-foreground/60 sm:inline">
-            Enter to send
-          </span>
+        <div className="ml-auto flex shrink-0 items-center">
           <PromptInputSubmit
             aria-label={submitLabel}
             disabled={!canSubmit}

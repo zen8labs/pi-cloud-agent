@@ -36,7 +36,7 @@ export function PromptInput({ className, onSubmit, children, ...props }: PromptI
 
   return (
     <form className={cn("w-full", className)} onSubmit={handleSubmit} {...props}>
-      <InputGroup className="min-h-28 overflow-hidden rounded-2xl border-border bg-background shadow-[0_12px_40px_rgba(0,0,0,0.08)] transition-shadow focus-within:shadow-[0_16px_48px_rgba(0,0,0,0.12)]">
+      <InputGroup className="min-h-28 overflow-hidden rounded-2xl border-border bg-background shadow-[0_1px_2px_rgba(0,0,0,0.05),0_8px_24px_rgba(0,0,0,0.05)] transition-shadow focus-within:shadow-[0_2px_4px_rgba(0,0,0,0.06),0_12px_32px_rgba(0,0,0,0.08)]">
         {children}
       </InputGroup>
     </form>
@@ -63,7 +63,7 @@ export function PromptInputTextarea({
   return (
     <InputGroupTextarea
       className={cn(
-        "max-h-52 min-h-16 px-4 pt-4 text-[15px] leading-6 placeholder:text-muted-foreground/70",
+        "max-h-52 min-h-16 px-4 pt-3.5 text-sm leading-6 placeholder:text-muted-foreground/60",
         className,
       )}
       name="message"

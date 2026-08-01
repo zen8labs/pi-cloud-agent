@@ -10,22 +10,23 @@ A profile owns three decisions and nothing else:
 
 **Depends on:** `@pi-cloud-agent/protocol` only.
 
+Only `general` is registered. `pr-review` stays on disk, deliberately unregistered, as the seed for a future rebuild of PR review.
+
 ## Files
 
 | Path | Role |
 |---|---|
 | `index.ts` | the registry, `getProfile`, `listProfiles`, `DEFAULT_PROFILE` |
 | `general/profile.ts` | a free-form request against a checkout. Deliberately has no config |
-| `pr-review/profile.ts` | reviews one pull request; owns its own triggering policy |
-| `pr-review/SKILL.md` | the instructions the agent follows, prepended to the prompt |
+| `pr-review/` | reviews one pull request. Dormant: not registered, kept as the seed for a future rebuild |
 | `profiles.test.ts` | the shared contract every profile must satisfy, plus per-profile policy |
 
 ## Invariants
 
 - **`accepts` must never green-light something `buildTask` would refuse.** The shared test block asserts this for every registered profile.
-- **Every config field needs a default.** Stored config is validated through your schema on read, so a schema that rejects `{}` breaks every unconfigured repository.
-- **The controller never reads inside a config.** It stores the JSON opaquely in `repo_config` and hands it back. That is what keeps profile settings out of the core. And it means a new setting needs no migration and no API change.
-- **No network calls in `buildTask`.** It runs on the provisioning path. Enrichment that needs a forge belongs in webhook intake.
+- **Every config field needs a default.** Config is validated through your schema on every run, and with no per-repository storage the input is always `{}`, so a schema that rejects it breaks every run.
+- **The controller never reads inside a config.** It validates through the profile's own schema and nothing else. That is what keeps profile settings out of the core.
+- **No network calls in `buildTask`.** It runs on the provisioning path.
 - **Profiles do not publish results.** The agent posts its own outcomes from inside the sandbox with `git` and `gh`. There is no reporting tool behind you.
 
 ## Adding one

@@ -1,46 +1,77 @@
 "use client";
 
 import type { RunEvent, RunStatus } from "@pi-cloud-agent/protocol";
-import {
-  CheckIcon,
-  CircleIcon,
-  FileTextIcon,
-  FolderSearchIcon,
-  LoaderCircleIcon,
-  PencilIcon,
-  SearchIcon,
-  TerminalIcon,
-  WrenchIcon,
-} from "lucide-react";
+import { ChevronRightIcon, LoaderCircleIcon, XIcon } from "lucide-react";
 import { useMemo } from "react";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
 import { STATUS_LABELS } from "@/lib/format";
 
-type ToolBlock = {
+type ToolLine = {
   key: string;
   kind: "tool";
   tool: string;
   args: Record<string, unknown>;
   status: string;
   callId: string;
+  at: string;
 };
 
-type Block = { key: string } & (
+type LogLine = { key: string; kind: "log"; text: string; at: string };
+
+type FlatBlock = { key: string } & (
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string }
-  | ToolBlock
-  | { kind: "log"; text: string }
+  | ToolLine
+  | LogLine
   | { kind: "status"; status: RunStatus; error?: string | null }
 );
 
+type WorkBlock = {
+  key: string;
+  kind: "work";
+  items: (ToolLine | LogLine)[];
+  startedAt: string;
+  endedAt: string;
+};
+
+type Block = FlatBlock | WorkBlock;
+
 function foldEvents(events: RunEvent[], userPrompt: string | null): Block[] {
-  const blocks: Block[] = userPrompt ? [{ key: "prompt", kind: "user", text: userPrompt }] : [];
-  const tools = new Map<string, ToolBlock>();
-  for (const event of events) foldEvent(blocks, tools, event);
-  return blocks.filter((block) => block.kind !== "assistant" || block.text.trim());
+  const flat: FlatBlock[] = userPrompt
+    ? [{ key: "prompt", kind: "user", text: userPrompt }]
+    : [];
+  const tools = new Map<string, ToolLine>();
+  for (const event of events) foldEvent(flat, tools, event);
+  const visible = flat.filter((block) => block.kind !== "assistant" || block.text.trim());
+  return groupWork(visible);
 }
 
-function foldEvent(blocks: Block[], tools: Map<string, ToolBlock>, event: RunEvent): void {
+/** Consecutive tool and log lines collapse into one "Worked for …" group, like Codex. */
+function groupWork(blocks: FlatBlock[]): Block[] {
+  const grouped: Block[] = [];
+  for (const block of blocks) {
+    const last = grouped.at(-1);
+    if (block.kind === "tool" || block.kind === "log") {
+      if (last?.kind === "work") {
+        last.items.push(block);
+        last.endedAt = block.at;
+      } else {
+        grouped.push({
+          key: `work-${block.key}`,
+          kind: "work",
+          items: [block],
+          startedAt: block.at,
+          endedAt: block.at,
+        });
+      }
+    } else {
+      grouped.push(block);
+    }
+  }
+  return grouped;
+}
+
+function foldEvent(blocks: FlatBlock[], tools: Map<string, ToolLine>, event: RunEvent): void {
   switch (event.type) {
     case "token":
       foldToken(blocks, event);
@@ -56,7 +87,7 @@ function foldEvent(blocks: Block[], tools: Map<string, ToolBlock>, event: RunEve
   }
 }
 
-function foldToken(blocks: Block[], event: RunEvent): void {
+function foldToken(blocks: FlatBlock[], event: RunEvent): void {
   const content = String(event.data?.content ?? "");
   const last = blocks.at(-1);
   if (!content) return;
@@ -64,42 +95,50 @@ function foldToken(blocks: Block[], event: RunEvent): void {
   else blocks.push({ key: `assistant-${event.seq}`, kind: "assistant", text: content });
 }
 
-function foldTool(blocks: Block[], tools: Map<string, ToolBlock>, event: RunEvent): void {
+function foldTool(blocks: FlatBlock[], tools: Map<string, ToolLine>, event: RunEvent): void {
   const callId = String(event.data?.callId ?? "");
   const existing = callId ? tools.get(callId) : undefined;
   if (existing) {
     existing.status = String(event.data?.status ?? existing.status);
+    existing.at = event.at;
     return;
   }
-  const block: ToolBlock = {
+  const block: ToolLine = {
     key: `tool-${callId || event.seq}`,
     kind: "tool",
     tool: String(event.data?.tool ?? "tool"),
     args: (event.data?.args as Record<string, unknown>) ?? {},
     status: String(event.data?.status ?? "running"),
     callId,
+    at: event.at,
   };
   if (callId) tools.set(callId, block);
   blocks.push(block);
 }
 
-function foldStatus(blocks: Block[], event: RunEvent): void {
+/** The stream reports "done"/"error"; the mirrored terminal event carries a RunStatus. */
+function foldStatus(blocks: FlatBlock[], event: RunEvent): void {
+  const raw = String(event.data?.status ?? "");
+  const status: RunStatus =
+    raw === "done" ? "succeeded" : raw === "error" ? "failed" : (raw as RunStatus);
   const detail = String(event.data?.detail ?? "");
   blocks.push({
     key: `status-${event.seq}`,
     kind: "status",
-    status: event.data?.status === "done" ? "succeeded" : "failed",
+    status,
     error: detail || null,
   });
 }
 
-function foldLog(blocks: Block[], event: RunEvent): void {
+function foldLog(blocks: FlatBlock[], event: RunEvent): void {
   const text = logText(event.data ?? {});
-  if (text) blocks.push({ key: `log-${event.seq}`, kind: "log", text });
+  if (text) blocks.push({ key: `log-${event.seq}`, kind: "log", text, at: event.at });
 }
 
 function logText(data: Record<string, unknown>): string {
   const named = data.event ?? data.message;
+  // Usage telemetry repeats after every step; the raw stream link keeps it.
+  if (named === "agent.turn_end") return "";
   if (!named)
     return Object.entries(data)
       .map(([key, value]) => `${key}=${format(value)}`)
@@ -127,21 +166,25 @@ export function ActivityFeed({
   if (!blocks.length) return <Empty active={active} />;
 
   return (
-    <div className="flex flex-col gap-7">
-      {blocks.map((block) => (
-        <BlockView key={block.key} block={block} />
+    <div className="flex flex-col gap-6">
+      {blocks.map((block, index) => (
+        <BlockView
+          key={block.key}
+          block={block}
+          streaming={active && index === blocks.length - 1}
+        />
       ))}
-      {active && (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <LoaderCircleIcon className="size-4 animate-spin" />
-          Pi is working…
+      {active && blocks.at(-1)?.kind !== "work" && (
+        <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
+          <LoaderCircleIcon className="size-3.5 animate-spin" />
+          Working…
         </div>
       )}
     </div>
   );
 }
 
-function BlockView({ block }: { block: Block }) {
+function BlockView({ block, streaming }: { block: Block; streaming: boolean }) {
   if (block.kind === "user") {
     return (
       <Message from="user">
@@ -158,43 +201,68 @@ function BlockView({ block }: { block: Block }) {
       </Message>
     );
   }
-  if (block.kind === "tool") return <ToolLine block={block} />;
-  if (block.kind === "log") return <LogRow text={block.text} />;
+  if (block.kind === "work") return <WorkGroup block={block} streaming={streaming} />;
+  if (block.kind === "status") return <StatusDivider block={block} />;
+  return null;
+}
+
+function WorkGroup({ block, streaming }: { block: WorkBlock; streaming: boolean }) {
+  if (streaming) {
+    return (
+      <div>
+        <div className="flex items-center gap-2 py-1 text-[13px] text-muted-foreground">
+          <LoaderCircleIcon className="size-3.5 animate-spin" />
+          Working…
+        </div>
+        <WorkLines items={block.items} />
+      </div>
+    );
+  }
   return (
-    <div className="flex items-center gap-3 py-1 text-xs text-muted-foreground">
-      <span className="h-px flex-1 bg-border" />
-      <span className="flex items-center gap-1.5">
-        <CircleIcon className="size-2.5" fill={`var(--status-${block.status}-dot)`} />
-        {STATUS_LABELS[block.status]}
-        {block.error ? ` · ${block.error}` : ""}
-      </span>
-      <span className="h-px flex-1 bg-border" />
+    <details className="activity-line group">
+      <summary className="flex cursor-pointer list-none select-none items-center gap-1.5 py-1 text-[13px] text-muted-foreground transition-colors hover:text-foreground">
+        <ChevronRightIcon className="size-3.5 shrink-0 transition-transform group-open:rotate-90" />
+        Worked for {workDuration(block.startedAt, block.endedAt)}
+      </summary>
+      <WorkLines items={block.items} />
+    </details>
+  );
+}
+
+function WorkLines({ items }: { items: (ToolLine | LogLine)[] }) {
+  return (
+    <div className="ml-[7px] mt-1 flex flex-col border-l border-border/70 pl-3.5">
+      {items.map((item) =>
+        item.kind === "tool" ? (
+          <ToolRow key={item.key} block={item} />
+        ) : (
+          <LogRow key={item.key} text={item.text} />
+        ),
+      )}
     </div>
   );
 }
 
-function ToolLine({ block }: { block: ToolBlock }) {
+function ToolRow({ block }: { block: ToolLine }) {
   const failed = block.status === "error";
   const running = block.status !== "completed" && !failed;
   const summary = toolSummary(block.tool, block.args);
-  const Icon = toolIcon(block.tool);
   return (
-    <details className="activity-line group">
-      <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2 py-1.5 text-[13px] text-muted-foreground">
+    <details className="activity-line group/line">
+      <summary className="flex min-w-0 cursor-pointer list-none select-none items-center gap-1.5 py-1 text-[13px]">
         {running ? (
-          <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin" />
+          <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
         ) : failed ? (
-          <CircleIcon className="size-2.5 shrink-0 fill-destructive text-destructive" />
+          <XIcon className="size-3.5 shrink-0 text-[var(--status-failed)]" />
         ) : (
-          <Icon className="size-3.5 shrink-0" />
+          <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/60 transition-transform group-open/line:rotate-90" />
         )}
-        <span className="shrink-0 font-medium text-foreground/75">{toolVerb(block.tool)}</span>
-        {summary && <span className="truncate text-muted-foreground/75">{summary}</span>}
-        <span className="ml-auto hidden shrink-0 text-[11px] text-muted-foreground/50 group-open:block">
-          hide details
-        </span>
+        <span className="shrink-0 font-medium text-foreground/85">{toolVerb(block.tool)}</span>
+        {summary && (
+          <span className="truncate font-mono text-xs text-muted-foreground">{summary}</span>
+        )}
       </summary>
-      <pre className="ml-5 max-h-64 overflow-auto whitespace-pre-wrap py-2 pl-0 font-mono text-[11px] leading-5 text-muted-foreground/70">
+      <pre className="ml-5 max-h-64 overflow-auto whitespace-pre-wrap py-1.5 font-mono text-[11px] leading-5 text-muted-foreground/80">
         {JSON.stringify(block.args, null, 2)}
       </pre>
     </details>
@@ -202,20 +270,49 @@ function ToolLine({ block }: { block: ToolBlock }) {
 }
 
 function LogRow({ text }: { text: string }) {
-  const label = text.length > 96 ? `${text.slice(0, 93)}…` : text;
+  const truncated = text.length > 110;
+  const label = truncated ? `${text.slice(0, 107)}…` : text;
+  if (!truncated) {
+    return <p className="truncate py-1 font-mono text-xs text-muted-foreground/80">{label}</p>;
+  }
   return (
-    <details className="activity-line group">
-      <summary className="flex cursor-pointer list-none items-center gap-2 py-1.5 text-[13px] text-muted-foreground">
-        <CheckIcon className="size-3.5 shrink-0 text-emerald-500" />
-        <span className="truncate text-muted-foreground/80">{label}</span>
+    <details className="activity-line group/line">
+      <summary className="flex cursor-pointer list-none select-none items-center gap-1.5 py-1">
+        <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/60 transition-transform group-open/line:rotate-90" />
+        <span className="truncate font-mono text-xs text-muted-foreground/80">{label}</span>
       </summary>
-      {label !== text && (
-        <pre className="ml-5 overflow-x-auto whitespace-pre-wrap py-2 font-mono text-[11px] leading-5 text-muted-foreground/70">
-          {text}
-        </pre>
-      )}
+      <pre className="ml-5 overflow-x-auto whitespace-pre-wrap py-1.5 font-mono text-[11px] leading-5 text-muted-foreground/80">
+        {text}
+      </pre>
     </details>
   );
+}
+
+function StatusDivider({ block }: { block: FlatBlock & { kind: "status" } }) {
+  return (
+    <div className="flex items-center gap-3 py-1 text-xs text-muted-foreground">
+      <span className="h-px flex-1 bg-border/70" />
+      <span className="flex items-center gap-1.5">
+        <span
+          className="size-1.5 rounded-full"
+          style={{ background: `var(--status-${block.status})` }}
+        />
+        <span className="font-medium" style={{ color: `var(--status-${block.status})` }}>
+          {STATUS_LABELS[block.status]}
+        </span>
+        {block.error ? <span>· {block.error}</span> : null}
+      </span>
+      <span className="h-px flex-1 bg-border/70" />
+    </div>
+  );
+}
+
+function workDuration(startIso: string, endIso: string): string {
+  const ms = Math.max(0, Date.parse(endIso) - Date.parse(startIso));
+  const totalSeconds = Math.max(1, Math.round(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
 }
 
 const TOOL_VERBS: Record<string, string> = {
@@ -251,25 +348,6 @@ function toolSummary(tool: string, args: Record<string, unknown>): string {
       const first = Object.values(args)[0];
       return typeof first === "string" ? first : "";
     }
-  }
-}
-
-function toolIcon(tool: string) {
-  switch (tool.toLowerCase()) {
-    case "read":
-      return FileTextIcon;
-    case "edit":
-    case "write":
-      return PencilIcon;
-    case "bash":
-      return TerminalIcon;
-    case "grep":
-      return SearchIcon;
-    case "glob":
-    case "list":
-      return FolderSearchIcon;
-    default:
-      return WrenchIcon;
   }
 }
 

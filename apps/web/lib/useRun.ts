@@ -115,13 +115,20 @@ export function useRun(id: string) {
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  // Reset during render when the run id changes. The subscription effect below
+  // only runs after one more render, and that render must not see the previous
+  // run's data tagged with the new id (React's set-state-during-render pattern
+  // for exactly this case).
+  const [previousId, setPreviousId] = useState(id);
+  if (previousId !== id) {
+    setPreviousId(id);
+    setRun(null);
+    setEvents([]);
+    setError(null);
+  }
+
   useEffect(() => {
-    if (!id) {
-      setEvents([]);
-      setRun(null);
-      setError(null);
-      return;
-    }
+    if (!id) return;
     const ctx: StreamCtx = {
       alive: true,
       seen: new Set(),
@@ -130,9 +137,6 @@ export function useRun(id: string) {
       setRun,
       setError,
     };
-    setEvents([]);
-    setRun(null);
-    setError(null);
 
     const loadDetail = detailLoader(id, ctx);
     void loadDetail();

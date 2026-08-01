@@ -29,8 +29,8 @@ export function MessageContent({ className, ...props }: MessageContentProps) {
   return (
     <div
       className={cn(
-        "min-w-0 max-w-full text-[15px] leading-7 text-foreground",
-        "group-[.is-user]:w-fit group-[.is-user]:rounded-2xl group-[.is-user]:bg-secondary group-[.is-user]:px-4 group-[.is-user]:py-2.5",
+        "min-w-0 max-w-full text-sm leading-7 text-foreground",
+        "group-[.is-user]:w-fit group-[.is-user]:rounded-2xl group-[.is-user]:bg-secondary group-[.is-user]:px-3.5 group-[.is-user]:py-2",
         className,
       )}
       {...props}

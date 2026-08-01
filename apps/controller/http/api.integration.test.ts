@@ -1,7 +1,5 @@
-import { createHmac } from "node:crypto";
 import type {
   ConfigResponse,
-  RepoConfigResponse,
   RunDetail,
   RunEventsResponse,
   RunListResponse,
@@ -30,8 +28,6 @@ import { createApp } from "./app";
 
 let database: Database;
 let app: ReturnType<typeof createApp>;
-
-const WEBHOOK_SECRET = "test-webhook-secret";
 
 beforeAll(async () => {
   database = setupTestDatabase();
@@ -98,18 +94,6 @@ describe("starting runs", () => {
     expect(run.model).toBe("aigateway/test-model");
     // The credential the sandbox will authenticate with is never returned.
     expect(JSON.stringify(run)).not.toContain("callbackToken");
-  });
-
-  it("rejects a request the chosen profile would not accept", async () => {
-    // pr-review without a pull request would fail inside a sandbox; better to say
-    // so before anything is written.
-    const response = await post("/runs", {
-      repo: "acme/widgets",
-      prompt: "review it",
-      profile: "pr-review",
-    });
-    expect(response.status).toBe(422);
-    expect((await json<{ error: string }>(response)).error).toContain("does not accept");
   });
 
   it("validates the request shape and the repository name", async () => {
@@ -319,135 +303,12 @@ describe("watching a run", () => {
   });
 });
 
-describe("webhook intake", () => {
-  const body = JSON.stringify({
-    action: "opened",
-    repository: {
-      name: "widgets",
-      owner: { login: "acme" },
-      html_url: "https://github.com/acme/widgets",
-      clone_url: "https://github.com/acme/widgets.git",
-      default_branch: "main",
-    },
-    pull_request: {
-      number: 7,
-      head: { sha: "headsha", ref: "feature" },
-      base: { sha: "basesha" },
-    },
-  });
-
-  const signature = () =>
-    `sha256=${createHmac("sha256", WEBHOOK_SECRET).update(body).digest("hex")}`;
-
-  it("answers 401 to an unsigned or forged delivery", async () => {
-    const forged = await app.request("/webhooks/github", {
-      method: "POST",
-      headers: { "x-github-event": "pull_request", "x-hub-signature-256": "sha256=bad" },
-      body,
-    });
-    expect(forged.status).toBe(401);
-  });
-
-  it("starts a run for every profile that accepts the event", async () => {
-    const response = await app.request("/webhooks/github", {
-      method: "POST",
-      headers: { "x-github-event": "pull_request", "x-hub-signature-256": signature() },
-      body,
-    });
-    expect(response.status).toBe(202);
-
-    const { runs: started } = (await response.json()) as { runs: string[] };
-    expect(started).toHaveLength(1);
-
-    const run = await getRun(database, started[0]!);
-    // pr-review claimed it; general declined because there is no human request.
-    expect(run?.profile).toBe("pr-review");
-    expect(run?.trigger.repo.prNumber).toBe(7);
-  });
-
-  it("respects a repo that has turned the trigger off", async () => {
-    await app.request("/settings/repo-config", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        repo: "acme/widgets",
-        profile: "pr-review",
-        config: { onOpened: false },
-      }),
-    });
-
-    const response = await app.request("/webhooks/github", {
-      method: "POST",
-      headers: { "x-github-event": "pull_request", "x-hub-signature-256": signature() },
-      body,
-    });
-    // Understood, deliberately ignored — not an error.
-    expect(response.status).toBe(204);
-    expect(((await (await app.request("/runs")).json()) as RunListResponse).runs).toHaveLength(
-      0,
-    );
-  });
-
-  it("answers 204 to an event no profile wants", async () => {
-    const closed = body.replace('"action":"opened"', '"action":"closed"');
-    const response = await app.request("/webhooks/github", {
-      method: "POST",
-      headers: {
-        "x-github-event": "pull_request",
-        "x-hub-signature-256": `sha256=${createHmac("sha256", WEBHOOK_SECRET).update(closed).digest("hex")}`,
-      },
-      body: closed,
-    });
-    expect(response.status).toBe(204);
-  });
-
-  it("answers 404 for a forge it does not know", async () => {
-    expect((await post("/webhooks/perforce", {})).status).toBe(404);
-  });
-});
-
 describe("dashboard support", () => {
-  it("reports the model and the profiles with their settings schemas", async () => {
+  it("reports the model and the registered profiles", async () => {
     const config = await json<ConfigResponse>(await app.request("/config"));
     expect(config.model).toBe("aigateway/test-model");
     expect(config.defaultProfile).toBe("general");
-
-    const review = config.profiles.find((profile) => profile.name === "pr-review");
-    const schema = review?.configJsonSchema as { properties?: Record<string, unknown> };
-    expect(schema.properties?.onOpened).toBeDefined();
-  });
-
-  it("validates stored profile config with the profile's own schema", async () => {
-    const bad = await app.request("/settings/repo-config", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        repo: "acme/widgets",
-        profile: "pr-review",
-        config: { onOpened: "yes please" },
-      }),
-    });
-    expect(bad.status).toBe(422);
-  });
-
-  it("stores config with the profile's defaults applied", async () => {
-    await app.request("/settings/repo-config", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        repo: "acme/widgets",
-        profile: "pr-review",
-        config: { branch: "release" },
-      }),
-    });
-
-    const stored = await json<RepoConfigResponse>(await app.request("/settings/repo-config"));
-    expect(stored.entries[0]?.config).toMatchObject({
-      branch: "release",
-      onOpened: true,
-      onUpdated: true,
-    });
-    expect(stored.repos).toContain("acme/widgets");
+    expect(config.profiles.map((profile) => profile.name)).toEqual(["general"]);
   });
 
   it("is healthy", async () => {

@@ -24,8 +24,8 @@ export const myProfile = defineProfile({
   name: "my-profile",
   description: "One line, shown in the dashboard",
 
-  // Per-repository settings. The dashboard renders this schema directly, so
-  // every field needs a default: an unconfigured repository must still work.
+  // Settings schema. There is no per-repository storage in this phase, so a
+  // run always sees the parsed defaults: every field needs one.
   configSchema: z.object({
     enabled: z.boolean().default(true),
   }),
@@ -56,12 +56,11 @@ export const myProfile = defineProfile({
 // packages/profiles/index.ts
 const REGISTRY: Record<string, Profile> = {
   [generalProfile.name]: generalProfile,
-  [prReviewProfile.name]: prReviewProfile,
   [myProfile.name]: myProfile,        // ← this line
 };
 ```
 
-That is the whole integration. Your profile now appears in `GET /config`, in the dashboard's profile selector, and, if `accepts` returns true for repository events, in webhook intake. Its settings appear on the settings page, rendered from your schema, with no migration and no API change.
+That is the whole integration. Your profile now appears in `GET /config` and in the dashboard's profile selector. (The existing `pr-review` profile is the deliberate exception: still exported from `index.ts`, but kept out of `REGISTRY` as the seed for a future rebuild.)
 
 ## 3. Optionally add a SKILL.md
 
@@ -79,13 +78,11 @@ Write a skill as instructions to a capable colleague, not as a script. The `pr-r
 
 ## Rules
 
-**`accepts` must never green-light something `buildTask` would refuse.** If your task needs a pull request number, check for it in `accepts`. Otherwise a run gets written to the database and then fails in provisioning for a reason nobody can see. `packages/profiles/profiles.test.ts` asserts this for every registered profile, so getting it wrong fails the suite.
+**`accepts` must never green-light something `buildTask` would refuse.** If your task needs a particular kind of trigger, check for it in `accepts`. Otherwise a run gets written to the database and then fails in provisioning for a reason nobody can see. `packages/profiles/profiles.test.ts` asserts this for every registered profile, so getting it wrong fails the suite.
 
-**Every config field needs a default.** Stored config is validated *through your schema* on read, so a schema that rejects `{}` breaks every unconfigured repository.
+**Every config field needs a default.** Config is validated *through your schema* on every run, and with no per-repository storage the input is always `{}`, so a schema that rejects it breaks every run.
 
-**Changing a config schema is a migration you have to think about.** Existing rows were stored under the old schema. Adding an optional field with a default is safe; renaming or narrowing a field will throw on read, and the controller logs that and skips your profile rather than failing the whole webhook delivery.
-
-**Do not reach for the network in `buildTask`.** It runs on the provisioning path. Enrichment that needs a forge call belongs in webhook intake, where `resolvePullRequest` already fills in missing commit coordinates.
+**Do not reach for the network in `buildTask`.** It runs on the provisioning path.
 
 **A profile that needs no settings should say so** with `z.object({})`, not invent some. `general` is deliberately empty.
 

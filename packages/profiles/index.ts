@@ -13,9 +13,12 @@ import { prReviewProfile } from "./pr-review/profile";
  * Adding one is a directory and a line here. See docs/adding-a-profile.md.
  */
 
+// pr-review is deliberately NOT registered: its feature set (webhook intake,
+// per-repo settings) was removed to be rebuilt later. The profile itself is
+// kept below as the seed for that rebuild, so it stays exported and type-checked
+// but never accepts a trigger at runtime.
 const REGISTRY: Record<string, Profile> = {
   [generalProfile.name]: generalProfile,
-  [prReviewProfile.name]: prReviewProfile,
 };
 
 export const DEFAULT_PROFILE = generalProfile.name;

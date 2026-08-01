@@ -68,7 +68,7 @@ Live tests never run in CI. If you change the sandbox image, the runtime, or the
 One file at a time:
 
 ```bash
-pnpm vitest run packages/vcs/webhooks.test.ts
+pnpm vitest run packages/profiles/profiles.test.ts
 pnpm vitest run --project integration apps/controller/db/runs.integration.test.ts
 ```
 

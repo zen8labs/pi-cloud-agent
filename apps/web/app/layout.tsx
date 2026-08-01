@@ -1,7 +1,7 @@
 import { GeistMono } from "geist/font/mono";
 import { GeistSans } from "geist/font/sans";
 import type { Metadata } from "next";
-import { SideNav } from "@/components/SideNav";
+import { AppShell } from "@/components/AppShell";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { cn } from "@/lib/utils";
 import "./globals.css";
@@ -29,10 +29,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <ThemeProvider>
-          <div className="app-shell">
-            <SideNav />
-            <main className="app-main">{children}</main>
-          </div>
+          <AppShell>{children}</AppShell>
         </ThemeProvider>
       </body>
     </html>

@@ -48,7 +48,7 @@ apps/
   web/            operator dashboard (Next.js)
 packages/
   protocol/       the contracts: types, schemas, and the three provider interfaces
-  profiles/       verticals: general, pr-review
+  profiles/       verticals: the registry ships general only (pr-review dormant on disk as a rebuild seed)
   sandbox/        SandboxProvider implementations (e2b)
   vcs/            VCSProvider implementations (github, gitlab, bitbucket)
   runtime/        runs INSIDE the sandbox (untrusted)
@@ -85,7 +85,7 @@ pnpm sandbox:template    # rebuild the sandbox image and E2B template
 One file:
 
 ```bash
-pnpm vitest run packages/vcs/webhooks.test.ts
+pnpm vitest run packages/profiles/profiles.test.ts
 pnpm vitest run --project integration apps/controller/db/runs.integration.test.ts
 ```
 

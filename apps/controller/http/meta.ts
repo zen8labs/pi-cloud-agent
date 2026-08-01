@@ -10,7 +10,7 @@ import type { AppEnv } from "./deps";
  * profiles and their settings schemas, and the repositories it can target.
  *
  * The selector endpoints are best-effort by design. A forge outage should leave
- * the dashboard usable with a typed-in `owner/name`, not blank.
+ * the dashboard usable with an empty list, not blank.
  */
 export function metaRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -57,7 +57,7 @@ export function metaRoutes(): Hono<AppEnv> {
  * `source` is returned so the dashboard can explain an empty list instead of
  * looking broken.
  */
-export async function resolveRepos(config: Config): Promise<ReposResponse> {
+async function resolveRepos(config: Config): Promise<ReposResponse> {
   if (config.web.repos.length > 0) return { repos: config.web.repos, source: "config" };
   try {
     const vcs = createVcsProvider("github", config.env);

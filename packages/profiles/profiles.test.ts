@@ -1,6 +1,6 @@
 import type { RepoRef, Trigger, TriggerKind } from "@pi-cloud-agent/protocol";
 import { describe, expect, it } from "vitest";
-import { getProfile, listProfiles } from "./index";
+import { getProfile, listProfiles, prReviewProfile } from "./index";
 
 /**
  * Profiles own two decisions the controller must never make: whether a trigger
@@ -83,8 +83,10 @@ describe("general", () => {
   });
 });
 
+// pr-review is kept on disk but unregistered (see index.ts), so these tests
+// import it directly rather than resolving it through the registry.
 describe("pr-review", () => {
-  const review = getProfile("pr-review");
+  const review = prReviewProfile;
   const defaults = review.parseConfig({});
 
   it("reviews on open and update by default", () => {

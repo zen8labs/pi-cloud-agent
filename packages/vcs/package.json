@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "VCSProvider implementations: webhook verification and scoped credentials",
+  "description": "VCSProvider implementations: scoped repository credentials",
   "main": "./index.ts",
   "exports": {
     ".": "./index.ts"
