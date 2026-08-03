@@ -44,7 +44,7 @@ const schema = z.object({
   CONTROL_PLANE_URL: z.string().url().default("http://host.microsandbox.internal:8080"),
 
   /** provider/model. The provider segment names an OpenAI-compatible gateway. */
-  AGENT_MODEL: z.string().min(1).default("aigateway/MiniMax/MiniMax-M2.7"),
+  AGENT_MODEL: z.string().min(1).default("openai/gpt-5.6-sol"),
   AIGATEWAY_BASE_URL: z.string().default(""),
   AIGATEWAY_API_KEY: z.string().default(""),
   MODEL_CONTEXT_WINDOW: z.coerce.number().int().positive().default(196_608),
@@ -78,7 +78,7 @@ export interface Config {
   databaseUrl: string;
   controlPlaneUrl: string;
   model: {
-    /** Full id as written in config, e.g. "aigateway/MiniMax/MiniMax-M2.7". */
+    /** Full id as written in config, e.g. "openai/gpt-5.6-sol". */
     id: string;
     /** The gateway name — the first path segment. */
     provider: string;

@@ -99,7 +99,7 @@ export interface ProfileInfo {
 }
 
 export interface ConfigResponse {
-  /** The single configured model id, e.g. "aigateway/MiniMax/MiniMax-M2.7". */
+  /** The single configured model id, e.g. "openai/gpt-5.6-sol". */
   model: string;
   profiles: ProfileInfo[];
   defaultProfile: string;

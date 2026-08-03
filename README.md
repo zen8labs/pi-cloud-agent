@@ -35,7 +35,7 @@ The execution unit is a **run**: an event starts it, it ends, and its log is imm
 
 ## Development
 
-Follow [DEVELOPMENT.md](DEVELOPMENT.md) from account setup through the first verified run.
+Copy `.env.example` to `.env`, add the GitHub App and model credentials, run `make setup`, then `make dev`. [DEVELOPMENT.md](DEVELOPMENT.md) has the short quick start and optional provider configuration.
 
 ## Why it is this small
 
