@@ -26,15 +26,13 @@ export const repoRefSchema = z.object({
 
 export type RepoRef = z.infer<typeof repoRefSchema>;
 
-export function repoFullName(repo: Pick<RepoRef, "owner" | "name">): string {
-  return `${repo.owner}/${repo.name}`;
-}
-
-/** Split "owner/name", rejecting anything that isn't exactly that. */
-export function parseRepoFullName(fullName: string): { owner: string; name: string } | null {
-  const parts = fullName.split("/");
-  if (parts.length !== 2) return null;
-  const [owner, name] = parts;
-  if (!owner || !name) return null;
-  return { owner, name };
+/** A repository exposed by a connected VCS identity. */
+export interface VcsRepository {
+  provider: string;
+  host: string;
+  fullName: string;
+  owner: string;
+  name: string;
+  cloneUrl: string;
+  defaultBranch: string | null;
 }

@@ -9,7 +9,6 @@ import {
   type TaskSpec,
   WorkspaceNotFoundError,
 } from "@pi-cloud-agent/protocol";
-import { createVcsProvider } from "@pi-cloud-agent/vcs";
 import type { Config } from "../config";
 import type { Database } from "../db/client";
 import { attachSandbox, completeRun, markRunning, requeueRun } from "../db/runs";
@@ -47,12 +46,10 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
 
   try {
     const task = buildTask(run);
-    const vcs = createVcsProvider(run.provider, config.env);
     const credentials = await broker.mintForRun({
+      userId: run.userId,
       provider: run.provider,
       repoFullName: run.repoFullName,
-      host: task.repo.host,
-      vcs,
     });
 
     const wallClockSeconds = Math.min(

@@ -20,7 +20,7 @@ Complexity belongs compressed inside the abstraction, not spread across the surf
 ## How a run works
 
 1. Something triggers it: the dashboard or an API call.
-2. The controller mints a credential scoped to one repository and boots a sandbox.
+2. The operator connects a GitHub or Azure DevOps identity in Settings; the controller resolves the repository and boots a sandbox with the run credential.
 3. Inside, an agent clones the repo, does the work, and posts its own result with ordinary tools like `git` and `gh`.
 4. Every step lands in an append-only log you can stream live or replay later.
 5. A standalone run's machine is reclaimed. A chat session's filesystem is parked for the next turn, then expires automatically.
@@ -57,7 +57,7 @@ packages/
   protocol/       the contracts: types, schemas, provider interfaces
   profiles/       verticals: general (pr-review dormant on disk as a rebuild seed)
   sandbox/        SandboxProvider implementations
-  vcs/            VCSProvider implementations
+  vcs/            GitHub and Azure DevOps provider implementations
   runtime/        runs inside the sandbox (untrusted)
 ```
 

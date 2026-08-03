@@ -22,6 +22,34 @@
       "when": 1785598450854,
       "tag": "0002_foamy_morlun",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785609577437,
+      "tag": "0003_round_ozymandias",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785728653068,
+      "tag": "0004_round_quentin_quire",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785730912084,
+      "tag": "0005_broad_quicksilver",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785731466972,
+      "tag": "0006_flat_proudstar",
+      "breakpoints": true
     }
   ]
 }

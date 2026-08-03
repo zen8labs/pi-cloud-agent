@@ -19,7 +19,7 @@ Forget existing products for a moment. If you want a coding agent to do useful w
 - **Trigger**: something has to *start* a run. A webhook, an API call, a chat message, a schedule. This is the cloud agent's "prompt": it arrives as an event, not as typing.
 - **Sandbox**: the agent needs somewhere to run. Isolated compute with a real checkout of the repo, network, and a shell. Because it will execute untrusted code, this environment is also the security boundary.
 - **Harness**: the actual agent loop. Give the model tools, let it read/edit files and run commands, feed results back, repeat until done. This runs *inside* the sandbox, headless.
-- **Secret broker**: the agent needs credentials (to clone, to comment, to push), but it's running untrusted code. So something *trusted* must mint scoped, short-lived credentials and hand only those into the sandbox.
+- **Secret broker**: the agent needs credentials (to clone, to comment, to push), but it's running untrusted code. The current MVP hands a connected OAuth token into the sandbox as a known limitation; the planned broker must authorize operations without exposing a reusable token.
 - **Actuation**: the run has to change something in the outside world. A PR comment, a commit, a status. The agent does this itself with ordinary tools (`git`, `gh`), the same way a human would.
 - **Observability**: no human is watching the loop live, so the run has to be *recorded*, both streamed as it happens and stored for later. This is how you trust, debug, and improve the agent.
 - **Profiles**: a way to turn the generic core into a specific job (review this PR, triage this issue) without editing the core. This is the extension surface and the whole point of the project.

@@ -36,6 +36,7 @@ import { type RunEventRow, type RunRow, runEvents, runs } from "./schema";
 const seconds = (n: number) => new Date(Date.now() + n * 1000);
 
 export interface CreateRunInput {
+  userId?: string | null;
   profile: string;
   provider: string;
   repoFullName: string;
@@ -229,13 +230,15 @@ export async function getRunByCallbackToken(
 
 export async function listRuns(
   database: Database,
-  options: { limit: number; status?: RunStatus },
+  options: { limit: number; status?: RunStatus; userId?: string | null },
 ): Promise<RunRow[]> {
-  const where = options.status ? eq(runs.status, options.status) : undefined;
+  const predicates = [];
+  if (options.userId) predicates.push(eq(runs.userId, options.userId));
+  if (options.status) predicates.push(eq(runs.status, options.status));
   return database
     .select()
     .from(runs)
-    .where(where)
+    .where(predicates.length > 0 ? and(...predicates) : undefined)
     .orderBy(desc(runs.createdAt))
     .limit(options.limit);
 }

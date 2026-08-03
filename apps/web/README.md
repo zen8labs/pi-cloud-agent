@@ -1,6 +1,6 @@
 # @pi-cloud-agent/web
 
-The operator dashboard: watch runs live, start new ones.
+The operator dashboard: watch runs live, start new ones, and connect VCS identities.
 
 Next.js App Router, React, Tailwind 4, Base UI, and local-source [AI Elements](https://elements.ai-sdk.dev/) conversation primitives. Reaches the controller over HTTP at `NEXT_PUBLIC_API_BASE` and holds no server-side state of its own. Pi remains the agent harness; AI Elements only owns presentation and interaction semantics.
 
@@ -12,6 +12,7 @@ Next.js App Router, React, Tailwind 4, Base UI, and local-source [AI Elements](h
 |---|---|
 | `app/page.tsx` | redirects the root route to the chat-first workspace |
 | `app/chat/page.tsx` | start a run; profiles come from the controller, not from here |
+| `app/settings/page.tsx` | connect and disconnect GitHub and Azure DevOps identities |
 | `app/sessions/[id]/page.tsx` | ordered turns: merged activity, live latest run, real follow-up |
 | `components/ActivityFeed.tsx` | folds the flat event log into a readable conversation |
 | `components/ChatComposer.tsx` | product wrapper around the AI Elements prompt primitives |

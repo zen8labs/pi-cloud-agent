@@ -10,6 +10,7 @@ import { CHANNELS, type Database, notify } from "./client";
 import { type RunRow, runs, type SessionRow, sessions } from "./schema";
 
 export interface CreateSessionInput {
+  userId?: string | null;
   title: string;
   profile: string;
   provider: string;
@@ -45,6 +46,7 @@ export async function createSessionWithRun(
       .insert(sessions)
       .values({
         id: sessionId,
+        userId: input.userId ?? null,
         title: input.title,
         profile: input.profile,
         provider: input.provider,
@@ -59,6 +61,7 @@ export async function createSessionWithRun(
       .insert(runs)
       .values({
         id: runId,
+        userId: input.userId ?? null,
         sessionId,
         turnNumber: 1,
         profile: input.profile,
@@ -81,6 +84,7 @@ export async function createSessionTurn(
   sessionId: string,
   prompt: string,
   callbackToken: string,
+  userId: string | null = null,
 ): Promise<RunRow> {
   const runId = randomUUID();
   const run = await database.transaction(async (tx) => {
@@ -92,7 +96,13 @@ export async function createSessionTurn(
         turnCount: sql`${sessions.turnCount} + 1`,
         updatedAt: new Date(),
       })
-      .where(and(eq(sessions.id, sessionId), isNull(sessions.activeRunId)))
+      .where(
+        and(
+          eq(sessions.id, sessionId),
+          isNull(sessions.activeRunId),
+          ...(userId ? [eq(sessions.userId, userId)] : []),
+        ),
+      )
       .returning();
 
     if (!claimed) {
@@ -109,6 +119,7 @@ export async function createSessionTurn(
       .insert(runs)
       .values({
         id: runId,
+        userId: claimed.userId,
         sessionId,
         turnNumber: claimed.turnCount,
         profile: claimed.profile,
@@ -129,27 +140,38 @@ export async function createSessionTurn(
 export async function getSession(
   database: Database,
   sessionId: string,
+  userId?: string | null,
 ): Promise<SessionRow | null> {
   const [row] = await database
     .select()
     .from(sessions)
-    .where(eq(sessions.id, sessionId))
+    .where(and(eq(sessions.id, sessionId), ...(userId ? [eq(sessions.userId, userId)] : [])))
     .limit(1);
   return row ?? null;
 }
 
-export async function listSessions(database: Database, limit: number): Promise<SessionRow[]> {
-  return database.select().from(sessions).orderBy(desc(sessions.updatedAt)).limit(limit);
+export async function listSessions(
+  database: Database,
+  limit: number,
+  userId?: string | null,
+): Promise<SessionRow[]> {
+  return database
+    .select()
+    .from(sessions)
+    .where(userId ? eq(sessions.userId, userId) : undefined)
+    .orderBy(desc(sessions.updatedAt))
+    .limit(limit);
 }
 
 export async function listSessionRuns(
   database: Database,
   sessionId: string,
+  userId?: string | null,
 ): Promise<RunRow[]> {
   return database
     .select()
     .from(runs)
-    .where(eq(runs.sessionId, sessionId))
+    .where(and(eq(runs.sessionId, sessionId), ...(userId ? [eq(runs.userId, userId)] : [])))
     .orderBy(runs.turnNumber);
 }
 
