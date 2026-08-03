@@ -4,6 +4,8 @@ import type { RunEvent, RunStatus } from "@pi-cloud-agent/protocol";
 import { ChevronRightIcon, LoaderCircleIcon, XIcon } from "lucide-react";
 import { useMemo } from "react";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
+import { ChangeStatsCard } from "@/components/ChangeStatsCard";
+import { type FileChangeStat, fileChangeStats, ToolArgsView } from "@/components/ToolArgsView";
 import { STATUS_LABELS } from "@/lib/format";
 
 type ToolLine = {
@@ -34,7 +36,14 @@ type WorkBlock = {
   endedAt: string;
 };
 
-type Block = FlatBlock | WorkBlock;
+type ChangesBlock = {
+  key: string;
+  kind: "changes";
+  files: FileChangeStat[];
+  createdOnly: boolean;
+};
+
+type Block = FlatBlock | WorkBlock | ChangesBlock;
 
 function foldEvents(events: RunEvent[], userPrompt: string | null): Block[] {
   const flat: FlatBlock[] = userPrompt
@@ -43,7 +52,62 @@ function foldEvents(events: RunEvent[], userPrompt: string | null): Block[] {
   const tools = new Map<string, ToolLine>();
   for (const event of events) foldEvent(flat, tools, event);
   const visible = flat.filter((block) => block.kind !== "assistant" || block.text.trim());
-  return groupWork(visible);
+  return appendChangeStats(groupWork(visible));
+}
+
+/** Aggregate write/edit tools into a trailing summary card for the turn. */
+function appendChangeStats(blocks: Block[]): Block[] {
+  const { files, createdOnly } = collectFileChanges(blocks);
+  if (!files.length) return blocks;
+  return [...blocks, { key: "changes", kind: "changes", files, createdOnly }];
+}
+
+function collectFileChanges(blocks: Block[]): {
+  files: FileChangeStat[];
+  createdOnly: boolean;
+} {
+  const byPath = new Map<string, FileChangeStat>();
+  const order: string[] = [];
+  let sawEdit = false;
+  let sawWrite = false;
+  for (const item of workTools(blocks)) {
+    const name = item.tool.toLowerCase();
+    if (name === "edit") sawEdit = true;
+    if (name === "write") sawWrite = true;
+    mergeFileStat(byPath, order, fileChangeStats(item.tool, item.args));
+  }
+  const files = order.flatMap((path) => {
+    const stat = byPath.get(path);
+    return stat ? [stat] : [];
+  });
+  return { files, createdOnly: sawWrite && !sawEdit };
+}
+
+function workTools(blocks: Block[]): ToolLine[] {
+  const tools: ToolLine[] = [];
+  for (const block of blocks) {
+    if (block.kind !== "work") continue;
+    for (const item of block.items) {
+      if (item.kind === "tool") tools.push(item);
+    }
+  }
+  return tools;
+}
+
+function mergeFileStat(
+  byPath: Map<string, FileChangeStat>,
+  order: string[],
+  stat: FileChangeStat | null,
+): void {
+  if (!stat) return;
+  const existing = byPath.get(stat.path);
+  if (existing) {
+    existing.added += stat.added;
+    existing.removed += stat.removed;
+    return;
+  }
+  byPath.set(stat.path, { path: stat.path, added: stat.added, removed: stat.removed });
+  order.push(stat.path);
 }
 
 /** Consecutive tool and log lines collapse into one "Worked for …" group, like Codex. */
@@ -166,16 +230,22 @@ export function ActivityFeed({
   const blocks = useMemo(() => foldEvents(events, userPrompt), [events, userPrompt]);
   if (!blocks.length) return <Empty active={active} />;
 
+  // The trailing change-stats card is not live activity; stream state follows the block before it.
+  let lastActivityIndex = blocks.length - 1;
+  while (lastActivityIndex >= 0 && blocks[lastActivityIndex]?.kind === "changes") {
+    lastActivityIndex -= 1;
+  }
+
   return (
     <div className="flex flex-col gap-6">
       {blocks.map((block, index) => (
         <BlockView
           key={block.key}
           block={block}
-          streaming={active && index === blocks.length - 1}
+          streaming={active && index === lastActivityIndex}
         />
       ))}
-      {active && blocks.at(-1)?.kind !== "work" && (
+      {active && lastActivityIndex >= 0 && blocks[lastActivityIndex]?.kind !== "work" && (
         <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
           <LoaderCircleIcon className="size-3.5 animate-spin" />
           Working…
@@ -203,6 +273,9 @@ function BlockView({ block, streaming }: { block: Block; streaming: boolean }) {
     );
   }
   if (block.kind === "work") return <WorkGroup block={block} streaming={streaming} />;
+  if (block.kind === "changes") {
+    return <ChangeStatsCard files={block.files} createdOnly={block.createdOnly} />;
+  }
   if (block.kind === "status") return <StatusDivider block={block} />;
   return null;
 }
@@ -263,9 +336,9 @@ function ToolRow({ block }: { block: ToolLine }) {
           <span className="truncate font-mono text-xs text-muted-foreground">{summary}</span>
         )}
       </summary>
-      <pre className="ml-5 max-h-64 overflow-auto whitespace-pre-wrap py-1.5 font-mono text-[11px] leading-5 text-muted-foreground/80">
-        {JSON.stringify(block.args, null, 2)}
-      </pre>
+      <div className="py-1.5">
+        <ToolArgsView tool={block.tool} args={block.args} />
+      </div>
     </details>
   );
 }

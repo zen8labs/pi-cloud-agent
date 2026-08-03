@@ -15,6 +15,8 @@ Next.js App Router, React, Tailwind 4, Base UI, and local-source [AI Elements](h
 | `app/settings/page.tsx` | connect and disconnect GitHub and Azure DevOps identities |
 | `app/sessions/[id]/page.tsx` | ordered turns: merged activity, live latest run, real follow-up |
 | `components/ActivityFeed.tsx` | folds the flat event log into a readable conversation |
+| `components/ToolArgsView.tsx` | write/edit tool expansions as line diffs (green/red), else JSON |
+| `components/ChangeStatsCard.tsx` | end-of-turn file change summary (+/− per path) |
 | `components/ChatComposer.tsx` | product wrapper around the AI Elements prompt primitives |
 | `components/StatusBadge.tsx` | the six run statuses, styled from CSS custom properties |
 | `components/ai-elements/` | source-owned conversation, message, and prompt primitives |
