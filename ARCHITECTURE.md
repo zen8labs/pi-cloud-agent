@@ -20,7 +20,7 @@ Everything else follows from this line.
               └──────── outbound HTTP only ────────────────┘
 ```
 
-The controller never dials into a sandbox. The provider lifecycle may create, pause, or reconnect compute, but the runtime always starts from inside the sandbox and calls outward. This keeps E2B today and Docker, Modal, or Daytona later interchangeable without an agent server.
+The controller never dials into a sandbox. The provider lifecycle may create, pause, or reconnect compute, but the runtime always starts from inside the sandbox and calls outward. This keeps local microSandbox, hosted E2B, and future backends interchangeable without an agent server.
 
 The boundary is enforced mechanically, not by convention: `packages/runtime` declares a dependency on `packages/protocol` and nothing else, pnpm's isolated `node_modules` makes an undeclared import unresolvable, and `pnpm boundaries` fails CI on a declared one.
 
@@ -98,7 +98,7 @@ All three live in `packages/protocol`, so an implementation package depends on t
 | Contract | Resolver | Implementations |
 |---|---|---|
 | `Profile` | `getProfile(name)` | `general` (`pr-review` kept dormant as a rebuild seed) |
-| `SandboxProvider` | `createSandboxProvider(name, env)` | `e2b` |
+| `SandboxProvider` | `createSandboxProvider(name, env)` | `microsandbox` (default), `e2b` |
 | `VCSProvider` | `createVcsProvider(name, env)` | `github`, `gitlab`, `bitbucket` |
 
 `TaskSpec` is the pivot: a profile turns a normalized `Trigger` into the repository, the prompt, and an optional budget. Everything below that line is infrastructure; everything above it is a vertical.
@@ -109,4 +109,4 @@ Each factory validates its own slice of the environment, which is why adding a p
 
 The HTTP surface and the reconciler share a process because it is simpler, not because they must. They exchange nothing in memory (all coordination is through Postgres), so splitting them across machines is a deployment decision that needs no code change. That is the payoff for not having an in-process event bus.
 
-The sandbox image is built separately (`pnpm sandbox:template`) and pins the agent harness to the version its bundle was typechecked against. Controller-only changes need a restart, not a template rebuild.
+The sandbox runtime image is built separately (`pnpm sandbox:image`) and pins the agent harness to the version its bundle was typechecked against. The default local provider is microSandbox; hosted E2B remains available with `SANDBOX_PROVIDER=e2b` and uses `pnpm sandbox:template`. Controller-only changes need a restart, not an image rebuild.

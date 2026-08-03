@@ -21,7 +21,7 @@ Separated by what they need to run, so a fresh clone can always run something.
 | `unit` | `pnpm test` | nothing | yes |
 | `integration` | `pnpm test:integration` | Postgres (`pnpm up`) | yes |
 | `e2e` | `pnpm test:e2e` | Postgres, Chromium | yes |
-| `live` | `pnpm test:live` | real E2B + model credentials | **no** |
+| `live` | `pnpm test:live` | real sandbox provider + model credentials | **no** |
 
 `pnpm verify` runs unit and integration. Configuration is in `vitest.config.ts`. Local integration tests create and use `pi_cloud_agent_test`, separate from the development database, so a running controller cannot claim their rows.
 
@@ -71,14 +71,16 @@ it("completeRun returns false when already terminal", …)     // no
 
 ## Live tests
 
-`*.live.test.ts` boots a real sandbox against real credentials from `.env` and costs money. They are excluded from CI and never run automatically.
+`*.live.test.ts` boots a real sandbox against the configured provider and real model credentials from `.env`. They are excluded from CI and never run automatically.
 
 They exist to validate the one thing offline tests cannot: that the sandbox image, harness, model gateway, callback path, Pi checkpoint, and provider pause/resume behavior work together. The live flow creates an uncommitted proof file in turn one and reads it in turn two while asserting the same Pi session and provider workspace continue without another clone.
 
 ```bash
-pnpm sandbox:template
+pnpm sandbox:image
 LIVE_TEST_REPO=owner/repository pnpm test:live
 ```
+
+For E2B, select `SANDBOX_PROVIDER=e2b` and use `pnpm sandbox:template` instead.
 
 The repository must be public or cloneable by the configured forge credential. Without `LIVE_TEST_REPO`, the paid test is skipped.
 

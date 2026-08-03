@@ -14,7 +14,7 @@ And then it runs code from a repository. **Once that happens, both credentials a
 | narrow scope (one repository) | yes, with a GitHub App |
 | short TTL (~1 hour) | yes, with a GitHub App |
 | isolation (one workspace per standalone run or durable session; never reassigned) | yes |
-| process memory discarded between session turns | yes, for the E2B filesystem-only pause |
+| process memory discarded between session turns | yes, for the provider's filesystem-only suspension |
 | the sandbox never holding the token at all | **not yet**: see below |
 
 A GitHub App is preferred for exactly this reason. A personal access token is accepted so a local setup works without registering an App, and it is strictly worse: broad and long-lived. GitLab has no mintable equivalent, so its token is a PAT, worth knowing before pointing it at a sandbox.
@@ -53,7 +53,7 @@ Each run gets a random 32-byte bearer token, compared in constant time. It authe
 
 ### Durable session state is sensitive
 
-A parked filesystem may contain arbitrary repository data, and Pi's JSONL checkpoint may contain prompts, source excerpts, tool arguments, and tool output. They have the same trust classification. E2B suspension retains only the filesystem, not process memory; every turn gets fresh credentials. The git helper stores environment-variable references rather than token values, but untrusted repository code can deliberately write any credential it sees, so a workspace is never reused across sessions and is deleted after `SESSION_WORKSPACE_RETENTION_SECONDS`.
+A parked filesystem may contain arbitrary repository data, and Pi's JSONL checkpoint may contain prompts, source excerpts, tool arguments, and tool output. They have the same trust classification. Provider suspension retains only the filesystem, not process memory; every turn gets fresh credentials. The git helper stores environment-variable references rather than token values, but untrusted repository code can deliberately write any credential it sees, so a workspace is never reused across sessions and is deleted after `SESSION_WORKSPACE_RETENTION_SECONDS`.
 
 The checkpoint is size-limited, stored without interpretation, and available only to the active run through its per-run bearer token. A production deployment should encrypt database storage and backups and apply a session deletion/retention policy appropriate to the repository data.
 

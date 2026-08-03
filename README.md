@@ -68,7 +68,7 @@ The split is by **substitutability and trust**, not by feature. `packages/runtim
 - [DeepWiki](https://deepwiki.com/zen8labs/pi-cloud-agent): a deep dive into the project's architecture and design
 - [VISION.md](VISION.md): what this is for, and what it will refuse to become
 - [ARCHITECTURE.md](ARCHITECTURE.md): the two trust zones and the run lifecycle
-- [DEVELOPMENT.md](DEVELOPMENT.md): complete local setup, E2B template, ngrok, and first run
+- [DEVELOPMENT.md](DEVELOPMENT.md): complete local setup, microSandbox image, optional E2B template, and first run
 - [AGENTS.md](AGENTS.md): index for coding agents, plus the enforced rules
 - [docs/](docs/): durable sessions, resumability, secrets, testing, operations, extension guides
 

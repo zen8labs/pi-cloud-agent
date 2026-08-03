@@ -1,6 +1,6 @@
 # @pi-cloud-agent/sandbox
 
-Where a run's compute comes from. Standalone runs use two methods:
+Where a run's compute comes from. The default backend is local microSandbox; hosted E2B remains available as an explicit alternative. Standalone runs use two methods:
 
 ```ts
 create(spec: SandboxSpec): Promise<SandboxRef>
@@ -21,7 +21,8 @@ open an inbound application connection to the sandbox. See
 | File | Role |
 |---|---|
 | `index.ts` | the `FACTORIES` registry, `createSandboxProvider`, `sandboxProviderNames` |
-| `e2b.ts` | E2B: create/kill plus filesystem-only pause/resume |
+| `microsandbox.ts` | microSandbox: local OCI microVM create/kill plus stop/start resume |
+| `e2b.ts` | E2B: hosted create/kill plus filesystem-only pause/resume |
 | `registry.test.ts` | the registry contract: construction and its failure messages |
 
 ## Invariants
@@ -35,6 +36,16 @@ open an inbound application connection to the sandbox. See
 - **Secrets are opened here and only here.** `spec.secrets` holds `Secret` objects; `expose()` is called at the boundary where they must become plain strings to cross into the machine.
 - **Never derive behavior from `spec.runId`.** It is correlation only. A provider that special-cases a run is a provider that cannot be swapped.
 - **Each factory validates its own environment.** That is why adding a backend needs no change to the controller's config schema.
+
+## Notes on providers
+
+microSandbox consumes an OCI image. Build the repository's local runtime image with `pnpm sandbox:image`; the command imports the Docker-built archive into the microSandbox cache. `MICROSANDBOX_IMAGE` can point at a different local image or registry reference. The provider overrides the image entrypoint with an inert command and starts the per-run runtime explicitly so credentials and run values are not baked into the image.
+
+microSandbox's default root filesystem is persisted by stopping and restarting the named sandbox. Its snapshots are an optional filesystem-only optimization; they do not preserve process memory.
+
+E2B remains selectable with `SANDBOX_PROVIDER=e2b` and uses its hosted template workflow.
+
+For deployment, build the image with an immutable registry tag and push it to an OCI-compatible registry. Set `MICROSANDBOX_IMAGE` to that reference on the machine that runs the controller and microSandbox, or pre-load the image with `msb load` on that machine. The local `pi-cloud-agent:local` tag is not a production artifact name and is not automatically visible on another host.
 
 ## Note on E2B
 

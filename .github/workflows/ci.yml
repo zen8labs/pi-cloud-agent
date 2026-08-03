@@ -79,8 +79,9 @@ jobs:
         env:
           CI: "true"
           DATABASE_URL: postgres://pi_cloud_agent:pi_cloud_agent@localhost:5532/pi_cloud_agent
-          # Present so the e2b provider constructs at boot; provisioning then
-          # fails authentication, which is the failure the test watches for.
+          # This browser test deliberately exercises the hosted-provider failure
+          # surface without requiring a local microVM or a runtime image.
+          SANDBOX_PROVIDER: e2b
           E2B_API_KEY: ci-dummy-no-sandbox
       - uses: actions/upload-artifact@v7
         if: failure()
@@ -121,5 +122,4 @@ jobs:
         run: pnpm --filter @pi-cloud-agent/web build
       - name: Sandbox runtime bundle
         run: pnpm --filter @pi-cloud-agent/runtime build
-
 

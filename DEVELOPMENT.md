@@ -1,17 +1,17 @@
 # Development
 
-This guide takes a new checkout from zero to a real agent run. It covers the local services, E2B sandbox template, public callback tunnel, model gateway, and the checks to run before opening a pull request.
+This guide takes a new checkout from zero to a real agent run. The default path uses a local microSandbox VM and a local controller callback. E2B remains an optional hosted backend when you need it.
 
-The important network constraint is simple: the controller never connects to an E2B sandbox. The sandbox calls the controller over `CONTROL_PLANE_URL`, so that URL must be public and reachable for the entire run.
+The important network constraint is simple: the controller never connects to a sandbox. The sandbox calls the controller over `CONTROL_PLANE_URL`, so that URL must be reachable from the selected provider for the entire run.
 
 ## 1. Create the required accounts
 
 You need:
 
-- An [E2B account](https://e2b.dev/docs) for hosted sandboxes. Create an API key in the E2B dashboard. The application uses this as `E2B_API_KEY`.
-- An [ngrok account](https://dashboard.ngrok.com/signup) for a stable HTTPS callback into the local controller. Copy the authtoken from the ngrok dashboard. If your account has a development domain, use it so `CONTROL_PLANE_URL` does not change whenever ngrok restarts.
+- Docker Desktop, because the local runtime image is built from `packages/runtime/Dockerfile.sandbox`.
 - Credentials for an OpenAI-compatible model gateway. The default configuration expects the MiniMax model through an AI gateway, but any compatible endpoint can be used if `AGENT_MODEL`, `AIGATEWAY_BASE_URL`, and `AIGATEWAY_API_KEY` agree.
 - Optional forge credentials. Public GitHub repositories work read-only without a token. Set `GITHUB_TOKEN` for private repositories or agent actions such as pushing commits and posting comments. A GitHub App is preferred for scoped, short-lived credentials; see [docs/secrets.md](docs/secrets.md).
+- An [E2B account](https://e2b.dev/docs) and an [ngrok account](https://dashboard.ngrok.com/signup) only if you select `SANDBOX_PROVIDER=e2b`.
 
 E2B sandboxes and model requests cost money. Live tests never run in CI.
 
@@ -22,7 +22,7 @@ Install:
 - Node.js 22.19 or newer
 - pnpm 11.1.3 (the version pinned in `package.json`)
 - Docker with Docker Compose
-- ngrok
+- ngrok, only when using E2B
 
 On macOS with Homebrew:
 
@@ -53,7 +53,30 @@ pnpm exec playwright install chromium
 
 `.env` contains credentials and is gitignored. Never commit it or paste its contents into logs or issues.
 
-## 4. Configure ngrok
+## 4. Configure the local sandbox
+
+The default provider is microSandbox. It runs a hardware-isolated local VM and reaches the host controller at `host.microsandbox.internal`. The provider allows only the configured controller port on the host when `MICROSANDBOX_ALLOW_HOST=true`; it does not grant unrestricted host access.
+
+Build the OCI image after installing dependencies:
+
+```bash
+pnpm sandbox:image
+```
+
+The command builds `pi-cloud-agent:local` and loads the Docker archive into the microSandbox image cache. It is the default `MICROSANDBOX_IMAGE`. Keep these values in `.env`:
+
+```dotenv
+SANDBOX_PROVIDER=microsandbox
+CONTROL_PLANE_URL=http://host.microsandbox.internal:8080
+MICROSANDBOX_IMAGE=pi-cloud-agent:local
+MICROSANDBOX_ALLOW_HOST=true
+```
+
+The image's normal command is overridden by the provider. The controller injects the run environment and starts `/app/run.js` only after the VM is ready.
+
+`pi-cloud-agent:local` is only a local image tag. For deployment, publish the same image to an OCI registry with an immutable tag, for example `ghcr.io/your-org/pi-cloud-agent:<git-sha>`, and set `MICROSANDBOX_IMAGE` to that reference on the controller host. The machine running the controller must also run microSandbox with Apple Silicon or Linux KVM; this provider does not turn microVM creation into a remote SaaS API.
+
+## 5. Configure ngrok for E2B (optional)
 
 Authenticate the ngrok agent once:
 
@@ -76,6 +99,7 @@ ngrok http 8080
 Copy the HTTPS forwarding URL into `.env`:
 
 ```dotenv
+SANDBOX_PROVIDER=e2b
 CONTROL_PLANE_URL=https://<your-domain>.ngrok.app
 ```
 
@@ -87,9 +111,9 @@ The controller is not running yet, so an ngrok `502 Bad Gateway` at this point i
 curl https://<your-domain>.ngrok.app/healthz
 ```
 
-## 5. Configure E2B and the model
+## 6. Configure E2B and the model
 
-Fill the following values in `.env`:
+When using E2B, fill the following values in `.env`:
 
 ```dotenv
 E2B_API_KEY=<your-e2b-api-key>
@@ -131,7 +155,9 @@ Rebuild the template after changing:
 
 Controller and dashboard changes do not require a template rebuild.
 
-## 6. Configure repository access
+The model settings are used by both providers.
+
+## 7. Configure repository access
 
 For a first read-only run against a public GitHub repository, forge credentials may remain empty. To list private repositories or let the agent actuate changes, configure one of:
 
@@ -152,11 +178,11 @@ WEB_REPOS=owner/repository,owner/another-repository
 
 An empty `WEB_REPOS` asks the configured VCS provider what it can access. The dashboard also has a `Custom…` option for entering any `owner/repository`.
 
-## 7. Start the development stack
+## 8. Start the development stack
 
 Use separate terminals so logs remain readable.
 
-Terminal 1 — ngrok, if it is not already running:
+Terminal 1 — ngrok, only when using E2B:
 
 ```bash
 ngrok http --url <your-domain>.ngrok.app 8080
@@ -175,10 +201,15 @@ Terminal 3 — controller:
 pnpm controller
 ```
 
-Confirm both the local and public health endpoints:
+Confirm the local health endpoint:
 
 ```bash
 curl http://localhost:8080/healthz
+```
+
+When using E2B, also confirm the public endpoint:
+
+```bash
 curl https://<your-domain>.ngrok.app/healthz
 ```
 
@@ -198,7 +229,7 @@ curl -sS -X POST http://localhost:8080/runs \
   -d '{"repo":"owner/repository","prompt":"Report the latest commit.","profile":"general"}'
 ```
 
-## 8. Validate changes
+## 9. Validate changes
 
 The normal CI-equivalent check is:
 
@@ -217,12 +248,14 @@ pnpm test:e2e
 pnpm docs:check
 ```
 
-After changing the runtime, template, sandbox provider, callback handling, or model configuration, rebuild the template and run the paid live suite:
+After changing the runtime, image, sandbox provider, callback handling, or model configuration, rebuild the local image or E2B template and run the live suite:
 
 ```bash
-pnpm sandbox:template
+pnpm sandbox:image
 LIVE_TEST_REPO=owner/repository pnpm test:live
 ```
+
+For E2B, use `pnpm sandbox:template` instead of `pnpm sandbox:image`.
 
 `LIVE_TEST_REPO` must name a repository the configured forge credential can clone, or a public repository when running without forge credentials. Without it, the live test is intentionally skipped and does not validate a sandbox or model request.
 
@@ -233,6 +266,8 @@ See [docs/testing.md](docs/testing.md) for test boundaries and [docs/operations.
 | Symptom | Check |
 |---|---|
 | Controller rejects configuration | Compare `.env` with `.env.example`; do not leave the database URL missing. |
+| microSandbox cannot boot | Confirm Docker is running, `pnpm sandbox:image` completed, and the host supports Apple Silicon or Linux KVM. |
+| Local sandbox cannot report events | Confirm the controller log shows `controlPlaneUrl=http://host.microsandbox.internal:8080`, keep `MICROSANDBOX_ALLOW_HOST=true`, and restart the controller after changing `.env`. A stale ngrok/cloudflared URL is not repaired by changing the provider. |
 | Template build returns 401 | Run `pnpm --filter @pi-cloud-agent/runtime exec e2b auth login` again and confirm the E2B account/team. |
 | Sandbox cannot be created | Confirm `E2B_API_KEY`, `E2B_TEMPLATE=pi-cloud-agent`, and that `pnpm sandbox:template` completed. |
 | Run has no events and later reports `sandbox went silent` | Verify ngrok is running, the public `/healthz` endpoint works, and the controller was restarted after changing `CONTROL_PLANE_URL`. |
@@ -246,4 +281,4 @@ Stop the local containers when finished:
 pnpm down
 ```
 
-Stopping the controller or ngrok does not stop Postgres. E2B sandboxes are reclaimed by the reconciler after terminal runs, cancellation, or timeout.
+Stopping the controller or ngrok does not stop Postgres. Sandboxes are reclaimed by the reconciler after terminal runs, cancellation, or timeout.

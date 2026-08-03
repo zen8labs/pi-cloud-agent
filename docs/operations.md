@@ -4,15 +4,22 @@ Running it, watching it, and working out what went wrong.
 
 ## Local setup
 
-For first-time account setup, dependencies, E2B template creation, ngrok, and the first real run, follow [DEVELOPMENT.md](../DEVELOPMENT.md). This document assumes the development environment is configured and focuses on operating it.
+For first-time account setup, dependencies, local microSandbox image creation, and the first real run, follow [DEVELOPMENT.md](../DEVELOPMENT.md). This document assumes the development environment is configured and focuses on operating it.
 
 `.env` at the repository root configures the controller. It is gitignored and holds live credentials. **Never print its values.**
 
 ### The one setting people get wrong
 
-`CONTROL_PLANE_URL` must be reachable **from inside the sandbox**, because the sandbox is outbound-only and reports back over it. With a hosted provider like E2B, `http://localhost:8080` is unreachable and every run goes silent until the reconciler times it out.
+`CONTROL_PLANE_URL` must be reachable **from inside the sandbox**, because the sandbox is outbound-only and reports back over it. With the default local microSandbox provider, use its host gateway:
 
-Use the authenticated ngrok tunnel configured during development:
+```dotenv
+CONTROL_PLANE_URL=http://host.microsandbox.internal:8080
+MICROSANDBOX_ALLOW_HOST=true
+```
+
+With a hosted provider like E2B, `http://localhost:8080` is unreachable and every run goes silent until the reconciler times it out.
+
+For E2B, use the authenticated ngrok tunnel configured during development:
 
 ```bash
 ngrok http --url <your-domain>.ngrok.app 8080
@@ -20,9 +27,15 @@ ngrok http --url <your-domain>.ngrok.app 8080
 
 Set `CONTROL_PLANE_URL` to that HTTPS URL and restart the controller after any change. A run that provisions, produces no events, and fails ten minutes later with "stopped reporting" is almost always this.
 
-## When to rebuild the sandbox template
+## When to rebuild the sandbox image or template
 
-Rebuild after changing `packages/runtime/**`, `Dockerfile.sandbox`, or the pinned agent harness version:
+Rebuild the local image after changing `packages/runtime/**`, `Dockerfile.sandbox`, or the pinned agent harness version:
+
+```bash
+pnpm sandbox:image
+```
+
+For E2B, rebuild the hosted template instead:
 
 ```bash
 pnpm sandbox:template
@@ -87,8 +100,8 @@ The terminal evidence is a `status` event followed by the run row reaching `succ
 | Symptom | Cause | Where to look |
 |---|---|---|
 | stuck in `queued` | reconciler not running, or `SANDBOX_PROVIDER` misconfigured | controller logs at startup |
-| `failed` immediately, "could not create a sandbox" | bad `E2B_API_KEY`, or the template does not exist | `pnpm sandbox:template` |
-| `running`, no events, fails with "stopped reporting" | `CONTROL_PLANE_URL` unreachable from the sandbox | the tunnel |
+| `failed` immediately, "could not create a sandbox" | bad provider configuration, missing local image, or missing E2B template | `pnpm sandbox:image` or `pnpm sandbox:template` |
+| `running`, no events, fails with "stopped reporting" | `CONTROL_PLANE_URL` is unreachable from the sandbox | the controller log, `msb logs <sandbox-id>`, and the selected provider's network path |
 | events stop mid-run, then "wall-clock budget" | the agent genuinely ran long | `RUN_WALL_CLOCK_SECONDS` |
 | `git.clone_branch_failed` then a successful clone | the named branch is gone; fell back to the default | benign |
 | `attempt` climbing | retryable provisioning failures | the provider's error in the logs |
@@ -116,9 +129,11 @@ On `SIGINT`/`SIGTERM` the reconciler stops claiming and drains in-flight provisi
 Costs money; needs real credentials in `.env`.
 
 ```bash
-pnpm sandbox:template
+pnpm sandbox:image
 LIVE_TEST_REPO=owner/repository pnpm test:live
 ```
+
+For E2B, select `SANDBOX_PROVIDER=e2b` and use `pnpm sandbox:template`.
 
 Or by hand:
 

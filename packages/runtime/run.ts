@@ -21,18 +21,25 @@ const clean = createRuntimeRedactor();
 async function main(): Promise<void> {
   const config = readConfig();
   const reporter = createReporter(config);
+  let stage = "configuration";
 
   try {
+    stage = "git credentials";
     await configureGitCredentials(config, reporter);
+    stage = "repository checkout";
     const workspace = await prepareCheckout(config, reporter);
-    if (workspace === "created") await runSetupScript(config, reporter);
+    if (workspace === "created") {
+      stage = "repository setup";
+      await runSetupScript(config, reporter);
+    }
+    stage = "agent session";
     await runAgentSession(config, reporter);
 
     // Drain telemetry first so the feed is complete before the run closes.
     await reporter.flush();
     await reporter.status({ status: "done" });
   } catch (error) {
-    const detail = clean(error instanceof Error ? error.message : String(error));
+    const detail = clean(`${stage}: ${error instanceof Error ? error.message : String(error)}`);
     process.stderr.write(`run failed: ${detail}\n`);
     await reporter.flush().catch(() => undefined);
     await reporter.status({ status: "error", detail });

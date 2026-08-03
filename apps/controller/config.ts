@@ -47,10 +47,10 @@ const schema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
 
   /**
-   * Where the sandbox dials back. Must be reachable from inside the sandbox,
-   * so for a hosted provider this is a public URL, not localhost.
+   * Where the sandbox dials back. The local microSandbox provider reaches the
+   * host through its internal gateway; hosted providers need their own URL.
    */
-  CONTROL_PLANE_URL: z.string().url().default("http://localhost:8080"),
+  CONTROL_PLANE_URL: z.string().url().default("http://host.microsandbox.internal:8080"),
 
   /** provider/model. The provider segment names an OpenAI-compatible gateway. */
   AGENT_MODEL: z.string().min(1).default("aigateway/MiniMax/MiniMax-M2.7"),
@@ -59,7 +59,7 @@ const schema = z.object({
   MODEL_CONTEXT_WINDOW: z.coerce.number().int().positive().default(196_608),
   MODEL_MAX_TOKENS: z.coerce.number().int().positive().default(32_000),
 
-  SANDBOX_PROVIDER: z.string().default("e2b"),
+  SANDBOX_PROVIDER: z.string().default("microsandbox"),
   SANDBOX_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(3900),
   RUN_WALL_CLOCK_SECONDS: z.coerce.number().int().positive().default(3600),
   SESSION_WORKSPACE_RETENTION_SECONDS: z.coerce.number().int().positive().default(604_800),
