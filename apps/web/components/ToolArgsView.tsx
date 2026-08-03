@@ -137,7 +137,18 @@ export function fileChangeStats(
   return { path: diff.path, added: diff.added, removed: diff.removed };
 }
 
-export function ToolArgsView({ tool, args }: { tool: string; args: Record<string, unknown> }) {
+export function ToolArgsView({
+  tool,
+  args,
+  output = null,
+}: {
+  tool: string;
+  args: Record<string, unknown>;
+  output?: string | null;
+}) {
+  const shell = shellCommand(tool, args);
+  if (shell !== null) return <ShellView command={shell} output={output ?? ""} />;
+
   const diff = buildFileDiff(tool, args);
   if (!diff) {
     return (
@@ -147,6 +158,27 @@ export function ToolArgsView({ tool, args }: { tool: string; args: Record<string
     );
   }
   return <FileDiffView diff={diff} />;
+}
+
+function shellCommand(tool: string, args: Record<string, unknown>): string | null {
+  const name = tool.toLowerCase();
+  if (name !== "bash" && name !== "shell") return null;
+  return asString(args.command) ?? asString(args.cmd);
+}
+
+function ShellView({ command, output }: { command: string; output: string }) {
+  return (
+    <div className="ml-5 overflow-hidden rounded-md border border-border/80 bg-zinc-950 text-zinc-100 dark:bg-black/50">
+      <div className="border-b border-white/10 px-2.5 py-1 text-[10px] font-medium tracking-wide text-zinc-400">
+        Shell
+      </div>
+      <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all px-2.5 py-2 font-mono text-[11px] leading-5">
+        <span className="text-zinc-500">$ </span>
+        <span className="text-zinc-100">{command}</span>
+        {output ? <span className="text-zinc-400">{`\n${output}`}</span> : null}
+      </pre>
+    </div>
+  );
 }
 
 function FileDiffView({ diff }: { diff: FileDiff }) {

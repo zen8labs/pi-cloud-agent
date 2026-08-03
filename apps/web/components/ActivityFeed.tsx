@@ -1,7 +1,7 @@
 "use client";
 
 import type { RunEvent, RunStatus } from "@pi-cloud-agent/protocol";
-import { ChevronRightIcon, LoaderCircleIcon, XIcon } from "lucide-react";
+import { ChevronRightIcon, LoaderCircleIcon, SquareTerminalIcon, XIcon } from "lucide-react";
 import { useMemo } from "react";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
 import { ChangeStatsCard } from "@/components/ChangeStatsCard";
@@ -15,6 +15,7 @@ type ToolLine = {
   args: Record<string, unknown>;
   status: string;
   callId: string;
+  output: string | null;
   at: string;
 };
 
@@ -161,10 +162,12 @@ function foldToken(blocks: FlatBlock[], event: RunEvent): void {
 
 function foldTool(blocks: FlatBlock[], tools: Map<string, ToolLine>, event: RunEvent): void {
   const callId = String(event.data?.callId ?? "");
+  const output = toolOutput(event.data?.output);
   const existing = callId ? tools.get(callId) : undefined;
   if (existing) {
     existing.status = String(event.data?.status ?? existing.status);
     existing.at = event.at;
+    if (output !== null) existing.output = output;
     return;
   }
   const block: ToolLine = {
@@ -174,10 +177,15 @@ function foldTool(blocks: FlatBlock[], tools: Map<string, ToolLine>, event: RunE
     args: (event.data?.args as Record<string, unknown>) ?? {},
     status: String(event.data?.status ?? "running"),
     callId,
+    output,
     at: event.at,
   };
   if (callId) tools.set(callId, block);
   blocks.push(block);
+}
+
+function toolOutput(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
 }
 
 /** The stream reports "done"/"error"; the mirrored terminal event carries a RunStatus. */
@@ -321,6 +329,32 @@ function ToolRow({ block }: { block: ToolLine }) {
   const failed = block.status === "error";
   const running = block.status !== "completed" && !failed;
   const summary = toolSummary(block.tool, block.args);
+  const shell = isShellTool(block.tool);
+  const label = (
+    <>
+      <span className="shrink-0 font-medium text-foreground/85">{toolVerb(block.tool)}</span>
+      {summary ? (
+        <span className="truncate font-mono text-xs text-muted-foreground">{summary}</span>
+      ) : null}
+    </>
+  );
+
+  // Read already shows the path in the summary; expanding only repeats it as JSON.
+  if (block.tool.toLowerCase() === "read") {
+    return (
+      <div className="flex min-w-0 items-center gap-1.5 py-1 text-[13px]">
+        {running ? (
+          <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+        ) : failed ? (
+          <XIcon className="size-3.5 shrink-0 text-[var(--status-failed)]" />
+        ) : (
+          <span className="size-3.5 shrink-0" aria-hidden />
+        )}
+        {label}
+      </div>
+    );
+  }
+
   return (
     <details className="activity-line group/line">
       <summary className="flex min-w-0 cursor-pointer list-none select-none items-center gap-1.5 py-1 text-[13px]">
@@ -328,19 +362,23 @@ function ToolRow({ block }: { block: ToolLine }) {
           <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
         ) : failed ? (
           <XIcon className="size-3.5 shrink-0 text-[var(--status-failed)]" />
+        ) : shell ? (
+          <SquareTerminalIcon className="size-3.5 shrink-0 text-muted-foreground/70" />
         ) : (
           <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/60 transition-transform group-open/line:rotate-90" />
         )}
-        <span className="shrink-0 font-medium text-foreground/85">{toolVerb(block.tool)}</span>
-        {summary && (
-          <span className="truncate font-mono text-xs text-muted-foreground">{summary}</span>
-        )}
+        {label}
       </summary>
       <div className="py-1.5">
-        <ToolArgsView tool={block.tool} args={block.args} />
+        <ToolArgsView tool={block.tool} args={block.args} output={block.output} />
       </div>
     </details>
   );
+}
+
+function isShellTool(tool: string): boolean {
+  const name = tool.toLowerCase();
+  return name === "bash" || name === "shell";
 }
 
 function LogRow({ text }: { text: string }) {
@@ -394,6 +432,7 @@ const TOOL_VERBS: Record<string, string> = {
   edit: "Edited",
   write: "Wrote",
   bash: "Ran",
+  shell: "Ran",
   grep: "Searched",
   glob: "Found files",
   list: "Listed",
@@ -411,6 +450,7 @@ function toolSummary(tool: string, args: Record<string, unknown>): string {
     case "write":
       return values.filePath || values.path || "";
     case "bash":
+    case "shell":
       return values.command || values.cmd || "";
     case "grep":
       return values.pattern ? `for “${values.pattern}”` : "";
