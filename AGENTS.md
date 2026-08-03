@@ -122,7 +122,7 @@ For reversible, local, within-contract work, just proceed.
 
 ## Design philosophy: think in primitives, not features
 
-The primitive is the product; workflows outlast technologies. Pi, E2B, and MiniMax are implementation details. `TaskSpec`, `Profile`, `SandboxProvider`, and `VCSProvider` are the product.
+The primitive is the product; workflows outlast technologies. Pi, sandbox providers, and model gateways are implementation details. `TaskSpec`, `Profile`, `SandboxProvider`, and `VCSProvider` are the product.
 
 - Start from the outcome, then find the smallest stable abstraction that enables it. Do not add a feature where a sharper primitive would do.
 - Treat every new feature as a liability. The default answer to "should we add this?" is "not yet, and probably not here."

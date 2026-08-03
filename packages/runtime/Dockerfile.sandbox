@@ -3,7 +3,7 @@
 # No credential is baked in. The controller injects a scoped forge token and the
 # model key per run, and they live only in that run's process environment.
 #
-# Build with: pnpm sandbox:template
+# Build with: pnpm sandbox:image (or pnpm sandbox:template for E2B)
 FROM node:22-bookworm-slim
 
 ENV NODE_ENV=production \
@@ -40,7 +40,7 @@ COPY dist/run.js /app/run.js
 # Where the repository is cloned and the agent works.
 RUN mkdir -p /workspace/.pi-cloud-agent \
     && chmod 1777 /workspace \
-    && chown user:user /workspace/.pi-cloud-agent \
+    && chown node:node /workspace/.pi-cloud-agent \
     && chmod 700 /workspace/.pi-cloud-agent
 
 # E2B runs a template's start command at build time, so the real per-run command

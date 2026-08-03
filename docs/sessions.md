@@ -82,9 +82,11 @@ resume(workspace, spec): sandbox
 delete(workspace): void
 ```
 
-The references are opaque to the controller. E2B implements suspension as a
-filesystem-only pause, so process memory and old per-run credentials are not
-retained. Another provider may use a stopped VM, snapshot, archive, or volume.
+The references are opaque to the controller. The default microSandbox provider
+implements suspension by stopping the VM, so its filesystem survives while
+process memory and old per-run credentials do not. E2B implements the same
+filesystem-only contract through pause. Another provider may use a snapshot,
+archive, or volume.
 
 When idle retention expires, the reconciler deletes the provider workspace but
 keeps the session and Pi checkpoint. The next turn recreates the checkout and

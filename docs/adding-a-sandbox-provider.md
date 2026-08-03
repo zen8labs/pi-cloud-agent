@@ -123,7 +123,7 @@ throw new SandboxError("api unavailable", { retryable: true, cause });
 
 ## The outbound-only rule in practice
 
-Your sandbox must be able to reach `CONTROL_PLANE_URL` over HTTPS. That is the only network requirement, and it is what makes providers interchangeable.
+Your sandbox must be able to reach `CONTROL_PLANE_URL` using the transport supported by the selected environment. Hosted providers generally need HTTPS; the default local microSandbox provider uses the host gateway over HTTP during development. That is the only network requirement, and it is what makes providers interchangeable.
 
 For a local Docker provider that means the controller has to be reachable from inside the container: `http://host.docker.internal:8080` on macOS and Windows, or `--add-host=host.docker.internal:host-gateway` on Linux.
 

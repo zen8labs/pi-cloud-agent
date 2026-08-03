@@ -1,5 +1,6 @@
 import type { SandboxProvider } from "@pi-cloud-agent/protocol";
 import { createE2BProvider } from "./e2b";
+import { createMicroSandboxProvider } from "./microsandbox";
 
 /**
  * @pi-cloud-agent/sandbox — where a run's compute comes from.
@@ -17,6 +18,7 @@ type Factory = (env: Env) => SandboxProvider;
 
 const FACTORIES: Record<string, Factory> = {
   e2b: createE2BProvider,
+  microsandbox: createMicroSandboxProvider,
 };
 
 export function createSandboxProvider(name: string, env: Env): SandboxProvider {
@@ -32,4 +34,4 @@ export function sandboxProviderNames(): string[] {
   return Object.keys(FACTORIES).sort();
 }
 
-export { createE2BProvider };
+export { createE2BProvider, createMicroSandboxProvider };

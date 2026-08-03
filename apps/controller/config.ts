@@ -38,19 +38,19 @@ const schema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
 
   /**
-   * Where the sandbox dials back. Must be reachable from inside the sandbox,
-   * so for a hosted provider this is a public URL, not localhost.
+   * Where the sandbox dials back. The local microSandbox provider reaches the
+   * host through its internal gateway; hosted providers need their own URL.
    */
-  CONTROL_PLANE_URL: z.string().url().default("http://localhost:8080"),
+  CONTROL_PLANE_URL: z.string().url().default("http://host.microsandbox.internal:8080"),
 
   /** provider/model. The provider segment names an OpenAI-compatible gateway. */
-  AGENT_MODEL: z.string().min(1).default("aigateway/MiniMax/MiniMax-M2.7"),
+  AGENT_MODEL: z.string().min(1).default("openai/gpt-5.6-sol"),
   AIGATEWAY_BASE_URL: z.string().default(""),
   AIGATEWAY_API_KEY: z.string().default(""),
   MODEL_CONTEXT_WINDOW: z.coerce.number().int().positive().default(196_608),
   MODEL_MAX_TOKENS: z.coerce.number().int().positive().default(32_000),
 
-  SANDBOX_PROVIDER: z.string().default("e2b"),
+  SANDBOX_PROVIDER: z.string().default("microsandbox"),
   SANDBOX_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(3900),
   RUN_WALL_CLOCK_SECONDS: z.coerce.number().int().positive().default(3600),
   SESSION_WORKSPACE_RETENTION_SECONDS: z.coerce.number().int().positive().default(604_800),
@@ -78,7 +78,7 @@ export interface Config {
   databaseUrl: string;
   controlPlaneUrl: string;
   model: {
-    /** Full id as written in config, e.g. "aigateway/MiniMax/MiniMax-M2.7". */
+    /** Full id as written in config, e.g. "openai/gpt-5.6-sol". */
     id: string;
     /** The gateway name — the first path segment. */
     provider: string;
@@ -125,6 +125,15 @@ function build(env: Env): Config {
     );
   }
 
+  const corsOrigins = value.WEB_CORS_ORIGINS.split(",")
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0);
+  if (corsOrigins.includes("*")) {
+    throw new Error(
+      "WEB_CORS_ORIGINS must list explicit origins because dashboard requests use credentials",
+    );
+  }
+
   const separator = value.AGENT_MODEL.indexOf("/");
   if (separator <= 0 || separator === value.AGENT_MODEL.length - 1) {
     throw new Error(`AGENT_MODEL must be "provider/model", got "${value.AGENT_MODEL}"`);
@@ -152,9 +161,7 @@ function build(env: Env): Config {
     sessionWorkspaceRetentionSeconds: value.SESSION_WORKSPACE_RETENTION_SECONDS,
     web: {
       url: value.WEB_URL.replace(/\/$/, ""),
-      corsOrigins: value.WEB_CORS_ORIGINS.split(",")
-        .map((origin) => origin.trim())
-        .filter((origin) => origin.length > 0),
+      corsOrigins,
     },
     auth: {
       requireUser,

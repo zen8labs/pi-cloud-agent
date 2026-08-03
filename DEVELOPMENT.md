@@ -1,264 +1,136 @@
 # Development
 
-This guide takes a new checkout from zero to a real agent run. It covers the local services, E2B sandbox template, public callback tunnel, model gateway, and the checks to run before opening a pull request.
+## Quick start
 
-The important network constraint is simple: the controller never connects to an E2B sandbox. The sandbox calls the controller over `CONTROL_PLANE_URL`, so that URL must be public and reachable for the entire run.
+### Prerequisites
 
-## 1. Create the required accounts
+Install Node.js 22.19 or newer, pnpm 11.1.3, and Docker Desktop. The default sandbox provider is local microSandbox, so Docker and Apple Silicon or Linux KVM are required. You also need a [GitHub App](#github-app-setup) and an OpenAI-compatible model gateway.
 
-You need:
+### 1. Configure credentials
 
-- An [E2B account](https://e2b.dev/docs) for hosted sandboxes. Create an API key in the E2B dashboard. The application uses this as `E2B_API_KEY`.
-- An [ngrok account](https://dashboard.ngrok.com/signup) for a stable HTTPS callback into the local controller. Copy the authtoken from the ngrok dashboard. If your account has a development domain, use it so `CONTROL_PLANE_URL` does not change whenever ngrok restarts.
-- Credentials for an OpenAI-compatible model gateway. The default configuration expects the MiniMax model through an AI gateway, but any compatible endpoint can be used if `AGENT_MODEL`, `AIGATEWAY_BASE_URL`, and `AIGATEWAY_API_KEY` agree.
-- A GitHub App and, optionally, an Azure DevOps Microsoft Entra app. GitHub App authorization creates the application session and GitHub connection; Azure DevOps is connected later from Settings. See the GitHub App setup instructions below.
-
-E2B sandboxes and model requests cost money. Live tests never run in CI.
-
-## 2. Install local tools
-
-Install:
-
-- Node.js 22.19 or newer
-- pnpm 11.1.3 (the version pinned in `package.json`)
-- Docker with Docker Compose
-- ngrok
-
-On macOS with Homebrew:
+Create the environment file:
 
 ```bash
-brew install node ngrok/ngrok/ngrok
-brew install --cask docker
-npm install --global pnpm@11.1.3
+cp .env.example .env
 ```
 
-Start Docker Desktop, then verify the tools:
+Fill these values in `.env`:
 
-```bash
-node --version
-pnpm --version
-docker compose version
-ngrok version
+```dotenv
+AIGATEWAY_BASE_URL=https://<your-openai-compatible-gateway>/v1
+AIGATEWAY_API_KEY=<your-model-api-key>
+
+APP_SESSION_SECRET=<at-least-32-random-characters>
+VCS_ENCRYPTION_KEY=<64-hex-characters>
+
+GITHUB_APP_CLIENT_ID=<github-app-client-id>
+GITHUB_APP_CLIENT_SECRET=<github-app-client-secret>
 ```
 
-## 3. Install the workspace
+For direct OpenAI API access, use `AGENT_MODEL=openai/gpt-5.6-sol`, `AIGATEWAY_BASE_URL=https://api.openai.com/v1`, and an OpenAI API key. The `openai/` prefix selects the provider in this application; only `gpt-5.6-sol` is sent as the model name to OpenAI.
+
+Keep the default local sandbox values unless you are intentionally using E2B.
+
+Configure the GitHub App callback as `http://localhost:8080/auth/github/callback`. The dashboard requires GitHub App sign-in by default, so `APP_SESSION_SECRET`, `GITHUB_APP_CLIENT_ID`, and `GITHUB_APP_CLIENT_SECRET` must be valid before the controller starts.
+
+### 2. Run setup
 
 From the repository root:
 
 ```bash
-pnpm install
-cp .env.example .env
-pnpm exec playwright install chromium
+make setup
 ```
 
-`.env` contains credentials and is gitignored. Never commit it or paste its contents into logs or issues.
+This installs the locked dependencies, starts the local Postgres container, applies migrations, builds the runtime image, and loads it into the microSandbox image cache. It is safe to run again after pulling changes.
 
-## 4. Configure ngrok
-
-Authenticate the ngrok agent once:
+### 3. Start development
 
 ```bash
-ngrok config add-authtoken <your-ngrok-authtoken>
+make dev
 ```
 
-Start the controller tunnel in its own terminal. Prefer the development domain assigned in the ngrok dashboard:
+This starts Postgres if needed, applies pending migrations, and launches the controller on port 8080 and the dashboard on port 3000 through one Turbo process. Open [http://localhost:3000](http://localhost:3000), sign in with GitHub, select a repository, and start a session with a small prompt such as `What does this repository do?`.
 
-```bash
-ngrok http --url <your-domain>.ngrok.app 8080
-```
+The first run should move through `queued`, `running`, and `succeeded`. The sandbox calls the local controller through `host.microsandbox.internal`.
 
-If you do not have a development domain, let ngrok assign a URL:
+Stop the development process with `Ctrl-C`. Postgres remains running and can be stopped with `docker compose down` when you are finished.
 
-```bash
-ngrok http 8080
-```
+## GitHub App setup
 
-Copy the HTTPS forwarding URL into `.env`:
+Create a GitHub App from **GitHub Settings → Developer settings → GitHub Apps → New GitHub App**. Set the local homepage to `http://localhost:3000` and the user authorization callback to `http://localhost:8080/auth/github/callback`. Enable user authorization during installation, keep authorization-token expiration enabled, and grant **Repository → Contents: Read and write** plus **Repository → Metadata: Read-only**. Install the App only on repositories that the agent should access.
+
+Copy the App Client ID and Client Secret into `.env`. Users authorize through the dashboard; they do not enter a personal access token.
+
+## Optional: Azure DevOps
+
+Register an application in [Microsoft Entra ID](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app), then add the exact callback `http://localhost:8080/vcs/connections/azure-devops/callback` and the `vso.code` and `vso.profile` permissions. Set these values in `.env`:
 
 ```dotenv
-CONTROL_PLANE_URL=https://<your-domain>.ngrok.app
-```
-
-Keep ngrok running while developing. If an assigned URL changes, update `CONTROL_PLANE_URL` and restart the controller before creating another run. Otherwise the sandbox will produce no events and fail after the silence timeout.
-
-The controller is not running yet, so an ngrok `502 Bad Gateway` at this point is expected. After starting the controller, this must return `{"ok":true}`:
-
-```bash
-curl https://<your-domain>.ngrok.app/healthz
-```
-
-## 5. Configure E2B and the model
-
-Fill the following values in `.env`:
-
-```dotenv
-E2B_API_KEY=<your-e2b-api-key>
-E2B_TEMPLATE=pi-cloud-agent
-
-AGENT_MODEL=aigateway/MiniMax/MiniMax-M2.7
-AIGATEWAY_BASE_URL=https://<your-openai-compatible-gateway>/v1
-AIGATEWAY_API_KEY=<your-model-api-key>
-
-# Optional: how long an idle session's filesystem remains resumable (default 7 days)
-SESSION_WORKSPACE_RETENTION_SECONDS=604800
-```
-
-`AGENT_MODEL` has the form `provider/model`. The provider prefix is local configuration; everything after the first slash is sent to the gateway as the model name.
-
-The repository includes the E2B CLI as a pinned development dependency. Sign in through the browser so the CLI is allowed to build templates:
-
-```bash
-pnpm --filter @pi-cloud-agent/runtime exec e2b auth login
-```
-
-The E2B SDK uses `E2B_API_KEY` from `.env` when the controller creates a sandbox. The CLI login is separately used by `pnpm sandbox:template` while building the template.
-
-Build and publish the template:
-
-```bash
-pnpm sandbox:template
-```
-
-This builds `packages/runtime`, creates the `pi-cloud-agent` E2B template with 4 CPUs and 4096 MiB of memory, and snapshots an inert `sleep infinity` process. The controller starts the real runtime after sandbox creation or workspace resume because per-run prompts and credentials do not exist at template-build time.
-
-The E2B CLI writes account-specific template metadata to `packages/runtime/e2b.toml`. That generated file is gitignored: keep it local and do not commit its team or template IDs.
-
-Rebuild the template after changing:
-
-- `packages/runtime/**`
-- `packages/runtime/Dockerfile.sandbox`
-- the pinned Pi agent dependency used by the runtime
-
-Controller and dashboard changes do not require a template rebuild.
-
-## 6. Configure repository access
-
-### GitHub App setup
-
-Create a GitHub App from **GitHub Settings → Developer settings → GitHub Apps → New GitHub App**. Follow GitHub's [Registering a GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app) guide and [Choosing permissions for a GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app) reference.
-
-Set the homepage URL to the dashboard URL and the callback URL to `http://localhost:8080/auth/github/callback` for local development, or `https://<controller-host>/auth/github/callback` for a deployed controller.
-
-Leave **Expire user authorization tokens** enabled and enable **Request user authorization (OAuth) during installation**. Install the App on the personal or organization account that owns the repositories and select only the repositories Pi should access.
-
-Enable **Repository → Contents: Read and write** and **Repository → Metadata: Read-only**.
-
-Copy the GitHub App Client ID and generate a Client Secret. Users authorize through GitHub; they do not enter a PAT.
-
-### Azure DevOps setup
-
-Register an application in [Microsoft Entra ID](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app), add the exact callback URL `http://localhost:8080/vcs/connections/azure-devops/callback` under Web redirect URIs, and add **Azure DevOps → API permissions → `vso.code` and `vso.profile`**. Grant admin consent if the tenant requires administrator approval. Use `AZURE_DEVOPS_TENANT_ID=common` for a multitenant Entra app, or the directory ID for a single-tenant app.
-
-See Microsoft's [Azure DevOps Microsoft Entra OAuth guide](https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/entra-oauth?view=azure-devops) for the registration and consent model.
-
-### Controller configuration
-
-Configure the GitHub App before opening the dashboard; GitHub App sign-in is required to create the application session. Azure DevOps is optional and is connected after sign-in from Settings:
-
-```dotenv
-# GitHub App user authorization.
-APP_AUTH_REQUIRED=true
-APP_SESSION_SECRET=<at-least-32-random-characters>
-GITHUB_APP_CLIENT_ID=<client-id>
-GITHUB_APP_CLIENT_SECRET=<client-secret>
-GITHUB_APP_REDIRECT_URI=http://localhost:8080/auth/github/callback
-VCS_ENCRYPTION_KEY=<64-hex-characters>
-
-# Azure DevOps / Microsoft Entra ID, if needed
 AZURE_DEVOPS_CLIENT_ID=<client-id>
 AZURE_DEVOPS_CLIENT_SECRET=<client-secret>
 AZURE_DEVOPS_TENANT_ID=common
 AZURE_DEVOPS_REDIRECT_URI=http://localhost:8080/vcs/connections/azure-devops/callback
 ```
 
-Set a 64-character hex `VCS_ENCRYPTION_KEY`, restart the controller, open **Settings**, and use the provider's **Connect** button. The repository selector then loads repositories from the connected identities.
+Restart `make dev`, sign in with GitHub, open **Settings**, and use the Azure DevOps **Connect** action.
 
-## 7. Start the development stack
+## Optional: E2B
 
-Use separate terminals so logs remain readable.
+E2B is useful when the controller is not running on a machine that can create local microVMs. It requires an E2B account and a public callback URL.
 
-Terminal 1 — ngrok, if it is not already running:
+Start a tunnel in a separate terminal:
 
 ```bash
 ngrok http --url <your-domain>.ngrok.app 8080
 ```
 
-Terminal 2 — Postgres. Start only the database for host-based development; `pnpm up` starts the containerized controller too and would occupy port 8080:
+Update `.env`:
 
-```bash
-docker compose up -d db
-pnpm db:migrate
+```dotenv
+SANDBOX_PROVIDER=e2b
+CONTROL_PLANE_URL=https://<your-domain>.ngrok.app
+E2B_API_KEY=<your-e2b-api-key>
+E2B_TEMPLATE=pi-cloud-agent
 ```
 
-Terminal 3 — controller:
-
-```bash
-pnpm controller
-```
-
-Confirm both the local and public health endpoints:
-
-```bash
-curl http://localhost:8080/healthz
-curl https://<your-domain>.ngrok.app/healthz
-```
-
-Terminal 4 — dashboard:
-
-```bash
-pnpm web
-```
-
-Open [http://localhost:3000](http://localhost:3000). Create a session using a public repository and a small prompt such as `What does this repository do?`. A healthy run progresses through `queued`, `running`, and `succeeded`, and its event stream begins with `git.cloned`.
-
-Use the dashboard after signing in with GitHub App. The operator API requires the browser's authenticated session cookie, so unauthenticated curl requests intentionally return `401`.
-
-## 8. Validate changes
-
-The normal CI-equivalent check is:
-
-```bash
-pnpm verify
-```
-
-Useful narrower checks:
-
-```bash
-pnpm lint
-pnpm typecheck
-pnpm test
-pnpm test:integration
-pnpm test:e2e
-pnpm docs:check
-```
-
-After changing the runtime, template, sandbox provider, callback handling, or model configuration, rebuild the template and run the paid live suite:
+Build the hosted template and restart the app:
 
 ```bash
 pnpm sandbox:template
+make dev
+```
+
+For E2B, keep the tunnel running for the entire run. GitHub webhooks also require a public URL when you want GitHub to initiate runs, regardless of which sandbox provider is selected.
+
+## Optional: validation and live runs
+
+Run the normal checks with:
+
+```bash
+make verify
+```
+
+Useful narrower checks are `pnpm lint`, `pnpm test`, `pnpm test:integration`, `pnpm test:e2e`, and `pnpm docs:check`. A real sandbox/model run uses credentials and may incur cost:
+
+```bash
 LIVE_TEST_REPO=owner/repository pnpm test:live
 ```
 
-`LIVE_TEST_REPO` must name a repository the configured forge credential can clone, or a public repository when running without forge credentials. Without it, the live test is intentionally skipped and does not validate a sandbox or model request.
+Rebuild the local image after changing `packages/runtime/**`, `packages/runtime/Dockerfile.sandbox`, or the runtime dependency:
 
-See [docs/testing.md](docs/testing.md) for test boundaries and [docs/operations.md](docs/operations.md) for run inspection, cancellation, database queries, and symptom-based diagnosis.
+```bash
+pnpm sandbox:image
+```
 
-## Troubleshooting first startup
+For E2B, use `pnpm sandbox:template` instead.
+
+## Troubleshooting
 
 | Symptom | Check |
 |---|---|
-| Controller rejects configuration | Compare `.env` with `.env.example`; do not leave the database URL missing. |
-| Template build returns 401 | Run `pnpm --filter @pi-cloud-agent/runtime exec e2b auth login` again and confirm the E2B account/team. |
-| Sandbox cannot be created | Confirm `E2B_API_KEY`, `E2B_TEMPLATE=pi-cloud-agent`, and that `pnpm sandbox:template` completed. |
-| Run has no events and later reports `sandbox went silent` | Verify ngrok is running, the public `/healthz` endpoint works, and the controller was restarted after changing `CONTROL_PLANE_URL`. |
-| Clone fails | Try a public repository first, then verify forge token scope for private repositories. |
-| Agent starts but inference fails | Verify the gateway URL, API key, model identifier, account balance, and gateway logs. |
+| microSandbox cannot boot | Confirm Docker is running, `make setup` completed, and the host supports Apple Silicon or Linux KVM. |
+| Local sandbox produces no events | Confirm the controller log uses `http://host.microsandbox.internal:8080`, keep `MICROSANDBOX_ALLOW_HOST=true`, and restart after changing `.env`. |
+| E2B produces no events | Confirm ngrok is running, the public `/healthz` endpoint works, and `CONTROL_PLANE_URL` is the current tunnel URL. |
 | Port 5532, 8080, or 3000 is busy | Stop the conflicting service or update the matching local configuration. |
 
-Stop the local containers when finished:
-
-```bash
-pnpm down
-```
-
-Stopping the controller or ngrok does not stop Postgres. E2B sandboxes are reclaimed by the reconciler after terminal runs, cancellation, or timeout.
+For run inspection, cancellation, database queries, and provider-specific operations, see [docs/operations.md](docs/operations.md). For the trust boundary and lifecycle, see [ARCHITECTURE.md](ARCHITECTURE.md).

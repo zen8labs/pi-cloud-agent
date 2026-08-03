@@ -14,9 +14,15 @@ describe("sandbox provider registry", () => {
     expect(typeof provider.stop).toBe("function");
   });
 
+  it("builds the local microSandbox provider without cloud credentials", () => {
+    const provider = createSandboxProvider("microsandbox", {});
+    expect(provider.name).toBe("microsandbox");
+    expect(typeof provider.resume).toBe("function");
+  });
+
   it("names the alternatives when asked for one that does not exist", () => {
     expect(() => createSandboxProvider("modal", {})).toThrow(
-      /Unknown sandbox provider "modal". Available: e2b./,
+      /Unknown sandbox provider "modal". Available: e2b, microsandbox./,
     );
   });
 
@@ -25,6 +31,6 @@ describe("sandbox provider registry", () => {
   });
 
   it("reports what it knows about", () => {
-    expect(sandboxProviderNames()).toEqual(["e2b"]);
+    expect(sandboxProviderNames()).toEqual(["e2b", "microsandbox"]);
   });
 });

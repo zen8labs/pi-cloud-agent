@@ -9,12 +9,14 @@ import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createWebSession, upsertAppUser } from "../db/auth";
 import { closeDatabase, type Database } from "../db/client";
-import { createRun, getRun } from "../db/runs";
+import { completeRun, createRun, getRun } from "../db/runs";
 import { oauthStates } from "../db/schema";
+import { parkSession } from "../db/sessions";
 import {
   manualTrigger,
   resetTables,
   seedRun,
+  seedSession,
   setupTestDatabase,
   silentLogger,
   testConfig,
@@ -65,15 +67,9 @@ describe("browser boundary", () => {
     });
     expect(denied.headers.get("access-control-allow-origin")).toBeNull();
 
-    const openApp = createApp({
-      config: testConfig({ WEB_CORS_ORIGINS: "*" }),
-      database,
-      log: silentLogger(),
-    });
-    const explicitWildcard = await openApp.request("/healthz", {
-      headers: { Origin: "https://operator.example" },
-    });
-    expect(explicitWildcard.headers.get("access-control-allow-origin")).toBe("*");
+    expect(() => testConfig({ WEB_CORS_ORIGINS: "*" })).toThrow(
+      "WEB_CORS_ORIGINS must list explicit origins",
+    );
   });
 
   it("requires a session and scopes runs to the signed-in user", async () => {
@@ -114,6 +110,15 @@ describe("browser boundary", () => {
     expect(secondRun.userId).toBe(second.id);
     const cookie = await createWebSession(database, first.id, testConfig().auth.sessionSecret);
 
+    const csrf = await secureApp.request("/auth/logout", {
+      method: "POST",
+      headers: {
+        Cookie: `pca_session=${cookie}`,
+        Origin: "https://untrusted.example",
+      },
+    });
+    expect(csrf.status).toBe(403);
+
     expect((await secureApp.request("/runs")).status).toBe(401);
     const me = await secureApp.request("/auth/me", {
       headers: { Cookie: `pca_session=${cookie}` },
@@ -131,6 +136,20 @@ describe("browser boundary", () => {
       headers: { Cookie: `pca_session=${cookie}` },
     });
     expect(other.status).toBe(404);
+
+    const { session: foreignSession, run: foreignRun } = await seedSession(database, second.id);
+    await completeRun(database, foreignRun.id, "succeeded", null);
+    await parkSession(database, foreignRun, null, null);
+    const foreignTurn = await secureApp.request(`/sessions/${foreignSession.id}/turns`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `pca_session=${cookie}`,
+        Origin: "http://localhost:3000",
+      },
+      body: JSON.stringify({ prompt: "peek" }),
+    });
+    expect(foreignTurn.status).toBe(404);
   });
 
   it("uses the GitHub App callback for a Settings reconnect", async () => {

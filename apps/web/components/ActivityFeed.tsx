@@ -1,9 +1,11 @@
 "use client";
 
 import type { RunEvent, RunStatus } from "@pi-cloud-agent/protocol";
-import { ChevronRightIcon, LoaderCircleIcon, XIcon } from "lucide-react";
+import { ChevronRightIcon, LoaderCircleIcon, SquareTerminalIcon, XIcon } from "lucide-react";
 import { useMemo } from "react";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
+import { ChangeStatsCard } from "@/components/ChangeStatsCard";
+import { type FileChangeStat, fileChangeStats, ToolArgsView } from "@/components/ToolArgsView";
 import { STATUS_LABELS } from "@/lib/format";
 
 type ToolLine = {
@@ -13,6 +15,7 @@ type ToolLine = {
   args: Record<string, unknown>;
   status: string;
   callId: string;
+  output: string | null;
   at: string;
 };
 
@@ -34,7 +37,14 @@ type WorkBlock = {
   endedAt: string;
 };
 
-type Block = FlatBlock | WorkBlock;
+type ChangesBlock = {
+  key: string;
+  kind: "changes";
+  files: FileChangeStat[];
+  createdOnly: boolean;
+};
+
+type Block = FlatBlock | WorkBlock | ChangesBlock;
 
 function foldEvents(events: RunEvent[], userPrompt: string | null): Block[] {
   const flat: FlatBlock[] = userPrompt
@@ -43,7 +53,62 @@ function foldEvents(events: RunEvent[], userPrompt: string | null): Block[] {
   const tools = new Map<string, ToolLine>();
   for (const event of events) foldEvent(flat, tools, event);
   const visible = flat.filter((block) => block.kind !== "assistant" || block.text.trim());
-  return groupWork(visible);
+  return appendChangeStats(groupWork(visible));
+}
+
+/** Aggregate write/edit tools into a trailing summary card for the turn. */
+function appendChangeStats(blocks: Block[]): Block[] {
+  const { files, createdOnly } = collectFileChanges(blocks);
+  if (!files.length) return blocks;
+  return [...blocks, { key: "changes", kind: "changes", files, createdOnly }];
+}
+
+function collectFileChanges(blocks: Block[]): {
+  files: FileChangeStat[];
+  createdOnly: boolean;
+} {
+  const byPath = new Map<string, FileChangeStat>();
+  const order: string[] = [];
+  let sawEdit = false;
+  let sawWrite = false;
+  for (const item of workTools(blocks)) {
+    const name = item.tool.toLowerCase();
+    if (name === "edit") sawEdit = true;
+    if (name === "write") sawWrite = true;
+    mergeFileStat(byPath, order, fileChangeStats(item.tool, item.args));
+  }
+  const files = order.flatMap((path) => {
+    const stat = byPath.get(path);
+    return stat ? [stat] : [];
+  });
+  return { files, createdOnly: sawWrite && !sawEdit };
+}
+
+function workTools(blocks: Block[]): ToolLine[] {
+  const tools: ToolLine[] = [];
+  for (const block of blocks) {
+    if (block.kind !== "work") continue;
+    for (const item of block.items) {
+      if (item.kind === "tool") tools.push(item);
+    }
+  }
+  return tools;
+}
+
+function mergeFileStat(
+  byPath: Map<string, FileChangeStat>,
+  order: string[],
+  stat: FileChangeStat | null,
+): void {
+  if (!stat) return;
+  const existing = byPath.get(stat.path);
+  if (existing) {
+    existing.added += stat.added;
+    existing.removed += stat.removed;
+    return;
+  }
+  byPath.set(stat.path, { path: stat.path, added: stat.added, removed: stat.removed });
+  order.push(stat.path);
 }
 
 /** Consecutive tool and log lines collapse into one "Worked for …" group, like Codex. */
@@ -97,10 +162,12 @@ function foldToken(blocks: FlatBlock[], event: RunEvent): void {
 
 function foldTool(blocks: FlatBlock[], tools: Map<string, ToolLine>, event: RunEvent): void {
   const callId = String(event.data?.callId ?? "");
+  const output = toolOutput(event.data?.output);
   const existing = callId ? tools.get(callId) : undefined;
   if (existing) {
     existing.status = String(event.data?.status ?? existing.status);
     existing.at = event.at;
+    if (output !== null) existing.output = output;
     return;
   }
   const block: ToolLine = {
@@ -110,10 +177,15 @@ function foldTool(blocks: FlatBlock[], tools: Map<string, ToolLine>, event: RunE
     args: (event.data?.args as Record<string, unknown>) ?? {},
     status: String(event.data?.status ?? "running"),
     callId,
+    output,
     at: event.at,
   };
   if (callId) tools.set(callId, block);
   blocks.push(block);
+}
+
+function toolOutput(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
 }
 
 /** The stream reports "done"/"error"; the mirrored terminal event carries a RunStatus. */
@@ -121,6 +193,7 @@ function foldStatus(blocks: FlatBlock[], event: RunEvent): void {
   const raw = String(event.data?.status ?? "");
   const status: RunStatus =
     raw === "done" ? "succeeded" : raw === "error" ? "failed" : (raw as RunStatus);
+  if (status === "succeeded") return;
   const detail = String(event.data?.detail ?? "");
   blocks.push({
     key: `status-${event.seq}`,
@@ -165,16 +238,22 @@ export function ActivityFeed({
   const blocks = useMemo(() => foldEvents(events, userPrompt), [events, userPrompt]);
   if (!blocks.length) return <Empty active={active} />;
 
+  // The trailing change-stats card is not live activity; stream state follows the block before it.
+  let lastActivityIndex = blocks.length - 1;
+  while (lastActivityIndex >= 0 && blocks[lastActivityIndex]?.kind === "changes") {
+    lastActivityIndex -= 1;
+  }
+
   return (
     <div className="flex flex-col gap-6">
       {blocks.map((block, index) => (
         <BlockView
           key={block.key}
           block={block}
-          streaming={active && index === blocks.length - 1}
+          streaming={active && index === lastActivityIndex}
         />
       ))}
-      {active && blocks.at(-1)?.kind !== "work" && (
+      {active && lastActivityIndex >= 0 && blocks[lastActivityIndex]?.kind !== "work" && (
         <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
           <LoaderCircleIcon className="size-3.5 animate-spin" />
           Working…
@@ -202,6 +281,9 @@ function BlockView({ block, streaming }: { block: Block; streaming: boolean }) {
     );
   }
   if (block.kind === "work") return <WorkGroup block={block} streaming={streaming} />;
+  if (block.kind === "changes") {
+    return <ChangeStatsCard files={block.files} createdOnly={block.createdOnly} />;
+  }
   if (block.kind === "status") return <StatusDivider block={block} />;
   return null;
 }
@@ -247,6 +329,32 @@ function ToolRow({ block }: { block: ToolLine }) {
   const failed = block.status === "error";
   const running = block.status !== "completed" && !failed;
   const summary = toolSummary(block.tool, block.args);
+  const shell = isShellTool(block.tool);
+  const label = (
+    <>
+      <span className="shrink-0 font-medium text-foreground/85">{toolVerb(block.tool)}</span>
+      {summary ? (
+        <span className="truncate font-mono text-xs text-muted-foreground">{summary}</span>
+      ) : null}
+    </>
+  );
+
+  // Read already shows the path in the summary; expanding only repeats it as JSON.
+  if (block.tool.toLowerCase() === "read") {
+    return (
+      <div className="flex min-w-0 items-center gap-1.5 py-1 text-[13px]">
+        {running ? (
+          <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+        ) : failed ? (
+          <XIcon className="size-3.5 shrink-0 text-[var(--status-failed)]" />
+        ) : (
+          <span className="size-3.5 shrink-0" aria-hidden />
+        )}
+        {label}
+      </div>
+    );
+  }
+
   return (
     <details className="activity-line group/line">
       <summary className="flex min-w-0 cursor-pointer list-none select-none items-center gap-1.5 py-1 text-[13px]">
@@ -254,19 +362,23 @@ function ToolRow({ block }: { block: ToolLine }) {
           <LoaderCircleIcon className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
         ) : failed ? (
           <XIcon className="size-3.5 shrink-0 text-[var(--status-failed)]" />
+        ) : shell ? (
+          <SquareTerminalIcon className="size-3.5 shrink-0 text-muted-foreground/70" />
         ) : (
           <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground/60 transition-transform group-open/line:rotate-90" />
         )}
-        <span className="shrink-0 font-medium text-foreground/85">{toolVerb(block.tool)}</span>
-        {summary && (
-          <span className="truncate font-mono text-xs text-muted-foreground">{summary}</span>
-        )}
+        {label}
       </summary>
-      <pre className="ml-5 max-h-64 overflow-auto whitespace-pre-wrap py-1.5 font-mono text-[11px] leading-5 text-muted-foreground/80">
-        {JSON.stringify(block.args, null, 2)}
-      </pre>
+      <div className="py-1.5">
+        <ToolArgsView tool={block.tool} args={block.args} output={block.output} />
+      </div>
     </details>
   );
+}
+
+function isShellTool(tool: string): boolean {
+  const name = tool.toLowerCase();
+  return name === "bash" || name === "shell";
 }
 
 function LogRow({ text }: { text: string }) {
@@ -320,6 +432,7 @@ const TOOL_VERBS: Record<string, string> = {
   edit: "Edited",
   write: "Wrote",
   bash: "Ran",
+  shell: "Ran",
   grep: "Searched",
   glob: "Found files",
   list: "Listed",
@@ -337,6 +450,7 @@ function toolSummary(tool: string, args: Record<string, unknown>): string {
     case "write":
       return values.filePath || values.path || "";
     case "bash":
+    case "shell":
       return values.command || values.cmd || "";
     case "grep":
       return values.pattern ? `for “${values.pattern}”` : "";

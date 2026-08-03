@@ -57,6 +57,7 @@ export function createE2BProvider(
           background: true,
           envs,
           timeoutMs,
+          user: "node",
         });
       } catch (cause) {
         // The machine exists but will never do anything. Reclaim it now rather
@@ -81,6 +82,7 @@ export function createE2BProvider(
           background: true,
           envs,
           timeoutMs,
+          user: "node",
         });
       } catch (cause) {
         if (cause instanceof SandboxNotFoundError) {

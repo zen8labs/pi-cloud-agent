@@ -101,9 +101,11 @@ export async function seedRun(
 
 export async function seedSession(
   database: Database,
+  userId?: string,
 ): Promise<{ session: SessionRow; run: RunRow }> {
   const trigger = manualTrigger();
   return createSessionWithRun(database, {
+    userId,
     title: "Summarize this repository",
     profile: "general",
     provider: trigger.repo.provider,

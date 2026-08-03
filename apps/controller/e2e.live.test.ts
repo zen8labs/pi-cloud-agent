@@ -47,15 +47,21 @@ beforeAll(async () => {
   config = getConfig();
 
   // The sandbox dials back over CONTROL_PLANE_URL. A loopback address is
-  // unreachable from a hosted sandbox, and the run would go silent rather than
-  // fail — so refuse up front with the reason, instead of burning ten minutes.
-  if (/localhost|127\.0\.0\.1|0\.0\.0\.0/.test(config.controlPlaneUrl)) {
+  // unreachable from E2B, and the run would go silent rather than fail — so
+  // refuse up front with the reason, instead of burning ten minutes. The local
+  // microSandbox provider intentionally uses its host gateway instead.
+  if (
+    config.sandbox.provider === "e2b" &&
+    /localhost|127\.0\.0\.1|0\.0\.0\.0|host\.microsandbox\.internal/.test(
+      config.controlPlaneUrl,
+    )
+  ) {
     throw new Error(
       `CONTROL_PLANE_URL is ${config.controlPlaneUrl}, which a hosted sandbox cannot reach. ` +
         "Start a tunnel and set it to the public URL; see docs/operations.md.",
     );
   }
-  await assertControlPlaneReachable(config.controlPlaneUrl);
+  await assertControlPlaneReachable(config.controlPlaneUrl, config.sandbox.provider);
 
   database = createDatabase(config.databaseUrl);
   await migrateDatabase(database);
@@ -222,8 +228,8 @@ async function cleanupSession(sessionId: string): Promise<void> {
   if (session.sandboxId) await clearSessionWorkspace(database, session.id, session.sandboxId);
 }
 
-async function assertControlPlaneReachable(baseUrl: string): Promise<void> {
-  const healthUrl = `${baseUrl}/healthz`;
+async function assertControlPlaneReachable(baseUrl: string, provider: string): Promise<void> {
+  const healthUrl = healthCheckUrl(baseUrl, provider);
   let response: Response;
   try {
     response = await fetch(healthUrl, { signal: AbortSignal.timeout(10_000) });
@@ -233,4 +239,12 @@ async function assertControlPlaneReachable(baseUrl: string): Promise<void> {
   if (!response.ok) {
     throw new Error(`CONTROL_PLANE_URL health check failed: ${response.status} ${healthUrl}`);
   }
+}
+
+function healthCheckUrl(baseUrl: string, provider: string): string {
+  const url = new URL(`${baseUrl}/healthz`);
+  if (provider === "microsandbox" && url.hostname === "host.microsandbox.internal") {
+    url.hostname = "localhost";
+  }
+  return url.toString();
 }
