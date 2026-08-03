@@ -10,6 +10,8 @@ import { runRoutes } from "./runs";
 import { sessionRoutes } from "./sessions";
 import { vcsRoutes } from "./vcs";
 
+const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
 /**
  * The controller's HTTP surface, in three groups:
  *
@@ -44,10 +46,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   // unaffected. A lone "*" means any origin; Hono only treats it as a wildcard
   // as a bare string, not as an array element.
   const corsOrigins = deps.config.web.corsOrigins;
-  app.use(
-    "*",
-    cors({ origin: corsOrigins.includes("*") ? "*" : corsOrigins, credentials: true }),
-  );
+  app.use("*", cors({ origin: corsOrigins, credentials: true }));
 
   app.use("*", async (c, next) => {
     const publicPath =
@@ -56,6 +55,22 @@ export function createApp(deps: Deps): Hono<AppEnv> {
       c.req.path.startsWith("/internal/");
     if (deps.config.auth.requireUser && !c.get("user") && !publicPath) {
       return c.json({ error: "authentication required" }, 401);
+    }
+    await next();
+  });
+
+  // SameSite=None enables a dashboard hosted on another site to send the
+  // session cookie. State-changing browser requests must still come from a
+  // configured dashboard origin, which prevents cross-site request forgery.
+  app.use("*", async (c, next) => {
+    const origin = c.req.header("Origin");
+    if (
+      c.get("user") &&
+      UNSAFE_METHODS.has(c.req.method) &&
+      origin &&
+      !corsOrigins.includes(origin)
+    ) {
+      return c.json({ error: "invalid request origin" }, 403);
     }
     await next();
   });

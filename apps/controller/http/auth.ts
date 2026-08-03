@@ -7,6 +7,7 @@ import type { AppEnv } from "./deps";
 
 const AUTH_STATE_COOKIE = "pca_github_auth_state";
 const SESSION_COOKIE = "pca_session";
+type SameSite = "Lax" | "None";
 
 export function userOwns(user: AppUserRow | null, ownerId: string | null): boolean {
   return user ? user.id === ownerId : ownerId === null;
@@ -28,7 +29,7 @@ export function authRoutes(): Hono<AppEnv> {
         c,
         AUTH_STATE_COOKIE,
         started.state,
-        cookieOptions(c.req.url.startsWith("https://"), 600),
+        cookieOptions(c.req.url.startsWith("https://"), 600, "Lax"),
       );
       return c.redirect(started.url);
     } catch (error) {
@@ -54,7 +55,11 @@ export function authRoutes(): Hono<AppEnv> {
         c,
         SESSION_COOKIE,
         session,
-        cookieOptions(c.req.url.startsWith("https://"), 30 * 24 * 60 * 60),
+        cookieOptions(
+          c.req.url.startsWith("https://"),
+          30 * 24 * 60 * 60,
+          c.req.url.startsWith("https://") ? "None" : "Lax",
+        ),
       );
       return c.redirect(
         result.returnTo === "settings"
@@ -99,10 +104,10 @@ export function authRoutes(): Hono<AppEnv> {
   return app;
 }
 
-function cookieOptions(secure: boolean, maxAge: number) {
+function cookieOptions(secure: boolean, maxAge: number, sameSite: SameSite) {
   return {
     httpOnly: true,
-    sameSite: "Lax" as const,
+    sameSite,
     secure,
     path: "/",
     maxAge,

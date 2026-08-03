@@ -109,7 +109,9 @@ export async function createSessionTurn(
       const [existing] = await tx
         .select({ id: sessions.id })
         .from(sessions)
-        .where(eq(sessions.id, sessionId));
+        .where(
+          and(eq(sessions.id, sessionId), ...(userId ? [eq(sessions.userId, userId)] : [])),
+        );
       if (!existing) throw new SessionNotFoundError();
       throw new SessionBusyError();
     }

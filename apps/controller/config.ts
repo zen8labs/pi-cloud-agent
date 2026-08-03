@@ -125,6 +125,15 @@ function build(env: Env): Config {
     );
   }
 
+  const corsOrigins = value.WEB_CORS_ORIGINS.split(",")
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0);
+  if (corsOrigins.includes("*")) {
+    throw new Error(
+      "WEB_CORS_ORIGINS must list explicit origins because dashboard requests use credentials",
+    );
+  }
+
   const separator = value.AGENT_MODEL.indexOf("/");
   if (separator <= 0 || separator === value.AGENT_MODEL.length - 1) {
     throw new Error(`AGENT_MODEL must be "provider/model", got "${value.AGENT_MODEL}"`);
@@ -152,9 +161,7 @@ function build(env: Env): Config {
     sessionWorkspaceRetentionSeconds: value.SESSION_WORKSPACE_RETENTION_SECONDS,
     web: {
       url: value.WEB_URL.replace(/\/$/, ""),
-      corsOrigins: value.WEB_CORS_ORIGINS.split(",")
-        .map((origin) => origin.trim())
-        .filter((origin) => origin.length > 0),
+      corsOrigins,
     },
     auth: {
       requireUser,
