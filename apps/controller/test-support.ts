@@ -28,7 +28,9 @@ export function setupTestDatabase(): Database {
 }
 
 export async function resetTables(database: Database): Promise<void> {
-  await database.execute(sql`truncate table run_events, runs, sessions cascade`);
+  await database.execute(
+    sql`truncate table web_sessions, oauth_states, vcs_connections, run_events, runs, sessions, app_users cascade`,
+  );
 }
 
 export function testConfig(overrides: Record<string, string> = {}): Config {
@@ -38,7 +40,16 @@ export function testConfig(overrides: Record<string, string> = {}): Config {
     AGENT_MODEL: "aigateway/test-model",
     AIGATEWAY_BASE_URL: "https://gateway.test/v1",
     AIGATEWAY_API_KEY: "test-model-key-0123456789",
-    GITHUB_TOKEN: "****************************",
+    WEB_URL: "http://localhost:3000",
+    APP_AUTH_REQUIRED: "false",
+    APP_SESSION_SECRET: "test-session-secret-012345678901234567890123",
+    VCS_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    GITHUB_APP_CLIENT_ID: "github-test-client",
+    GITHUB_APP_CLIENT_SECRET: "github-test-secret",
+    GITHUB_APP_REDIRECT_URI: "http://localhost:8080/auth/github/callback",
+    AZURE_DEVOPS_CLIENT_ID: "azure-test-client",
+    AZURE_DEVOPS_CLIENT_SECRET: "azure-test-secret",
+    AZURE_DEVOPS_REDIRECT_URI: "http://localhost:8080/vcs/connections/azure-devops/callback",
     RUN_WALL_CLOCK_SECONDS: "600",
     LOG_LEVEL: "error",
     ...overrides,

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { RunEvent } from "./events";
+import type { VcsRepository } from "./repo";
 import type { RunStatus } from "./run";
 
 /**
@@ -11,12 +12,11 @@ import type { RunStatus } from "./run";
  */
 
 export const createRunRequestSchema = z.object({
-  /** "owner/name" */
+  /** Provider-specific full repository name. */
   repo: z.string().min(3),
   prompt: z.string().min(1),
   profile: z.string().default("general"),
   provider: z.string().default("github"),
-  host: z.string().default("github.com"),
   /** Branch to clone. Omitted means "ask the provider for the default". */
   branch: z.string().nullish(),
 });
@@ -106,9 +106,28 @@ export interface ConfigResponse {
 }
 
 export interface ReposResponse {
-  repos: string[];
-  /** Where the list came from: explicit config, the provider, or nothing. */
-  source: "config" | "provider" | "none";
+  repos: VcsRepository[];
+  /** Where the list came from: a connected identity or nothing. */
+  source: "connection" | "none";
+}
+
+export interface VcsConnectionSummary {
+  provider: string;
+  displayName: string;
+  configured: boolean;
+  connected: boolean;
+  accountName: string | null;
+}
+
+export interface VcsConnectionsResponse {
+  connections: VcsConnectionSummary[];
+}
+
+export interface AppUserSummary {
+  id: string;
+  login: string;
+  displayName: string;
+  avatarUrl: string | null;
 }
 
 export interface BranchesResponse {

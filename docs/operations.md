@@ -8,6 +8,8 @@ For first-time account setup, dependencies, E2B template creation, ngrok, and th
 
 `.env` at the repository root configures the controller. It is gitignored and holds live credentials. **Never print its values.**
 
+The Settings page manages the GitHub App and Azure DevOps connections. GitHub App sign-in is required and dashboard resources are scoped to the signed-in user. A connected VCS token is still exposed to the untrusted sandbox for the duration of a run; see [secrets.md](secrets.md).
+
 ### The one setting people get wrong
 
 `CONTROL_PLANE_URL` must be reachable **from inside the sandbox**, because the sandbox is outbound-only and reports back over it. With a hosted provider like E2B, `http://localhost:8080` is unreachable and every run goes silent until the reconciler times it out.
@@ -120,26 +122,8 @@ pnpm sandbox:template
 LIVE_TEST_REPO=owner/repository pnpm test:live
 ```
 
-Or by hand:
+Create runs from the dashboard after signing in with GitHub. Direct operator API calls must include the authenticated browser session cookie; unauthenticated requests intentionally return `401`.
 
-```bash
-curl -sS -X POST http://localhost:8080/runs \
-  -H 'Content-Type: application/json' \
-  -d '{"repo":"owner/repo","prompt":"Report the latest commit.","profile":"general"}'
-```
-
-For an interactive session, create it once and add turns to the same id:
-
-```bash
-SESSION_ID=$(curl -sS -X POST http://localhost:8080/sessions \
-  -H 'Content-Type: application/json' \
-  -d '{"repo":"owner/repo","prompt":"Create an uncommitted proof file.","profile":"general"}' \
-  | jq -r '.id')
-
-# Wait until GET /sessions/$SESSION_ID reports status=idle, then:
-curl -sS -X POST "http://localhost:8080/sessions/$SESSION_ID/turns" \
-  -H 'Content-Type: application/json' \
-  -d '{"prompt":"Read the proof file from the previous turn."}'
-```
+Create the session from the dashboard after signing in with GitHub, then use its conversation UI for the follow-up turn.
 
 The live test performs this as two real turns and verifies the Pi session id, uncommitted file, provider workspace id, and absence of a second clone. Run it after changing the sandbox image, runtime, session checkpointing, provider lifecycle, or model configuration.

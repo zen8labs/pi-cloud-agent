@@ -2,7 +2,7 @@
 
 > **This is the trusted zone.** It holds credentials and owns the database. It never executes repository code.
 
-Decides what runs and when, mints scoped credentials, starts sandboxes, records what happened, and reclaims machines.
+Decides what runs and when, resolves connected identities, mints run credentials, starts sandboxes, records what happened, and reclaims machines.
 
 **Depends on:** `protocol`, `profiles`, `sandbox`, `vcs`. It is the only package allowed to compose everything, and the only one that reaches Postgres.
 
@@ -13,7 +13,7 @@ Decides what runs and when, mints scoped credentials, starts sandboxes, records 
 | `index.ts` | bootstrap: HTTP surface + reconciler in one process, graceful shutdown |
 | `config.ts` | **the only file in the repo that reads `process.env`** |
 | `logger.ts` | structured JSON lines; level is passed in, never read from globals |
-| `db/schema.ts` | three tables: `sessions`, `runs`, `run_events` |
+| `db/schema.ts` | seven tables: application users, browser sessions, execution state, and VCS connections |
 | `db/sessions.ts` | ordered turns, Pi checkpoints, and parked workspace ownership |
 | `db/runs.ts` | every write to a run, each a single guarded statement |
 | `db/client.ts` | the pool, plus `LISTEN/NOTIFY`, the bus replacement |
@@ -24,14 +24,16 @@ Decides what runs and when, mints scoped credentials, starts sandboxes, records 
 | `http/sessions.ts` | durable chat sessions and guarded follow-up turns |
 | `http/internal.ts` | events, terminal status, and checkpoint callbacks, authenticated per run |
 | `http/meta.ts` | what the dashboard needs to render itself |
+| `http/vcs.ts` | OAuth connect callbacks and connection management |
 | `reconcile/loop.ts` | the one loop that repairs durable state |
 | `reconcile/provision.ts` | queued → a sandbox is working on it, as a short transaction |
 | `secrets/broker.ts` | shapes the credentials one run needs, and nothing more |
+| `vcs/connections.ts` | encrypted connection storage, refresh, and provider resolution |
 | `test-support.ts` | shared integration-test setup |
 
 ## Invariants
 
-- **Only `config.ts` reads `process.env`.** Provider packages are handed the environment and validate their own slice, which is why adding a provider needs no change here. The `noProcessEnv` lint rule enforces it.
+- **Only `config.ts` reads `process.env`.** Provider adapters are handed the environment and validate their own API slice; OAuth connection keys are explicit here because the controller owns callbacks and secret storage. The `noProcessEnv` lint rule enforces it.
 - **Every run transition is a single `UPDATE` with its expected state in the `WHERE`**, returning whether it changed a row. No read-then-write, no transaction held open across network I/O. See [../../docs/resumability.md](../../docs/resumability.md).
 - **No in-memory run state.** If it is needed to resume a run, it is a column. This is the rule that removed the event bus.
 - **No in-memory session state.** Pi history is checkpointed in Postgres; a provider workspace id is only an optimization. See [../../docs/sessions.md](../../docs/sessions.md).

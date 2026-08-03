@@ -1,7 +1,8 @@
 "use client";
 
-import type { ConfigResponse } from "@pi-cloud-agent/protocol";
+import type { ConfigResponse, VcsRepository } from "@pi-cloud-agent/protocol";
 import { FolderGit2Icon, GitBranchIcon, SlidersHorizontalIcon } from "lucide-react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { ChatComposer } from "@/components/ChatComposer";
@@ -27,8 +28,9 @@ function NewSession() {
   const router = useRouter();
   const params = useSearchParams();
   const [config, setConfig] = useState<ConfigResponse | null>(null);
-  const [repos, setRepos] = useState<string[]>([]);
+  const [repos, setRepos] = useState<VcsRepository[]>([]);
   const [repo, setRepo] = useState(params.get("repo") ?? "");
+  const [provider, setProvider] = useState("github");
   const [profile, setProfile] = useState(params.get("profile") ?? "");
   const [prompt, setPrompt] = useState("");
   const [branches, setBranches] = useState<string[]>([]);
@@ -45,7 +47,11 @@ function NewSession() {
         setConfig(loadedConfig);
         setRepos(loadedRepos);
         setProfile((current) => current || loadedConfig.defaultProfile);
-        setRepo((current) => current || loadedRepos[0] || "");
+        const selected = loadedRepos[0];
+        if (selected) {
+          setRepo((current) => current || selected.fullName);
+          setProvider(selected.provider);
+        }
       })
       .catch((cause) => {
         if (alive) setError(cause instanceof Error ? cause.message : String(cause));
@@ -56,7 +62,7 @@ function NewSession() {
   }, []);
 
   useEffect(() => {
-    if (!repo.includes("/")) {
+    if (!repo || !provider) {
       setBranches([]);
       setBranch("");
       return;
@@ -64,7 +70,7 @@ function NewSession() {
     let cancelled = false;
     setBranchesLoading(true);
     api
-      .listBranches(repo)
+      .listBranches(provider, repo)
       .then((result) => {
         if (!cancelled) {
           setBranches(result.branches);
@@ -83,7 +89,7 @@ function NewSession() {
     return () => {
       cancelled = true;
     };
-  }, [repo]);
+  }, [provider, repo]);
 
   const canSubmit = Boolean(repo) && Boolean(profile) && Boolean(prompt.trim()) && !submitting;
   const activeProfile = config?.profiles.find((entry) => entry.name === profile);
@@ -95,6 +101,7 @@ function NewSession() {
     try {
       const session = await api.createSession({
         repo,
+        provider,
         profile,
         prompt: prompt.trim(),
         branch: branch || null,
@@ -132,7 +139,14 @@ function NewSession() {
               <ComposerOptions
                 repo={repo}
                 repos={repos}
-                onRepoChange={setRepo}
+                onRepoChange={(selected) => {
+                  setRepo(selected.fullName);
+                  setProvider(selected.provider);
+                }}
+                onManualRepoChange={(value) => {
+                  setRepo(value);
+                  setProvider("github");
+                }}
                 profile={profile}
                 profiles={config?.profiles.map((entry) => entry.name) ?? []}
                 onProfileChange={setProfile}
@@ -144,8 +158,18 @@ function NewSession() {
             }
           />
           <p className="mt-3 px-2 text-center text-xs text-muted-foreground">
-            {activeProfile?.description ??
-              "Profiles and repositories load from the controller."}
+            {repos.length === 0 ? (
+              <>
+                Connect a VCS identity in{" "}
+                <Link href="/settings" className="underline underline-offset-2">
+                  Settings
+                </Link>{" "}
+                to choose a repository.
+              </>
+            ) : (
+              (activeProfile?.description ??
+              "Profiles and repositories load from the controller.")
+            )}
           </p>
           {error && (
             <div
@@ -163,8 +187,9 @@ function NewSession() {
 
 type ComposerOptionsProps = {
   repo: string;
-  repos: string[];
-  onRepoChange: (value: string) => void;
+  repos: VcsRepository[];
+  onRepoChange: (value: VcsRepository) => void;
+  onManualRepoChange: (value: string) => void;
   profile: string;
   profiles: string[];
   onProfileChange: (value: string) => void;
@@ -180,18 +205,34 @@ function ComposerOptions(props: ComposerOptionsProps) {
   return (
     <>
       <FolderGit2Icon className="size-3.5 shrink-0 text-muted-foreground" />
-      <Select value={props.repo} onValueChange={(value) => props.onRepoChange(value ?? "")}>
-        <SelectTrigger aria-label="Repository" className={triggerClass}>
-          <SelectValue placeholder="Repository" />
-        </SelectTrigger>
-        <SelectContent align="start">
-          {props.repos.map((name) => (
-            <SelectItem key={name} value={name}>
-              {name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      {props.repos.length === 0 ? (
+        <input
+          aria-label="Repository"
+          className="h-7 w-32 min-w-0 border-0 bg-transparent px-1.5 text-xs outline-none placeholder:text-muted-foreground"
+          placeholder="owner/repo"
+          value={props.repo}
+          onChange={(event) => props.onManualRepoChange(event.target.value)}
+        />
+      ) : (
+        <Select
+          value={props.repo}
+          onValueChange={(value) => {
+            const selected = props.repos.find((entry) => entry.fullName === value);
+            if (selected) props.onRepoChange(selected);
+          }}
+        >
+          <SelectTrigger aria-label="Repository" className={triggerClass}>
+            <SelectValue placeholder="Repository" />
+          </SelectTrigger>
+          <SelectContent align="start">
+            {props.repos.map((entry) => (
+              <SelectItem key={`${entry.provider}:${entry.fullName}`} value={entry.fullName}>
+                {entry.fullName}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
       <SlidersHorizontalIcon className="ml-1 size-3.5 shrink-0 text-muted-foreground" />
       <Select
         value={props.profile}

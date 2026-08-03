@@ -5,9 +5,12 @@ import type {
   RunListResponse,
   RunSummary,
 } from "@pi-cloud-agent/protocol";
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { createWebSession, upsertAppUser } from "../db/auth";
 import { closeDatabase, type Database } from "../db/client";
-import { getRun } from "../db/runs";
+import { createRun, getRun } from "../db/runs";
+import { oauthStates } from "../db/schema";
 import {
   manualTrigger,
   resetTables,
@@ -71,6 +74,91 @@ describe("browser boundary", () => {
       headers: { Origin: "https://operator.example" },
     });
     expect(explicitWildcard.headers.get("access-control-allow-origin")).toBe("*");
+  });
+
+  it("requires a session and scopes runs to the signed-in user", async () => {
+    const secureApp = createApp({
+      config: testConfig({ APP_AUTH_REQUIRED: "true" }),
+      database,
+      log: silentLogger(),
+    });
+    const first = await upsertAppUser(database, {
+      githubUserId: "github-1",
+      login: "first",
+      displayName: "First User",
+    });
+    const second = await upsertAppUser(database, {
+      githubUserId: "github-2",
+      login: "second",
+      displayName: "Second User",
+    });
+    const firstRun = await createRun(database, {
+      userId: first.id,
+      profile: "general",
+      provider: "github",
+      repoFullName: "acme/first",
+      trigger: manualTrigger({ owner: "acme", name: "first" }),
+      model: "aigateway/test-model",
+      callbackToken: "first-run-token",
+    });
+    const secondRun = await createRun(database, {
+      userId: second.id,
+      profile: "general",
+      provider: "github",
+      repoFullName: "acme/second",
+      trigger: manualTrigger({ owner: "acme", name: "second" }),
+      model: "aigateway/test-model",
+      callbackToken: "second-run-token",
+    });
+    expect(firstRun.userId).toBe(first.id);
+    expect(secondRun.userId).toBe(second.id);
+    const cookie = await createWebSession(database, first.id, testConfig().auth.sessionSecret);
+
+    expect((await secureApp.request("/runs")).status).toBe(401);
+    const me = await secureApp.request("/auth/me", {
+      headers: { Cookie: `pca_session=${cookie}` },
+    });
+    expect(me.status).toBe(200);
+    expect((await json<{ login: string }>(me)).login).toBe("first");
+
+    const listed = await secureApp.request("/runs", {
+      headers: { Cookie: `pca_session=${cookie}` },
+    });
+    expect((await json<RunListResponse>(listed)).runs.map((run) => run.id)).toEqual([
+      firstRun.id,
+    ]);
+    const other = await secureApp.request(`/runs/${secondRun.id}`, {
+      headers: { Cookie: `pca_session=${cookie}` },
+    });
+    expect(other.status).toBe(404);
+  });
+
+  it("uses the GitHub App callback for a Settings reconnect", async () => {
+    const response = await app.request("/auth/github/connect?returnTo=settings");
+    expect(response.status).toBe(302);
+    const location = response.headers.get("location");
+    expect(location).toBeTruthy();
+    const state = new URL(location ?? "https://github.com").searchParams.get("state");
+    expect(state).toBeTruthy();
+
+    const [saved] = await database
+      .select()
+      .from(oauthStates)
+      .where(and(eq(oauthStates.state, state ?? ""), eq(oauthStates.provider, "github")));
+    expect(saved?.returnTo).toBe("settings");
+  });
+
+  it("preserves the provider denial reason for the Settings notification", async () => {
+    const response = await app.request(
+      "/vcs/connections/azure-devops/callback?error=access_denied&error_description=Admin%20consent%20is%20required",
+    );
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get("location") ?? "https://example.test");
+    expect(location.pathname).toBe("/settings");
+    expect(location.searchParams.get("connection")).toBe("connection_denied");
+    expect(location.searchParams.get("message")).toBe(
+      "Admin consent is required (access_denied)",
+    );
   });
 });
 

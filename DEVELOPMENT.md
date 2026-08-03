@@ -11,7 +11,7 @@ You need:
 - An [E2B account](https://e2b.dev/docs) for hosted sandboxes. Create an API key in the E2B dashboard. The application uses this as `E2B_API_KEY`.
 - An [ngrok account](https://dashboard.ngrok.com/signup) for a stable HTTPS callback into the local controller. Copy the authtoken from the ngrok dashboard. If your account has a development domain, use it so `CONTROL_PLANE_URL` does not change whenever ngrok restarts.
 - Credentials for an OpenAI-compatible model gateway. The default configuration expects the MiniMax model through an AI gateway, but any compatible endpoint can be used if `AGENT_MODEL`, `AIGATEWAY_BASE_URL`, and `AIGATEWAY_API_KEY` agree.
-- Optional forge credentials. Public GitHub repositories work read-only without a token. Set `GITHUB_TOKEN` for private repositories or agent actions such as pushing commits and posting comments. A GitHub App is preferred for scoped, short-lived credentials; see [docs/secrets.md](docs/secrets.md).
+- A GitHub App and, optionally, an Azure DevOps Microsoft Entra app. GitHub App authorization creates the application session and GitHub connection; Azure DevOps is connected later from Settings. See the GitHub App setup instructions below.
 
 E2B sandboxes and model requests cost money. Live tests never run in CI.
 
@@ -133,24 +133,45 @@ Controller and dashboard changes do not require a template rebuild.
 
 ## 6. Configure repository access
 
-For a first read-only run against a public GitHub repository, forge credentials may remain empty. To list private repositories or let the agent actuate changes, configure one of:
+### GitHub App setup
+
+Create a GitHub App from **GitHub Settings → Developer settings → GitHub Apps → New GitHub App**. Follow GitHub's [Registering a GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app) guide and [Choosing permissions for a GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app) reference.
+
+Set the homepage URL to the dashboard URL and the callback URL to `http://localhost:8080/auth/github/callback` for local development, or `https://<controller-host>/auth/github/callback` for a deployed controller.
+
+Leave **Expire user authorization tokens** enabled and enable **Request user authorization (OAuth) during installation**. Install the App on the personal or organization account that owns the repositories and select only the repositories Pi should access.
+
+Enable **Repository → Contents: Read and write** and **Repository → Metadata: Read-only**.
+
+Copy the GitHub App Client ID and generate a Client Secret. Users authorize through GitHub; they do not enter a PAT.
+
+### Azure DevOps setup
+
+Register an application in [Microsoft Entra ID](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app), add the exact callback URL `http://localhost:8080/vcs/connections/azure-devops/callback` under Web redirect URIs, and add **Azure DevOps → API permissions → `vso.code` and `vso.profile`**. Grant admin consent if the tenant requires administrator approval. Use `AZURE_DEVOPS_TENANT_ID=common` for a multitenant Entra app, or the directory ID for a single-tenant app.
+
+See Microsoft's [Azure DevOps Microsoft Entra OAuth guide](https://learn.microsoft.com/en-us/azure/devops/integrate/get-started/authentication/entra-oauth?view=azure-devops) for the registration and consent model.
+
+### Controller configuration
+
+Configure the GitHub App before opening the dashboard; GitHub App sign-in is required to create the application session. Azure DevOps is optional and is connected after sign-in from Settings:
 
 ```dotenv
-# Simple development option
-GITHUB_TOKEN=<fine-grained-personal-access-token>
+# GitHub App user authorization.
+APP_AUTH_REQUIRED=true
+APP_SESSION_SECRET=<at-least-32-random-characters>
+GITHUB_APP_CLIENT_ID=<client-id>
+GITHUB_APP_CLIENT_SECRET=<client-secret>
+GITHUB_APP_REDIRECT_URI=http://localhost:8080/auth/github/callback
+VCS_ENCRYPTION_KEY=<64-hex-characters>
 
-# Preferred long-term option
-GITHUB_APP_ID=<app-id>
-GITHUB_APP_PRIVATE_KEY=<private-key>
+# Azure DevOps / Microsoft Entra ID, if needed
+AZURE_DEVOPS_CLIENT_ID=<client-id>
+AZURE_DEVOPS_CLIENT_SECRET=<client-secret>
+AZURE_DEVOPS_TENANT_ID=common
+AZURE_DEVOPS_REDIRECT_URI=http://localhost:8080/vcs/connections/azure-devops/callback
 ```
 
-To populate the dashboard repository selector explicitly:
-
-```dotenv
-WEB_REPOS=owner/repository,owner/another-repository
-```
-
-An empty `WEB_REPOS` asks the configured VCS provider what it can access. The dashboard also has a `Custom…` option for entering any `owner/repository`.
+Set a 64-character hex `VCS_ENCRYPTION_KEY`, restart the controller, open **Settings**, and use the provider's **Connect** button. The repository selector then loads repositories from the connected identities.
 
 ## 7. Start the development stack
 
@@ -190,13 +211,7 @@ pnpm web
 
 Open [http://localhost:3000](http://localhost:3000). Create a session using a public repository and a small prompt such as `What does this repository do?`. A healthy run progresses through `queued`, `running`, and `succeeded`, and its event stream begins with `git.cloned`.
 
-You can also create a run without the dashboard:
-
-```bash
-curl -sS -X POST http://localhost:8080/runs \
-  -H 'Content-Type: application/json' \
-  -d '{"repo":"owner/repository","prompt":"Report the latest commit.","profile":"general"}'
-```
+Use the dashboard after signing in with GitHub App. The operator API requires the browser's authenticated session cookie, so unauthenticated curl requests intentionally return `401`.
 
 ## 8. Validate changes
 

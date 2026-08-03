@@ -1,4 +1,5 @@
 import type {
+  AppUserSummary,
   BranchesResponse,
   ConfigResponse,
   CreateRunRequest,
@@ -10,6 +11,9 @@ import type {
   SessionDetail,
   SessionListResponse,
   SessionSummary,
+  VcsConnectionSummary,
+  VcsConnectionsResponse,
+  VcsRepository,
 } from "@pi-cloud-agent/protocol";
 
 /**
@@ -44,6 +48,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
+    credentials: "include",
     cache: "no-store",
   });
   if (!response.ok) {
@@ -60,6 +65,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  getCurrentUser: (): Promise<AppUserSummary> => request<AppUserSummary>("/auth/me"),
+
+  loginUrl: (): string => `${API_BASE}/auth/github/connect`,
+
+  logout: (): Promise<{ ok: boolean }> =>
+    request<{ ok: boolean }>("/auth/logout", { method: "POST" }),
+
   listRuns: (limit = 100): Promise<RunSummary[]> =>
     request<RunListResponse>(`/runs?limit=${limit}`).then((r) => r.runs),
 
@@ -91,11 +103,26 @@ export const api = {
   getConfig: (): Promise<ConfigResponse> =>
     cached("config", () => request<ConfigResponse>("/config")),
 
-  listRepos: (): Promise<string[]> =>
-    cached("repos", () => request<{ repos: string[] }>("/repos").then((r) => r.repos)),
+  listRepos: (): Promise<VcsRepository[]> =>
+    cached("repos", () => request<{ repos: VcsRepository[] }>("/repos").then((r) => r.repos)),
 
-  listBranches: (repo: string): Promise<BranchesResponse> =>
-    request<BranchesResponse>(`/repos/${repo}/branches`),
+  listBranches: (provider: string, repo: string): Promise<BranchesResponse> =>
+    request<BranchesResponse>(
+      `/repos/branches?provider=${encodeURIComponent(provider)}&repo=${encodeURIComponent(repo)}`,
+    ),
+
+  listConnections: (): Promise<VcsConnectionSummary[]> =>
+    request<VcsConnectionsResponse>("/vcs/connections").then((r) => r.connections),
+
+  deleteConnection: (provider: string): Promise<{ ok: boolean }> =>
+    request<{ ok: boolean }>(`/vcs/connections/${encodeURIComponent(provider)}`, {
+      method: "DELETE",
+    }),
+
+  connectUrl: (provider: string): string =>
+    provider === "github"
+      ? `${API_BASE}/auth/github/connect?returnTo=settings`
+      : `${API_BASE}/vcs/connections/${encodeURIComponent(provider)}/connect`,
 };
 
 export function streamUrl(id: string): string {

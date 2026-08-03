@@ -10,7 +10,8 @@ Everything else follows from this line.
 │                                         │      │                              │
 │  • authenticates sandbox callbacks      │      │  • clones the repository     │
 │  • owns Postgres                        │      │  • runs repository code      │
-│  • mints repo-scoped credentials        │      │  • runs one agent session    │
+│  • resolves connected VCS identities    │      │  • runs one agent session    │
+│  • mints run credentials                │      │                              │
 │  • owns durable session checkpoints     │      │  • posts events/checkpoints  │
 │  • decides what runs and when           │      │    outward                   │
 │  • never executes repository code       │      │  • holds no database, no     │
@@ -70,13 +71,17 @@ Provisioning is a **short transaction**, not a long-lived task. Once `attachSand
 
 ## State
 
-Three tables. That is the entire persistent state of the system.
+Seven tables. That is the entire persistent state of the system.
 
 | Table | Role |
 |---|---|
 | `sessions` | ordered turns, the latest Pi JSONL checkpoint, and the parked workspace reference |
 | `runs` | the queue, the lifecycle record, and the crash-recovery journal at once |
 | `run_events` | append-only log, `(run_id, seq)`. The only observability source |
+| `vcs_connections` | one encrypted OAuth connection per provider |
+| `oauth_states` | one-time PKCE state for connection callbacks |
+| `app_users` | stable application users established by GitHub App authorization |
+| `web_sessions` | hashed, expiring browser sessions |
 
 Session state and runtime lifetime are deliberately separate. Postgres owns the conversation checkpoint; the sandbox provider owns a filesystem reference; live compute exists only while a turn runs. If the parked workspace expires, the next turn cold-clones the repository and still opens the same Pi session. See [docs/sessions.md](docs/sessions.md).
 
@@ -99,7 +104,7 @@ All three live in `packages/protocol`, so an implementation package depends on t
 |---|---|---|
 | `Profile` | `getProfile(name)` | `general` (`pr-review` kept dormant as a rebuild seed) |
 | `SandboxProvider` | `createSandboxProvider(name, env)` | `e2b` |
-| `VCSProvider` | `createVcsProvider(name, env)` | `github`, `gitlab`, `bitbucket` |
+| `VCSProvider` | `createVcsProvider(name, accessToken)` | `github`, `azure-devops` |
 
 `TaskSpec` is the pivot: a profile turns a normalized `Trigger` into the repository, the prompt, and an optional budget. Everything below that line is infrastructure; everything above it is a vertical.
 

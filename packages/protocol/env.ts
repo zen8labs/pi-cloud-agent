@@ -3,7 +3,7 @@
  *
  * The controller writes these; the runtime reads them. Both sides import this
  * object, so a rename is a type error instead of a run that boots with an empty
- * prompt. Provider-specific credential variables (GH_TOKEN, GITLAB_TOKEN, …)
+ * prompt. Provider-specific credential variables (GH_TOKEN, …)
  * are not listed here — those are shaped by the credential broker for whichever
  * CLI the agent will use, and only the broker and the CLI need to agree.
  */

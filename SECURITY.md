@@ -32,9 +32,9 @@ The project is pre-1.0. Only `main` is supported; fixes land there, and there ar
 
 These are documented design gaps, not vulnerabilities. Reporting them is welcome but won't be treated as a new finding. The full reasoning is in [docs/secrets.md](docs/secrets.md).
 
-- **The sandbox holds credentials next to untrusted code.** Each run's sandbox receives one model API key and one forge token in its environment, then runs code from a repository. Once that happens, both credentials are compromised in principle. The controls that matter are scope (one repository), TTL (~1 hour with a GitHub App), and isolation (one machine per run, destroyed after), not redaction. Moving to a credential broker and an auth-injecting egress proxy, so the sandbox never holds a token, is the intended next step.
-- **A personal access token is worse than a GitHub App.** PATs are accepted so a local setup works without registering an App. They are broad and long-lived. GitLab has no mintable equivalent, so its token is always a PAT.
-- **The operator API has no authentication.** `POST /runs` and `GET /runs` are unauthenticated because the intended deployment is localhost or a private network. **Do not expose the controller publicly without adding real authentication first.** Sandbox callbacks verify a per-run bearer token, so those are safe to expose; the operator API is not.
+- **The sandbox holds credentials next to untrusted code.** Each run's sandbox receives one model API key and, when connected, one provider access token in its environment, then runs code from a repository. Once that happens, both credentials are compromised in principle. Redaction is not containment. Moving to a credential broker and an auth-injecting egress proxy, so the sandbox never holds a token, is the intended next step.
+- **Provider permissions still need least-privilege review.** GitHub uses a GitHub App with Contents and Metadata permissions; Contents read/write permits repository mutation. Azure DevOps uses Microsoft Entra delegated permissions configured on the Entra app. Review both before operating against sensitive repositories.
+- **The controller requires application authentication by default.** GitHub App authorization creates the local user session and every dashboard resource is user-scoped. `APP_AUTH_REQUIRED=false` is a test/development escape hatch and must not be used on a public deployment. Sandbox callbacks verify a per-run bearer token, so they remain separately authenticated.
 
 ## In scope
 
@@ -60,6 +60,6 @@ Anything that breaks a boundary we claim to hold:
 If you run this yourself:
 
 - keep the controller off the public internet, or put real authentication in front of it
-- prefer a GitHub App over a PAT, and scope it to the repositories you actually need
+- configure only the GitHub App and Azure DevOps permissions the product needs
 - treat every sandbox as hostile after it clones a repository
 - rotate the model API key and forge credentials on the schedule you'd use for any production secret

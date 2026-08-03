@@ -23,7 +23,11 @@ const app = createApp({ config, database, log });
 const reconciler = createReconciler({
   config,
   database,
-  broker: createCredentialBroker(config, createLogger("secrets", { level: config.logLevel })),
+  broker: createCredentialBroker(
+    config,
+    database,
+    createLogger("secrets", { level: config.logLevel }),
+  ),
   log: createLogger("reconciler", { level: config.logLevel }),
 });
 

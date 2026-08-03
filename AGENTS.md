@@ -50,7 +50,7 @@ packages/
   protocol/       the contracts: types, schemas, and the three provider interfaces
   profiles/       verticals: the registry ships general only (pr-review dormant on disk as a rebuild seed)
   sandbox/        SandboxProvider implementations (e2b)
-  vcs/            VCSProvider implementations (github, gitlab, bitbucket)
+  vcs/            VCSProvider implementations (github, azure-devops)
   runtime/        runs INSIDE the sandbox (untrusted)
   tsconfig/       shared compiler options
 ```
