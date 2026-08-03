@@ -72,7 +72,7 @@ export function createMicroSandboxProvider(
         await startRuntime(sandbox, spec);
         await sandbox.detach();
       } catch (cause) {
-        await sandbox.kill().catch(() => undefined);
+        await cleanupCreatedSandbox(id, sandbox);
         throw new SandboxError(
           "microsandbox: sandbox started but the runtime command did not",
           {
@@ -133,21 +133,9 @@ export function createMicroSandboxProvider(
 
     async deleteWorkspace(ref): Promise<void> {
       try {
-        const handle = await Sandbox.get(ref.id);
-        if (handle.status !== "stopped" && handle.status !== "crashed") {
-          await handle.kill();
-        }
-        await handle.remove();
+        await removePersistedSandbox(ref.id);
       } catch (cause) {
         if (cause instanceof SandboxNotFoundError) return;
-        if (cause instanceof SandboxStillRunningError) {
-          await Sandbox.get(ref.id)
-            .then((handle) => handle.kill().then(() => handle.remove()))
-            .catch((error) => {
-              if (!(error instanceof SandboxNotFoundError)) throw error;
-            });
-          return;
-        }
         throw new SandboxError(`microsandbox: could not delete workspace "${ref.id}"`, {
           retryable: false,
           cause,
@@ -157,10 +145,7 @@ export function createMicroSandboxProvider(
 
     async stop(ref: SandboxRef): Promise<void> {
       try {
-        const handle = await Sandbox.get(ref.id);
-        if (handle.status !== "stopped" && handle.status !== "crashed") {
-          await handle.kill();
-        }
+        await removePersistedSandbox(ref.id);
       } catch (cause) {
         if (cause instanceof SandboxNotFoundError) return;
         throw new SandboxError(`microsandbox: could not stop sandbox "${ref.id}"`, {
@@ -170,6 +155,24 @@ export function createMicroSandboxProvider(
       }
     },
   };
+}
+
+async function cleanupCreatedSandbox(id: string, sandbox: Sandbox): Promise<void> {
+  await sandbox.kill().catch(() => undefined);
+  await removePersistedSandbox(id).catch(() => undefined);
+}
+
+async function removePersistedSandbox(id: string): Promise<void> {
+  try {
+    const handle = await Sandbox.get(id);
+    if (handle.status !== "stopped" && handle.status !== "crashed") {
+      await handle.kill();
+    }
+    await handle.remove();
+  } catch (cause) {
+    if (!(cause instanceof SandboxStillRunningError)) throw cause;
+    await Sandbox.get(id).then((handle) => handle.kill().then(() => handle.remove()));
+  }
 }
 
 async function startRuntime(sandbox: Sandbox, spec: SandboxSpec): Promise<void> {
@@ -184,6 +187,8 @@ async function startRuntime(sandbox: Sandbox, spec: SandboxSpec): Promise<void> 
     exec
       .args([
         "-lc",
+        // Keep the detached process from holding the exec pipe open. Its output
+        // is available inside the guest at this path; see docs/operations.md.
         `nohup ${spec.command} > /tmp/pi-cloud-agent-runtime.log 2>&1 < /dev/null & pid=$!; sleep 0.1; kill -0 "$pid"`,
       ])
       .envs(envs)

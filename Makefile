@@ -11,7 +11,7 @@ check-env:
 	@test -f .env || (printf '%s\n' 'Missing .env. Run: cp .env.example .env, then fill in the required credentials.' >&2; exit 1)
 
 db:
-	docker compose up -d db
+	docker compose up -d --wait db
 
 migrate: db
 	pnpm db:migrate

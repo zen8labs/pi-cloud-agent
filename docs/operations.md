@@ -103,7 +103,7 @@ The terminal evidence is a `status` event followed by the run row reaching `succ
 |---|---|---|
 | stuck in `queued` | reconciler not running, or `SANDBOX_PROVIDER` misconfigured | controller logs at startup |
 | `failed` immediately, "could not create a sandbox" | bad provider configuration, missing local image, or missing E2B template | `pnpm sandbox:image` or `pnpm sandbox:template` |
-| `running`, no events, fails with "stopped reporting" | `CONTROL_PLANE_URL` is unreachable from the sandbox | the controller log, `msb logs <sandbox-id>`, and the selected provider's network path |
+| `running`, no events, fails with "stopped reporting" | `CONTROL_PLANE_URL` is unreachable from the sandbox, or the detached runtime failed before it could report | the controller log, `msb logs <sandbox-id>`, `msb exec <sandbox-id> -- cat /tmp/pi-cloud-agent-runtime.log` while the microSandbox is running, and the selected provider's network path |
 | events stop mid-run, then "wall-clock budget" | the agent genuinely ran long | `RUN_WALL_CLOCK_SECONDS` |
 | `git.clone_branch_failed` then a successful clone | the named branch is gone; fell back to the default | benign |
 | `attempt` climbing | retryable provisioning failures | the provider's error in the logs |
