@@ -121,6 +121,7 @@ function foldStatus(blocks: FlatBlock[], event: RunEvent): void {
   const raw = String(event.data?.status ?? "");
   const status: RunStatus =
     raw === "done" ? "succeeded" : raw === "error" ? "failed" : (raw as RunStatus);
+  if (status === "succeeded") return;
   const detail = String(event.data?.detail ?? "");
   blocks.push({
     key: `status-${event.seq}`,
