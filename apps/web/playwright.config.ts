@@ -21,7 +21,9 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "pnpm --filter @pi-cloud-agent/controller start",
+      // Browser smoke tests deliberately use the explicit local auth escape
+      // hatch; production defaults APP_AUTH_REQUIRED=true.
+      command: "APP_AUTH_REQUIRED=false pnpm --filter @pi-cloud-agent/controller start",
       port: 8080,
       reuseExistingServer: !CI,
       timeout: 60_000,

@@ -10,8 +10,9 @@ import { streamSSE } from "hono/streaming";
 import type { Database } from "../db/client";
 import { completeRun, createRun, getRun, listEvents, listRuns } from "../db/runs";
 import type { RunRow } from "../db/schema";
+import { userOwns } from "./auth";
 import type { AppEnv } from "./deps";
-import { readManualRequest } from "./manual";
+import { readManualRouteRequest } from "./manual";
 
 /** The operator API: start runs, read them, watch them, stop them. */
 export function runRoutes(): Hono<AppEnv> {
@@ -20,17 +21,22 @@ export function runRoutes(): Hono<AppEnv> {
   app.get("/", async (c) => {
     const limit = Math.min(Number(c.req.query("limit") ?? 100) || 100, 200);
     const status = c.req.query("status") as RunStatus | undefined;
-    const rows = await listRuns(c.get("database"), { limit, status });
+    const rows = await listRuns(c.get("database"), {
+      limit,
+      status,
+      userId: c.get("user")?.id,
+    });
     return c.json({ runs: rows.map(toSummary) });
   });
 
   app.post("/", async (c) => {
     const config = c.get("config");
-    const resolved = await readManualRequest(await c.req.json().catch(() => null), config);
+    const resolved = await readManualRouteRequest(c);
     if (!resolved.ok) return c.json(resolved.error, 422);
     const { body, request: manual } = resolved;
 
     const run = await createRun(c.get("database"), {
+      userId: c.get("user")?.id ?? null,
       profile: manual.profile,
       provider: body.provider,
       repoFullName: body.repo,
@@ -50,14 +56,17 @@ export function runRoutes(): Hono<AppEnv> {
 
   app.get("/:runId", async (c) => {
     const run = await getRun(c.get("database"), c.req.param("runId"));
-    if (!run) return c.json({ error: "run not found" }, 404);
+    if (!run || !userOwns(c.get("user"), run.userId))
+      return c.json({ error: "run not found" }, 404);
     return c.json(toDetail(run));
   });
 
   app.get("/:runId/events", async (c) => {
     const database = c.get("database");
     const runId = c.req.param("runId");
-    if (!(await getRun(database, runId))) return c.json({ error: "run not found" }, 404);
+    const run = await getRun(database, runId);
+    if (!run || !userOwns(c.get("user"), run.userId))
+      return c.json({ error: "run not found" }, 404);
     const afterSeq = Number(c.req.query("afterSeq") ?? 0) || 0;
     return c.json({ events: await listEvents(database, runId, afterSeq) });
   });
@@ -66,7 +75,8 @@ export function runRoutes(): Hono<AppEnv> {
     const database = c.get("database");
     const runId = c.req.param("runId");
     const run = await getRun(database, runId);
-    if (!run) return c.json({ error: "run not found" }, 404);
+    if (!run || !userOwns(c.get("user"), run.userId))
+      return c.json({ error: "run not found" }, 404);
     if (isTerminal(run.status)) return c.json({ status: run.status });
 
     // Only the state transition happens here. The sandbox is reclaimed by the
@@ -87,15 +97,19 @@ export function runRoutes(): Hono<AppEnv> {
    * append-only log is the only source, which is why history and live tail are
    * the same code path.
    */
-  app.get("/:runId/stream", (c) => {
+  app.get("/:runId/stream", async (c) => {
     const database = c.get("database");
     const runId = c.req.param("runId");
+    const run = await getRun(database, runId);
+    if (!run || !userOwns(c.get("user"), run.userId)) {
+      return c.json({ error: "run not found" }, 404);
+    }
     // `Last-Event-ID` is what a browser sends on reconnect; `afterSeq` is for
     // anything driving the stream by hand, such as curl.
     const resumeFrom = c.req.header("last-event-id") ?? c.req.query("afterSeq");
     const startSeq = Number(resumeFrom ?? 0) || 0;
 
-    return streamSSE(c, (stream) => tailRun(stream, database, runId, startSeq));
+    return streamSSE(c, (stream) => tailRun(stream, database, runId, startSeq, run.userId));
   });
 
   return app;
@@ -109,8 +123,10 @@ async function tailRun(
   database: Database,
   runId: string,
   startSeq: number,
+  ownerId: string | null,
 ): Promise<void> {
-  if (!(await getRun(database, runId))) {
+  const run = await getRun(database, runId);
+  if (!run || run.userId !== ownerId) {
     await stream.writeSSE({
       event: "error",
       data: JSON.stringify({ message: "run not found" }),

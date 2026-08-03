@@ -141,7 +141,7 @@ export function useRun(id: string) {
     const loadDetail = detailLoader(id, ctx);
     void loadDetail();
 
-    const source = new EventSource(streamUrl(id));
+    const source = new EventSource(streamUrl(id), { withCredentials: true });
     for (const type of FEED_EVENTS) source.addEventListener(type, feedHandler(type, ctx));
     source.addEventListener("status", statusHandler(ctx));
     source.addEventListener("end", () => {

@@ -1,66 +1,47 @@
 # Adding a VCS provider
 
-A VCS provider **mints a credential scoped to one repository** and answers the read-only questions the dashboard's selectors ask.
+The MVP has two providers: GitHub and Azure DevOps. Users connect one identity per provider in **Settings**; the controller then uses that identity for repository listing, branch lookup, cloning, and git actions.
 
-There is no write side. The agent posts its own comments and pushes its own commits from inside the sandbox using the token you mint, so this contract has no publish method, no comment API, and no diff fetching.
+The provider package owns API details. The controller owns OAuth state, encrypted token storage, refresh, and the trust boundary around sandbox credentials.
 
 ```ts
 export interface VCSProvider {
   readonly name: string;
+  getRepository(repoFullName: string): Promise<VcsRepository | null>;
   mintRepoToken(repoFullName: string): Promise<Secret>;
   getDefaultBranch(repoFullName: string): Promise<string | null>;
   listBranches(repoFullName: string): Promise<string[]>;
-  listRepos(): Promise<string[]>;
+  listRepos(): Promise<VcsRepository[]>;
 }
 ```
 
-## 1. Write it
+## Provider implementation
 
-```text
-packages/vcs/
-  my-forge.ts     the implementation
-  index.ts        add one line to FACTORIES
-  http.ts         shared helpers. Use these
-```
+Add one adapter under `packages/vcs/` and register it in `packages/vcs/index.ts`. An adapter receives an already decrypted access token; it must not read process environment variables or persist credentials.
 
-Use `http.ts` rather than rolling your own: `fetchJson` applies a timeout.
+`getRepository`, `getDefaultBranch`, `listBranches`, and `listRepos` are dashboard lookups. They should return `null` or an empty array on provider outages. `mintRepoToken` may throw when the identity is disconnected or cannot access the repository.
 
-## 2. Register it
+Repository names are provider-specific but stable inside the shared `VcsRepository` shape. GitHub uses `owner/name`; Azure DevOps uses `organization/project/repository`.
 
-```ts
-// packages/vcs/index.ts
-const FACTORIES: Record<string, Factory> = {
-  github: createGitHubProvider,
-  "my-forge": createMyForgeProvider,   // ← this line
-};
-```
+## OAuth integration
 
-The controller can now mint tokens through it, and the dashboard's repository and branch selectors can query it.
+Add the provider's OAuth implementation to `packages/vcs/oauth.ts`, then add its configuration keys to `apps/controller/config.ts`. The controller flow is:
 
-## What each method must guarantee
+1. Generate a random state and PKCE verifier and store them in `oauth_states` for ten minutes.
+2. Set an HttpOnly, SameSite=Lax state cookie and redirect to the provider.
+3. Verify the callback state, consume it once, exchange the code, and identify the account.
+4. Encrypt access and refresh tokens with `VCS_ENCRYPTION_KEY` before upserting `vcs_connections`.
+5. Refresh an expiring token before constructing a provider for a run.
 
-### `mintRepoToken`
-
-Prefer something short-lived and scoped to the single repository. A GitHub App installation token is the reference. A long-lived personal access token is acceptable as a fallback, and is strictly worse. Say so in a comment so nobody mistakes it for equivalent. See [secrets.md](secrets.md).
-
-Cache tokens and refresh before expiry with slack, so a long clone cannot straddle the boundary. Collapse concurrent requests for the same repository into one round-trip.
-
-### The selector methods
-
-`getDefaultBranch`, `listBranches`, and `listRepos` are best-effort. They feed dashboard selectors, so they must **never throw**. Return `null` or an empty array. A forge outage should leave the dashboard usable with a typed-in `owner/name`, not blank.
-
-## Configuration
-
-Validate your own slice of the environment inside your factory, the way `github.ts` does. Do not add fields to the controller's config schema. That is what keeps a new forge from touching `apps/controller` at all.
+Do not add provider-specific credential handling to the reconciler. `getVcsProvider` is the one controller resolver for connected identities.
 
 ## Test it
 
-Add a test file next to your implementation. Cover, at minimum:
-
-- tokens are cached and refreshed before expiry, so a long clone cannot straddle the boundary
-- concurrent mints for the same repository collapse into one round-trip
-- the selector methods return `null` or an empty array on a forge outage rather than throwing
+Cover repository normalization, provider outage behavior, and token minting. Run:
 
 ```bash
 pnpm vitest run packages/vcs
+pnpm typecheck
 ```
+
+Adding a provider is a product and security decision. It needs an OAuth registration, a documented scope, and a review of how its token is exposed to the sandbox. Do not reintroduce PAT-only or process-wide provider credentials for convenience.

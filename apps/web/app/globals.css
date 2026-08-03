@@ -104,6 +104,25 @@
 }
 
 .animate-pulse-dot { animation: pulse-dot 1.4s ease-in-out infinite; }
+
+/* Sign-in screen: staggered content reveal and floating satellite cubes. */
+@keyframes sign-in-rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.sign-in-rise { animation: sign-in-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@keyframes iso-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+.iso-float { animation: iso-float 7s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sign-in-rise, .iso-float { animation: none; }
+}
 .app-shell { display: grid; min-height: 100dvh; grid-template-columns: 252px minmax(0, 1fr); }
 .app-shell.nav-collapsed { grid-template-columns: 46px minmax(0, 1fr); }
 .nav-rail { display: flex; flex-direction: column; align-items: center; border-right: 1px solid var(--border); background: oklch(0.974 0 0); padding: 10px 0; }
@@ -118,6 +137,8 @@
 .side-nav-link { display: flex; align-items: center; gap: 0.5rem; height: 2rem; border-radius: 0.5rem; padding-inline: 0.5rem; color: var(--muted-foreground); font-size: 0.8125rem; transition: color 120ms, background 120ms; }
 .side-nav-link:hover { background: var(--accent); color: var(--foreground); }
 .side-nav-link.is-active { background: var(--accent); color: var(--foreground); font-weight: 500; }
+.account-menu-item { display: flex; width: 100%; align-items: center; gap: 0.5rem; border-radius: 0.5rem; padding: 0.5rem 0.625rem; color: var(--muted-foreground); font-size: 0.75rem; transition: color 120ms, background 120ms; }
+.account-menu-item:hover { background: var(--accent); color: var(--foreground); }
 .history-link { display: flex; min-width: 0; align-items: center; gap: 0.5rem; height: 1.875rem; border-radius: 0.5rem; padding-inline: 0.5rem; color: color-mix(in oklab, var(--foreground) 76%, transparent); font-size: 0.8125rem; line-height: 1.25rem; transition: background 120ms, color 120ms; }
 .history-link:hover { background: var(--accent); color: var(--foreground); }
 .history-link.is-active { background: var(--accent); color: var(--foreground); }

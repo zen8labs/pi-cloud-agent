@@ -10,8 +10,9 @@ import type { LogLevel } from "./logger";
  * Everything downstream takes typed values, so a missing variable fails at
  * startup with a readable message instead of surfacing as `undefined` in the
  * middle of a run. Provider packages get the raw environment handed to them and
- * validate their own slice — see `env` below — which is why adding a sandbox or
- * VCS provider needs no change here.
+ * validate their own slice — see `env` below. Sandbox providers need no schema
+ * change; connected providers add explicit keys here because the controller
+ * owns the callback and secret-storage boundary.
  *
  * The `noProcessEnv` lint rule enforces this: no other file may read
  * `process.env`.
@@ -29,16 +30,6 @@ function loadEnvFile(): void {
     }
   }
 }
-
-const commaList = z
-  .string()
-  .default("")
-  .transform((value) =>
-    value
-      .split(",")
-      .map((item) => item.trim())
-      .filter((item) => item.length > 0),
-  );
 
 const schema = z.object({
   PORT: z.coerce.number().int().positive().default(8080),
@@ -64,8 +55,19 @@ const schema = z.object({
   RUN_WALL_CLOCK_SECONDS: z.coerce.number().int().positive().default(3600),
   SESSION_WORKSPACE_RETENTION_SECONDS: z.coerce.number().int().positive().default(604_800),
 
-  WEB_REPOS: commaList,
+  WEB_URL: z.string().url().default("http://localhost:3000"),
   WEB_CORS_ORIGINS: z.string().default("http://localhost:3000"),
+
+  APP_SESSION_SECRET: z.string().default(""),
+  APP_AUTH_REQUIRED: z.enum(["true", "false"]).default("true"),
+  VCS_ENCRYPTION_KEY: z.string().default(""),
+  GITHUB_APP_CLIENT_ID: z.string().default(""),
+  GITHUB_APP_CLIENT_SECRET: z.string().default(""),
+  GITHUB_APP_REDIRECT_URI: z.string().default(""),
+  AZURE_DEVOPS_CLIENT_ID: z.string().default(""),
+  AZURE_DEVOPS_CLIENT_SECRET: z.string().default(""),
+  AZURE_DEVOPS_TENANT_ID: z.string().default("common"),
+  AZURE_DEVOPS_REDIRECT_URI: z.string().default(""),
 });
 
 export type Env = Readonly<Record<string, string | undefined>>;
@@ -94,9 +96,14 @@ export interface Config {
   runWallClockSeconds: number;
   sessionWorkspaceRetentionSeconds: number;
   web: {
-    repos: string[];
+    url: string;
     corsOrigins: string[];
   };
+  auth: {
+    requireUser: boolean;
+    sessionSecret: string;
+  };
+  vcs: { encryptionKey: string };
   /** Handed to provider factories so they can read their own variables. */
   env: Env;
 }
@@ -110,6 +117,13 @@ function build(env: Env): Config {
     throw new Error(`Invalid configuration:\n${issues}\n\nSee .env.example.`);
   }
   const value = parsed.data;
+
+  const requireUser = value.APP_AUTH_REQUIRED === "true";
+  if (requireUser && value.APP_SESSION_SECRET.length < 32) {
+    throw new Error(
+      "APP_SESSION_SECRET must contain at least 32 characters when APP_AUTH_REQUIRED=true",
+    );
+  }
 
   const separator = value.AGENT_MODEL.indexOf("/");
   if (separator <= 0 || separator === value.AGENT_MODEL.length - 1) {
@@ -137,11 +151,16 @@ function build(env: Env): Config {
     runWallClockSeconds: value.RUN_WALL_CLOCK_SECONDS,
     sessionWorkspaceRetentionSeconds: value.SESSION_WORKSPACE_RETENTION_SECONDS,
     web: {
-      repos: value.WEB_REPOS,
+      url: value.WEB_URL.replace(/\/$/, ""),
       corsOrigins: value.WEB_CORS_ORIGINS.split(",")
         .map((origin) => origin.trim())
         .filter((origin) => origin.length > 0),
     },
+    auth: {
+      requireUser,
+      sessionSecret: value.APP_SESSION_SECRET,
+    },
+    vcs: { encryptionKey: value.VCS_ENCRYPTION_KEY },
     env,
   };
 }

@@ -161,7 +161,7 @@ function newReconciler(): Reconciler {
   return createReconciler({
     config,
     database,
-    broker: createCredentialBroker(config, log),
+    broker: createCredentialBroker(config, database, log),
     log,
   });
 }

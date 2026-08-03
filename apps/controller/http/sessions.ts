@@ -17,8 +17,9 @@ import {
   SessionBusyError,
   SessionNotFoundError,
 } from "../db/sessions";
+import { userOwns } from "./auth";
 import type { AppEnv } from "./deps";
-import { readManualRequest } from "./manual";
+import { readManualRouteRequest } from "./manual";
 import { toDetail } from "./runs";
 
 /** Durable chat sessions. Each user turn creates one ordinary run. */
@@ -27,7 +28,7 @@ export function sessionRoutes(): Hono<AppEnv> {
 
   app.get("/", async (c) => {
     const limit = Math.min(Number(c.req.query("limit") ?? 100) || 100, 200);
-    const rows = await listSessions(c.get("database"), limit);
+    const rows = await listSessions(c.get("database"), limit, c.get("user")?.id);
     const summaries = await Promise.all(
       rows.map((row) => toSessionSummary(c.get("database"), row)),
     );
@@ -36,11 +37,12 @@ export function sessionRoutes(): Hono<AppEnv> {
 
   app.post("/", async (c) => {
     const config = c.get("config");
-    const resolved = await readManualRequest(await c.req.json().catch(() => null), config);
+    const resolved = await readManualRouteRequest(c);
     if (!resolved.ok) return c.json(resolved.error, 422);
     const { body, request: manual } = resolved;
 
     const created = await createSessionWithRun(c.get("database"), {
+      userId: c.get("user")?.id ?? null,
       title: titleFrom(body.prompt, body.repo),
       profile: manual.profile,
       provider: body.provider,
@@ -61,8 +63,10 @@ export function sessionRoutes(): Hono<AppEnv> {
   app.get("/:sessionId", async (c) => {
     const database = c.get("database");
     const session = await getSession(database, c.req.param("sessionId"));
-    if (!session) return c.json({ error: "session not found" }, 404);
-    const runs = await listSessionRuns(database, session.id);
+    if (!session || !userOwns(c.get("user"), session.userId)) {
+      return c.json({ error: "session not found" }, 404);
+    }
+    const runs = await listSessionRuns(database, session.id, c.get("user")?.id);
     const detail: SessionDetail = {
       ...(await toSessionSummary(database, session)),
       runs: runs.map(toDetail),
@@ -81,6 +85,7 @@ export function sessionRoutes(): Hono<AppEnv> {
         c.req.param("sessionId"),
         parsed.data.prompt,
         randomBytes(32).toString("hex"),
+        c.get("user")?.id ?? null,
       );
       c.get("log").info("session turn queued", {
         sessionId: run.sessionId,

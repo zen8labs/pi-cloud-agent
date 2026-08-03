@@ -2,17 +2,44 @@
 
 import { PanelLeftIcon, PlusIcon } from "lucide-react";
 import Link from "next/link";
+import { useEffect, useState } from "react";
+import { AccountMenu } from "@/components/AccountMenu";
 import { NavCollapseProvider, useNavCollapse } from "@/components/nav-collapse";
 import { SideNav } from "@/components/SideNav";
+import { SignIn } from "@/components/SignIn";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 /** The shell owns the left navigation's collapsed state; pages never see it. */
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <NavCollapseProvider>
-      <Shell>{children}</Shell>
+      <AuthGate>{children}</AuthGate>
     </NavCollapseProvider>
   );
+}
+
+function AuthGate({ children }: { children: React.ReactNode }) {
+  const [state, setState] = useState<"loading" | "signed-in" | "signed-out">("loading");
+
+  useEffect(() => {
+    void api
+      .getCurrentUser()
+      .then(() => setState("signed-in"))
+      .catch(() => setState("signed-out"));
+  }, []);
+
+  if (state === "loading") {
+    return (
+      <div className="grid min-h-screen place-items-center text-sm text-muted-foreground">
+        Loading…
+      </div>
+    );
+  }
+  if (state === "signed-out") {
+    return <SignIn />;
+  }
+  return <Shell>{children}</Shell>;
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
@@ -37,6 +64,7 @@ function NavRail() {
         <PlusIcon className="size-4" />
       </Link>
       <div className="flex-1" />
+      <AccountMenu compact placement="right" />
     </div>
   );
 }

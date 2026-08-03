@@ -46,8 +46,8 @@ test("the chat shell renders session history in the sidebar", async ({ page }) =
 test("the new-session form gates submit on a repo and a prompt", async ({ page }) => {
   await page.goto("/chat");
   const start = page.getByRole("button", { name: "Start" });
-  await expect(page.getByText("Repository", { exact: true })).toBeVisible();
-  await expect(page.getByText("Profile", { exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Repository" })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Profile" })).toBeVisible();
   await expect(start).toBeDisabled();
 
   // A configured repository is already selected. Credential-free CI exposes

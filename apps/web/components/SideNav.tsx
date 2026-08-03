@@ -1,25 +1,22 @@
 "use client";
 
 import type { SessionSummary } from "@pi-cloud-agent/protocol";
-import { MoonIcon, PanelLeftIcon, PlusIcon, SunIcon } from "lucide-react";
+import { PanelLeftIcon, PlusIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { AccountMenu } from "@/components/AccountMenu";
 import { useNavCollapse } from "@/components/nav-collapse";
-import { useTheme } from "@/components/ThemeProvider";
 import { api } from "@/lib/api";
 import { loadSessionTitles } from "@/lib/session-titles";
 import { cn } from "@/lib/utils";
 
 export function SideNav() {
   const pathname = usePathname();
-  const { theme, toggle } = useTheme();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [titles, setTitles] = useState<Record<string, string>>({});
-  const [mounted, setMounted] = useState(false);
 
-  useEffect(() => setMounted(true), []);
   useEffect(() => {
     let alive = true;
     const load = () =>
@@ -51,6 +48,7 @@ export function SideNav() {
           <MobileLink href="/chat" label="New task" active={pathname === "/chat"}>
             <PlusIcon />
           </MobileLink>
+          <AccountMenu compact placement="bottom" />
         </div>
       </header>
 
@@ -94,14 +92,7 @@ export function SideNav() {
         </div>
 
         <div className="border-t border-border px-2.5 py-2.5">
-          <button type="button" onClick={toggle} className="side-nav-link w-full">
-            {mounted && theme === "light" ? (
-              <MoonIcon className="size-3.5" />
-            ) : (
-              <SunIcon className="size-3.5" />
-            )}
-            {mounted && theme === "light" ? "Dark mode" : "Light mode"}
-          </button>
+          <AccountMenu />
         </div>
       </aside>
     </>

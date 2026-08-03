@@ -8,11 +8,14 @@ import {
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
 /**
- * Four tables. That is the entire persistent state of the system.
+ * Seven tables. Users and web sessions own the application identity boundary;
+ * runs and sessions own execution state; connections own encrypted VCS tokens
+ * and short-lived OAuth state.
  *
  * `runs` is simultaneously the queue, the lifecycle record, and the crash
  * recovery journal — which is deliberate. Because every fact the controller
@@ -23,10 +26,58 @@ import {
 
 const timestamptz = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
 
+export const appUsers = pgTable(
+  "app_users",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    githubUserId: text("github_user_id").notNull(),
+    login: text("login").notNull(),
+    displayName: text("display_name").notNull(),
+    avatarUrl: text("avatar_url"),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("app_users_github_user_idx").on(table.githubUserId)],
+);
+
+export const vcsConnections = pgTable(
+  "vcs_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").references(() => appUsers.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    accountId: text("account_id").notNull(),
+    accountName: text("account_name").notNull(),
+    accessToken: text("access_token").notNull(),
+    refreshToken: text("refresh_token"),
+    expiresAt: timestamptz("expires_at"),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("vcs_connections_user_provider_idx").on(table.userId, table.provider),
+  ],
+);
+
+export const oauthStates = pgTable(
+  "oauth_states",
+  {
+    state: text("state").primaryKey(),
+    userId: uuid("user_id").references(() => appUsers.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    returnTo: text("return_to"),
+    codeVerifier: text("code_verifier").notNull(),
+    expiresAt: timestamptz("expires_at").notNull(),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+  },
+  (table) => [index("oauth_states_expiry_idx").on(table.expiresAt)],
+);
+
 export const sessions = pgTable(
   "sessions",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").references(() => appUsers.id, { onDelete: "set null" }),
     title: text("title").notNull(),
     profile: text("profile").notNull(),
     provider: text("provider").notNull(),
@@ -62,6 +113,7 @@ export const runs = pgTable(
   "runs",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").references(() => appUsers.id, { onDelete: "set null" }),
 
     /** Null for standalone background runs; set for interactive turns. */
     sessionId: uuid("session_id").references(() => sessions.id, { onDelete: "cascade" }),
@@ -145,6 +197,27 @@ export const runEvents = pgTable(
   ],
 );
 
+export const webSessions = pgTable(
+  "web_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => appUsers.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: timestamptz("expires_at").notNull(),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("web_sessions_token_hash_idx").on(table.tokenHash),
+    index("web_sessions_user_expiry_idx").on(table.userId, table.expiresAt),
+  ],
+);
+
 export type RunRow = typeof runs.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
 export type RunEventRow = typeof runEvents.$inferSelect;
+export type VcsConnectionRow = typeof vcsConnections.$inferSelect;
+export type OAuthStateRow = typeof oauthStates.$inferSelect;
+export type AppUserRow = typeof appUsers.$inferSelect;
+export type WebSessionRow = typeof webSessions.$inferSelect;
