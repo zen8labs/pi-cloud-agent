@@ -18,6 +18,13 @@ export const SANDBOX_ENV = {
   profile: "PROFILE",
   taskPrompt: "TASK_PROMPT",
 
+  /**
+   * Optional JSON snapshot of resolved MCP server config for `createMcpAdapter`.
+   * Absent or empty means zero MCP tools. Values may contain secrets; treat as
+   * redacted material (never log or persist in run_events).
+   */
+  mcpConfig: "MCP_CONFIG",
+
   model: "AGENT_MODEL",
   modelBaseUrl: "MODEL_BASE_URL",
   modelApiKey: "MODEL_API_KEY",

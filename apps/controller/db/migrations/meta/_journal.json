@@ -50,6 +50,13 @@
       "when": 1785731466972,
       "tag": "0006_flat_proudstar",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785892555712,
+      "tag": "0007_short_maggott",
+      "breakpoints": true
     }
   ]
 }

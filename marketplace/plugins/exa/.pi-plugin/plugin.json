@@ -1,0 +1,25 @@
+{
+  "name": "exa",
+  "version": "1.0.0",
+  "description": "Web search and page fetch via Exa MCP (OAuth preferred).",
+  "author": { "name": "Zen8" },
+  "keywords": ["search", "web", "mcp", "exa"],
+  "skills": "skills/",
+  "mcpServers": "mcp.json",
+  "oauth": {
+    "resource": "https://mcp.exa.ai/mcp",
+    "tokenVariable": "EXA_ACCESS_TOKEN",
+    "scopes": ["mcp:tools"]
+  },
+  "variables": {
+    "type": "object",
+    "properties": {
+      "EXA_ACCESS_TOKEN": {
+        "type": "string",
+        "title": "Exa OAuth token (or API key)",
+        "description": "Prefer Connect (OAuth). Paste an API key from https://dashboard.exa.ai/api-keys only as a fallback."
+      }
+    },
+    "required": ["EXA_ACCESS_TOKEN"]
+  }
+}

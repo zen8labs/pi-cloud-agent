@@ -33,7 +33,10 @@ WORKDIR /app
 # dist/package.json pins Pi to the version the bundle was built against, and Pi
 # ships a shrinkwrap, so this layer is reproducible.
 COPY dist/package.json /app/package.json
-RUN npm install --omit=dev --no-audit --no-fund
+COPY dist/patch-pi-ai-exports.mjs /app/patch-pi-ai-exports.mjs
+RUN npm install --omit=dev --no-audit --no-fund \
+    && node /app/patch-pi-ai-exports.mjs \
+    && rm /app/patch-pi-ai-exports.mjs
 
 COPY dist/run.js /app/run.js
 

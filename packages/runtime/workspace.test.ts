@@ -35,6 +35,7 @@ const config: RuntimeConfig = {
     path: "/workspace/widgets",
   },
   git: { username: "x-access-token", hasToken: false },
+  mcpConfig: null,
 };
 
 function fakeReporter(): Reporter {

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "exa": {
+      "url": "https://mcp.exa.ai/mcp/oauth",
+      "headers": {
+        "Authorization": "Bearer ${EXA_ACCESS_TOKEN}"
+      },
+      "lifecycle": "lazy"
+    }
+  }
+}

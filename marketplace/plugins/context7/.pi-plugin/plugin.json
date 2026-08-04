@@ -1,0 +1,20 @@
+{
+  "name": "context7",
+  "version": "1.0.0",
+  "description": "Up-to-date library docs via Context7 MCP (resolve library + query docs).",
+  "author": { "name": "Zen8" },
+  "keywords": ["docs", "mcp", "context7"],
+  "skills": "skills/",
+  "mcpServers": "mcp.json",
+  "variables": {
+    "type": "object",
+    "properties": {
+      "CONTEXT7_API_KEY": {
+        "type": "string",
+        "title": "Context7 API key",
+        "description": "From https://context7.com/dashboard (recommended for rate limits)."
+      }
+    },
+    "required": ["CONTEXT7_API_KEY"]
+  }
+}

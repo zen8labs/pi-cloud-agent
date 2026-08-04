@@ -24,6 +24,16 @@ These are known limitations, not solved problems:
 
 The application user is established by the GitHub App callback. VCS connections, runs, sessions, repository discovery, and dashboard reads are scoped by that user's database id. Internal sandbox callbacks use a separate per-run callback token and are not authenticated by the browser session.
 
+## Plugin MCP OAuth
+
+Host-mediated plugin OAuth reuses the same encryption key (`VCS_ENCRYPTION_KEY`)
+and stores access/refresh tokens in `plugin_oauth_tokens` plus a copy of the
+access token in `plugin_user_variables` under the manifest `tokenVariable`.
+
+- Authorization-server hosts must be listed in `PLUGIN_OAUTH_ISSUER_ALLOWLIST`.
+- Tokens must never appear in `run_events`, logs, or audit detail payloads.
+- Dynamic client registration caches `client_id` in `plugin_oauth_clients` (public client, PKCE only — no client secret).
+
 ## Planned secrets broker
 
 The broker should replace the direct token handoff, not add another token alias. The preferred shape is a broker-backed git credential helper or egress proxy that authorizes a repository operation and injects credentials outside the sandbox. GitHub installation tokens are the intended GitHub execution target: they can be limited to repositories and permissions and expire after one hour.

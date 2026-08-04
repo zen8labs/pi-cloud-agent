@@ -139,6 +139,27 @@ For E2B, select `SANDBOX_PROVIDER=e2b` and use `pnpm sandbox:template`.
 
 Create runs from the dashboard after signing in with GitHub. Direct operator API calls must include the authenticated browser session cookie; unauthenticated requests intentionally return `401`.
 
+## Plugins marketplace
+
+Operators listed in `OPERATOR_GITHUB_LOGINS` can seed `marketplace/plugins` and manage review/install modes. Any signed-in user can install plugins and configure variables from the **Plugins** page.
+
+```bash
+pnpm db:migrate
+pnpm plugins:seed   # publishes every package under marketplace/plugins as approved / default_off
+```
+
+Set `PLUGIN_OAUTH_REDIRECT_URI` to a browser-reachable controller URL (for local
+dev usually `http://localhost:8080/plugins/oauth/callback` — not the sandbox
+gateway host). Keep `PLUGIN_OAUTH_ISSUER_ALLOWLIST` tight (default `auth.exa.ai`).
+
+Demo with Context7: Install → Configure with a key from https://context7.com/dashboard → start a `general` run that asks about a library API.
+
+Demo with Exa: Install → **Connect** (OAuth) → start a `general` run that needs live web search. Paste an API key under Configure only as a fallback.
+
+Plugin skills replace the profile skill; MCP arrives as resolved `MCP_CONFIG` in the sandbox (never from the cloned repo).
+
+Yanked versions cannot newly attach; in-flight runs keep the plugin set pinned on `runs.plugins`.
+
 Create the session from the dashboard after signing in with GitHub, then use its conversation UI for the follow-up turn.
 
 The live test performs this as two real turns and verifies the Pi session id, uncommitted file, provider workspace id, and absence of a second clone. Run it after changing the sandbox image, runtime, session checkpointing, provider lifecycle, or model configuration.

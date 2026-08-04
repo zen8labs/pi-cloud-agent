@@ -39,7 +39,8 @@ export const runEventInputSchema = z.discriminatedUnion("type", [
 ]);
 
 export type RunEventInput = z.infer<typeof runEventInputSchema>;
-export type RunEventType = RunEventInput["type"] | "status";
+/** Sandbox telemetry, terminal status, plus controller-emitted attach metadata. */
+export type RunEventType = RunEventInput["type"] | "status" | "plugins.attached";
 
 /** The terminal report. `done` succeeds the run; `error` fails it. */
 export const runStatusReportSchema = z.object({

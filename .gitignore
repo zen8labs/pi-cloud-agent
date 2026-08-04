@@ -19,6 +19,9 @@ playwright-report/
 # Written by `e2b template build`; holds an account-specific template id.
 e2b.toml
 
+# Published plugin artifacts (local marketplace store).
+.pi-plugin-artifacts/
+
 # AIHub auto-generated history
 .specstory/
 # Reference code consulted during architecture design, not part of the project

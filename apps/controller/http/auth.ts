@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { createWebSession, deleteWebSession } from "../db/auth";
 import type { AppUserRow } from "../db/schema";
+import { isOperator } from "../plugins/marketplace";
 import { beginVcsConnection, finishGithubLogin } from "../vcs/connections";
 import type { AppEnv } from "./deps";
 
@@ -80,6 +81,7 @@ export function authRoutes(): Hono<AppEnv> {
         login: "local",
         displayName: "Local test user",
         avatarUrl: null,
+        isOperator: isOperator(c.get("config"), "local"),
       });
     }
     if (!user) return c.json({ error: "authentication required" }, 401);
@@ -88,6 +90,7 @@ export function authRoutes(): Hono<AppEnv> {
       login: user.login,
       displayName: user.displayName,
       avatarUrl: user.avatarUrl,
+      isOperator: isOperator(c.get("config"), user.login),
     });
   });
 

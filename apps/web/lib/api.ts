@@ -3,6 +3,8 @@ import type {
   BranchesResponse,
   ConfigResponse,
   CreateRunRequest,
+  PluginCatalogEntry,
+  PluginCatalogResponse,
   RunDetail,
   RunEvent,
   RunEventsResponse,
@@ -123,6 +125,57 @@ export const api = {
     provider === "github"
       ? `${API_BASE}/auth/github/connect?returnTo=settings`
       : `${API_BASE}/vcs/connections/${encodeURIComponent(provider)}/connect`,
+
+  listPlugins: (): Promise<PluginCatalogResponse> => request<PluginCatalogResponse>("/plugins"),
+
+  connectPluginOAuthUrl: (name: string): string =>
+    `${API_BASE}/plugins/${encodeURIComponent(name)}/oauth/connect`,
+
+  installPlugin: (name: string, enabled: boolean): Promise<{ ok: boolean }> =>
+    request<{ ok: boolean }>("/plugins/install", {
+      method: "POST",
+      body: JSON.stringify({ name, enabled }),
+    }),
+
+  uninstallPlugin: (name: string): Promise<{ ok: boolean }> =>
+    request<{ ok: boolean }>("/plugins/uninstall", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+
+  configurePlugin: (
+    name: string,
+    variables: Record<string, string>,
+  ): Promise<{ ok: boolean }> =>
+    request<{ ok: boolean }>("/plugins/configure", {
+      method: "POST",
+      body: JSON.stringify({ name, variables }),
+    }),
+
+  seedPlugins: (): Promise<{ ok: boolean; plugins: PluginCatalogEntry[] }> =>
+    request<{ ok: boolean; plugins: PluginCatalogEntry[] }>("/plugins/seed", {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
+  setPluginInstallMode: (
+    name: string,
+    installMode: "default_off" | "default_on" | "required",
+  ): Promise<{ ok: boolean }> =>
+    request<{ ok: boolean }>("/plugins/install-mode", {
+      method: "POST",
+      body: JSON.stringify({ name, installMode }),
+    }),
+
+  reviewPlugin: (
+    name: string,
+    version: string,
+    status: "draft" | "approved" | "yanked",
+  ): Promise<{ ok: boolean }> =>
+    request<{ ok: boolean }>("/plugins/review", {
+      method: "POST",
+      body: JSON.stringify({ name, version, status }),
+    }),
 };
 
 export function streamUrl(id: string): string {

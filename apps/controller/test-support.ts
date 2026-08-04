@@ -29,7 +29,7 @@ export function setupTestDatabase(): Database {
 
 export async function resetTables(database: Database): Promise<void> {
   await database.execute(
-    sql`truncate table web_sessions, oauth_states, vcs_connections, run_events, runs, sessions, app_users cascade`,
+    sql`truncate table plugin_audit_log, plugin_oauth_tokens, plugin_oauth_clients, plugin_user_variables, plugin_user_state, plugin_settings, plugin_versions, plugins, web_sessions, oauth_states, vcs_connections, run_events, runs, sessions, app_users cascade`,
   );
 }
 

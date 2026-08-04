@@ -4,7 +4,7 @@
 
 Decides what runs and when, resolves connected identities, mints run credentials, starts sandboxes, records what happened, and reclaims machines.
 
-**Depends on:** `protocol`, `profiles`, `sandbox`, `vcs`. It is the only package allowed to compose everything, and the only one that reaches Postgres.
+**Depends on:** `protocol`, `profiles`, `plugins`, `sandbox`, `vcs`. It is the only package allowed to compose everything, and the only one that reaches Postgres.
 
 ## Files
 
@@ -13,7 +13,7 @@ Decides what runs and when, resolves connected identities, mints run credentials
 | `index.ts` | bootstrap: HTTP surface + reconciler in one process, graceful shutdown |
 | `config.ts` | **the only file in the repo that reads `process.env`** |
 | `logger.ts` | structured JSON lines; level is passed in, never read from globals |
-| `db/schema.ts` | seven tables: application users, browser sessions, execution state, and VCS connections |
+| `db/schema.ts` | application users, browser sessions, execution state, VCS connections, plugin catalog |
 | `db/sessions.ts` | ordered turns, Pi checkpoints, and parked workspace ownership |
 | `db/runs.ts` | every write to a run, each a single guarded statement |
 | `db/client.ts` | the pool, plus `LISTEN/NOTIFY`, the bus replacement |
@@ -22,9 +22,13 @@ Decides what runs and when, resolves connected identities, mints run credentials
 | `http/manual.ts` | request parsing shared by the run and session routes |
 | `http/runs.ts` | the operator API, including the resumable SSE stream |
 | `http/sessions.ts` | durable chat sessions and guarded follow-up turns |
+| `http/plugins.ts` | marketplace catalog, install, configure, OAuth connect/callback, operator publish/review |
 | `http/internal.ts` | events, terminal status, and checkpoint callbacks, authenticated per run |
 | `http/meta.ts` | what the dashboard needs to render itself |
 | `http/vcs.ts` | OAuth connect callbacks and connection management |
+| `plugins/catalog.ts` | resolve effective plugins for a run; compose skills + MCP |
+| `plugins/marketplace.ts` | publish, review, install, configure, audit |
+| `plugins/oauth.ts` | host-mediated MCP OAuth (RFC 9728 discovery, DCR, PKCE) |
 | `reconcile/loop.ts` | the one loop that repairs durable state |
 | `reconcile/provision.ts` | queued → a sandbox is working on it, as a short transaction |
 | `secrets/broker.ts` | shapes the credentials one run needs, and nothing more |

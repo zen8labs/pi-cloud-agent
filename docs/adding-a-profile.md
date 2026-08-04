@@ -92,6 +92,8 @@ Your profile does not post results. The agent does, from inside the sandbox, usi
 
 If you want structured output, ask for it in the skill and have the agent write it where the reader will look. Do not add a controller-side parser; see [../AGENTS.md](../AGENTS.md) on what to consult about first.
 
+**Plugin skills override profile skills.** When a user has any enabled plugin that contributes skills, those plugin skills replace your profile's `skill` in `TASK_PROMPT`. If no plugin skills attach, your profile skill is used unchanged. See [adding-a-plugin.md](adding-a-plugin.md).
+
 ## Test it
 
 Add cases to `packages/profiles/profiles.test.ts`. The shared `describe("every profile")` block already covers the contract (registration, empty config, schema publication, task attribution), so you only need tests for your own triggering policy and prompt.

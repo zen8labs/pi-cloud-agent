@@ -6,6 +6,7 @@ import { authRoutes } from "./auth";
 import type { AppEnv, Deps } from "./deps";
 import { internalRoutes } from "./internal";
 import { metaRoutes } from "./meta";
+import { pluginRoutes } from "./plugins";
 import { runRoutes } from "./runs";
 import { sessionRoutes } from "./sessions";
 import { vcsRoutes } from "./vcs";
@@ -85,6 +86,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   app.route("/auth", authRoutes());
   app.route("/runs", runRoutes());
   app.route("/sessions", sessionRoutes());
+  app.route("/plugins", pluginRoutes());
   app.route("/internal", internalRoutes());
   app.route("/vcs", vcsRoutes());
   app.route("/", metaRoutes());
