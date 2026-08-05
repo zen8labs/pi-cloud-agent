@@ -16,9 +16,7 @@ export function metaRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   app.get("/config", (c) => {
-    const config = c.get("config");
     const response: ConfigResponse = {
-      model: config.model.id,
       profiles: listProfiles().map((profile) => ({
         name: profile.name,
         description: profile.description,

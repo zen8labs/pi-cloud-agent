@@ -1,6 +1,5 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { Secret } from "@pi-cloud-agent/protocol";
 import { z } from "zod";
 import type { LogLevel } from "./logger";
 
@@ -43,13 +42,6 @@ const schema = z.object({
    */
   CONTROL_PLANE_URL: z.string().url().default("http://host.microsandbox.internal:8080"),
 
-  /** provider/model. The provider segment names an OpenAI-compatible gateway. */
-  AGENT_MODEL: z.string().min(1).default("openai/gpt-5.6-sol"),
-  AIGATEWAY_BASE_URL: z.string().default(""),
-  AIGATEWAY_API_KEY: z.string().default(""),
-  MODEL_CONTEXT_WINDOW: z.coerce.number().int().positive().default(196_608),
-  MODEL_MAX_TOKENS: z.coerce.number().int().positive().default(32_000),
-
   SANDBOX_PROVIDER: z.string().default("microsandbox"),
   SANDBOX_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(3900),
   RUN_WALL_CLOCK_SECONDS: z.coerce.number().int().positive().default(3600),
@@ -60,7 +52,8 @@ const schema = z.object({
 
   APP_SESSION_SECRET: z.string().default(""),
   APP_AUTH_REQUIRED: z.enum(["true", "false"]).default("true"),
-  VCS_ENCRYPTION_KEY: z.string().default(""),
+  VCS_ENCRYPTION_KEY: z.string().regex(/^[0-9a-f]{64}$/i, "must be 64 hexadecimal characters"),
+  LLM_ENCRYPTION_KEY: z.string().regex(/^[0-9a-f]{64}$/i, "must be 64 hexadecimal characters"),
   GITHUB_APP_CLIENT_ID: z.string().default(""),
   GITHUB_APP_CLIENT_SECRET: z.string().default(""),
   GITHUB_APP_REDIRECT_URI: z.string().default(""),
@@ -77,18 +70,6 @@ export interface Config {
   logLevel: LogLevel;
   databaseUrl: string;
   controlPlaneUrl: string;
-  model: {
-    /** Full id as written in config, e.g. "openai/gpt-5.6-sol". */
-    id: string;
-    /** The gateway name — the first path segment. */
-    provider: string;
-    /** The model name the gateway expects — everything after the first segment. */
-    name: string;
-    baseUrl: string;
-    apiKey: Secret;
-    contextWindow: number;
-    maxTokens: number;
-  };
   sandbox: {
     provider: string;
     timeoutSeconds: number;
@@ -104,6 +85,7 @@ export interface Config {
     sessionSecret: string;
   };
   vcs: { encryptionKey: string };
+  llm: { encryptionKey: string };
   /** Handed to provider factories so they can read their own variables. */
   env: Env;
 }
@@ -134,25 +116,11 @@ function build(env: Env): Config {
     );
   }
 
-  const separator = value.AGENT_MODEL.indexOf("/");
-  if (separator <= 0 || separator === value.AGENT_MODEL.length - 1) {
-    throw new Error(`AGENT_MODEL must be "provider/model", got "${value.AGENT_MODEL}"`);
-  }
-
   return {
     port: value.PORT,
     logLevel: value.LOG_LEVEL,
     databaseUrl: value.DATABASE_URL,
     controlPlaneUrl: value.CONTROL_PLANE_URL.replace(/\/$/, ""),
-    model: {
-      id: value.AGENT_MODEL,
-      provider: value.AGENT_MODEL.slice(0, separator),
-      name: value.AGENT_MODEL.slice(separator + 1),
-      baseUrl: value.AIGATEWAY_BASE_URL.replace(/\/$/, ""),
-      apiKey: new Secret(value.AIGATEWAY_API_KEY, "model api key"),
-      contextWindow: value.MODEL_CONTEXT_WINDOW,
-      maxTokens: value.MODEL_MAX_TOKENS,
-    },
     sandbox: {
       provider: value.SANDBOX_PROVIDER,
       timeoutSeconds: value.SANDBOX_TIMEOUT_SECONDS,
@@ -168,6 +136,7 @@ function build(env: Env): Config {
       sessionSecret: value.APP_SESSION_SECRET,
     },
     vcs: { encryptionKey: value.VCS_ENCRYPTION_KEY },
+    llm: { encryptionKey: value.LLM_ENCRYPTION_KEY },
     env,
   };
 }

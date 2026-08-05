@@ -30,7 +30,7 @@ export function decryptSecret(value: string, encryptionKey: string): string {
 
 function keyBytes(value: string): Buffer {
   if (!/^[0-9a-f]{64}$/i.test(value)) {
-    throw new Error("VCS_ENCRYPTION_KEY must be 64 hexadecimal characters");
+    throw new Error("encryption key must be 64 hexadecimal characters");
   }
   return Buffer.from(value, "hex");
 }

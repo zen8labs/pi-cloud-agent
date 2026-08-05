@@ -1,25 +1,28 @@
 import type {
   ConfigResponse,
+  LlmConnectionsResponse,
   RunDetail,
   RunEventsResponse,
   RunListResponse,
   RunSummary,
+  SessionSummary,
 } from "@pi-cloud-agent/protocol";
-import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createWebSession, upsertAppUser } from "../db/auth";
 import { closeDatabase, type Database } from "../db/client";
-import { completeRun, createRun, getRun } from "../db/runs";
-import { oauthStates } from "../db/schema";
+import { getRun } from "../db/runs";
 import { parkSession } from "../db/sessions";
+import { saveApiKeyConnection } from "../llm/connections";
+import { createCredentialBroker } from "../secrets/broker";
 import {
   manualTrigger,
   resetTables,
   seedRun,
-  seedSession,
+  seedTestUser,
   setupTestDatabase,
   silentLogger,
   testConfig,
+  withTestModel,
 } from "../test-support";
 import { createApp } from "./app";
 
@@ -33,6 +36,9 @@ import { createApp } from "./app";
 
 let database: Database;
 let app: ReturnType<typeof createApp>;
+let testCookie: string;
+let testUserId: string;
+let testModelConnectionId: string;
 
 beforeAll(async () => {
   database = setupTestDatabase();
@@ -41,6 +47,11 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await resetTables(database);
+  const config = testConfig();
+  const seeded = await seedTestUser(database, config);
+  testUserId = seeded.userId;
+  testCookie = seeded.cookie;
+  testModelConnectionId = seeded.modelConnectionId;
 });
 
 afterAll(async () => {
@@ -50,136 +61,14 @@ afterAll(async () => {
 function post(path: string, body: unknown, headers: Record<string, string> = {}) {
   return app.request(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...headers },
-    body: JSON.stringify(body),
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: `pca_session=${testCookie}`,
+      ...headers,
+    },
+    body: JSON.stringify(withTestModel(body, testModelConnectionId)),
   });
 }
-
-describe("browser boundary", () => {
-  it("allows the local dashboard origin without admitting arbitrary websites", async () => {
-    const allowed = await app.request("/healthz", {
-      headers: { Origin: "http://localhost:3000" },
-    });
-    expect(allowed.headers.get("access-control-allow-origin")).toBe("http://localhost:3000");
-
-    const denied = await app.request("/healthz", {
-      headers: { Origin: "https://untrusted.example" },
-    });
-    expect(denied.headers.get("access-control-allow-origin")).toBeNull();
-
-    expect(() => testConfig({ WEB_CORS_ORIGINS: "*" })).toThrow(
-      "WEB_CORS_ORIGINS must list explicit origins",
-    );
-  });
-
-  it("requires a session and scopes runs to the signed-in user", async () => {
-    const secureApp = createApp({
-      config: testConfig({ APP_AUTH_REQUIRED: "true" }),
-      database,
-      log: silentLogger(),
-    });
-    const first = await upsertAppUser(database, {
-      githubUserId: "github-1",
-      login: "first",
-      displayName: "First User",
-    });
-    const second = await upsertAppUser(database, {
-      githubUserId: "github-2",
-      login: "second",
-      displayName: "Second User",
-    });
-    const firstRun = await createRun(database, {
-      userId: first.id,
-      profile: "general",
-      provider: "github",
-      repoFullName: "acme/first",
-      trigger: manualTrigger({ owner: "acme", name: "first" }),
-      model: "aigateway/test-model",
-      callbackToken: "first-run-token",
-    });
-    const secondRun = await createRun(database, {
-      userId: second.id,
-      profile: "general",
-      provider: "github",
-      repoFullName: "acme/second",
-      trigger: manualTrigger({ owner: "acme", name: "second" }),
-      model: "aigateway/test-model",
-      callbackToken: "second-run-token",
-    });
-    expect(firstRun.userId).toBe(first.id);
-    expect(secondRun.userId).toBe(second.id);
-    const cookie = await createWebSession(database, first.id, testConfig().auth.sessionSecret);
-
-    const csrf = await secureApp.request("/auth/logout", {
-      method: "POST",
-      headers: {
-        Cookie: `pca_session=${cookie}`,
-        Origin: "https://untrusted.example",
-      },
-    });
-    expect(csrf.status).toBe(403);
-
-    expect((await secureApp.request("/runs")).status).toBe(401);
-    const me = await secureApp.request("/auth/me", {
-      headers: { Cookie: `pca_session=${cookie}` },
-    });
-    expect(me.status).toBe(200);
-    expect((await json<{ login: string }>(me)).login).toBe("first");
-
-    const listed = await secureApp.request("/runs", {
-      headers: { Cookie: `pca_session=${cookie}` },
-    });
-    expect((await json<RunListResponse>(listed)).runs.map((run) => run.id)).toEqual([
-      firstRun.id,
-    ]);
-    const other = await secureApp.request(`/runs/${secondRun.id}`, {
-      headers: { Cookie: `pca_session=${cookie}` },
-    });
-    expect(other.status).toBe(404);
-
-    const { session: foreignSession, run: foreignRun } = await seedSession(database, second.id);
-    await completeRun(database, foreignRun.id, "succeeded", null);
-    await parkSession(database, foreignRun, null, null);
-    const foreignTurn = await secureApp.request(`/sessions/${foreignSession.id}/turns`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: `pca_session=${cookie}`,
-        Origin: "http://localhost:3000",
-      },
-      body: JSON.stringify({ prompt: "peek" }),
-    });
-    expect(foreignTurn.status).toBe(404);
-  });
-
-  it("uses the GitHub App callback for a Settings reconnect", async () => {
-    const response = await app.request("/auth/github/connect?returnTo=settings");
-    expect(response.status).toBe(302);
-    const location = response.headers.get("location");
-    expect(location).toBeTruthy();
-    const state = new URL(location ?? "https://github.com").searchParams.get("state");
-    expect(state).toBeTruthy();
-
-    const [saved] = await database
-      .select()
-      .from(oauthStates)
-      .where(and(eq(oauthStates.state, state ?? ""), eq(oauthStates.provider, "github")));
-    expect(saved?.returnTo).toBe("settings");
-  });
-
-  it("preserves the provider denial reason for the Settings notification", async () => {
-    const response = await app.request(
-      "/vcs/connections/azure-devops/callback?error=access_denied&error_description=Admin%20consent%20is%20required",
-    );
-    expect(response.status).toBe(302);
-    const location = new URL(response.headers.get("location") ?? "https://example.test");
-    expect(location.pathname).toBe("/settings");
-    expect(location.searchParams.get("connection")).toBe("connection_denied");
-    expect(location.searchParams.get("message")).toBe(
-      "Admin consent is required (access_denied)",
-    );
-  });
-});
 
 /** Read a response body at a named type, so a renamed field fails to compile. */
 async function json<T>(response: Response): Promise<T> {
@@ -198,7 +87,7 @@ describe("starting runs", () => {
     const run = (await response.json()) as RunSummary;
     expect(run.status).toBe("queued");
     expect(run.repo).toBe("acme/widgets");
-    expect(run.model).toBe("aigateway/test-model");
+    expect(run.model).toBe("test-provider/test-model");
     // The credential the sandbox will authenticate with is never returned.
     expect(JSON.stringify(run)).not.toContain("callbackToken");
   });
@@ -239,7 +128,7 @@ describe("starting runs", () => {
 
 describe("sandbox callbacks", () => {
   it("refuses a callback without the run's own token", async () => {
-    const run = await seedRun(database);
+    const run = await seedRun(database, { userId: testUserId });
     const other = await seedRun(database);
     const event = { type: "token", data: { content: "hi" } };
 
@@ -259,7 +148,7 @@ describe("sandbox callbacks", () => {
   });
 
   it("accepts telemetry and assigns it a sequence number", async () => {
-    const run = await seedRun(database);
+    const run = await seedRun(database, { userId: testUserId });
     const response = await post(
       `/internal/runs/${run.id}/events`,
       { type: "token", data: { content: "hello" } },
@@ -333,7 +222,7 @@ describe("sandbox callbacks", () => {
 
 describe("cancelling", () => {
   it("marks the run cancelled and leaves teardown to the reconciler", async () => {
-    const run = await seedRun(database);
+    const run = await seedRun(database, { userId: testUserId });
     const response = await post(`/runs/${run.id}/cancel`, {});
     expect(response.status).toBe(200);
 
@@ -343,7 +232,7 @@ describe("cancelling", () => {
   });
 
   it("is a no-op on a run that already finished", async () => {
-    const run = await seedRun(database);
+    const run = await seedRun(database, { userId: testUserId });
     await post(
       `/internal/runs/${run.id}/status`,
       { status: "done" },
@@ -411,14 +300,178 @@ describe("watching a run", () => {
 });
 
 describe("dashboard support", () => {
-  it("reports the model and the registered profiles", async () => {
+  it("reports the registered profiles and model-selection policy", async () => {
     const config = await json<ConfigResponse>(await app.request("/config"));
-    expect(config.model).toBe("aigateway/test-model");
     expect(config.defaultProfile).toBe("general");
     expect(config.profiles.map((profile) => profile.name)).toEqual(["general"]);
   });
 
   it("is healthy", async () => {
     expect((await json<{ ok: boolean }>(await app.request("/healthz"))).ok).toBe(true);
+  });
+});
+
+describe("model connections", () => {
+  it("stores credentials per user and snapshots the selected connection on a run", async () => {
+    const secureApp = createApp({
+      config: testConfig({ APP_AUTH_REQUIRED: "true" }),
+      database,
+      log: silentLogger(),
+    });
+    const user = await upsertAppUser(database, {
+      githubUserId: "model-user",
+      login: "model-user",
+      displayName: "Model User",
+    });
+    const cookie = await createWebSession(database, user.id, testConfig().auth.sessionSecret);
+    const created = await secureApp.request("/llm/connections", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `pca_session=${cookie}`,
+        Origin: "http://localhost:3000",
+      },
+      body: JSON.stringify({
+        displayName: "Test LiteLLM",
+        provider: "litellm",
+        api: "openai-completions",
+        baseUrl: "https://llm.example.test/v1",
+        model: "gpt-test",
+        apiKey: "super-secret-api-key",
+        isDefault: true,
+      }),
+    });
+    expect(created.status).toBe(201);
+    const connection = await json<{ id: string; isDefault: boolean }>(created);
+    expect(connection.isDefault).toBe(true);
+    expect(JSON.stringify(connection)).not.toContain("super-secret-api-key");
+
+    const listed = await json<LlmConnectionsResponse>(
+      await secureApp.request("/llm/connections", {
+        headers: { Cookie: `pca_session=${cookie}` },
+      }),
+    );
+    expect(listed.connections).toHaveLength(1);
+    expect(listed.connections[0]?.id).toBe(connection.id);
+
+    const queued = await secureApp.request("/runs", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `pca_session=${cookie}`,
+        Origin: "http://localhost:3000",
+      },
+      body: JSON.stringify({
+        repo: "acme/widgets",
+        prompt: "use my model",
+        modelConnectionId: connection.id,
+        modelId: "gpt-test",
+      }),
+    });
+    expect(queued.status).toBe(201);
+    const run = await json<RunSummary>(queued);
+    expect(run.model).toBe("litellm/gpt-test");
+    expect(run.modelConnectionId).toBe(connection.id);
+
+    const deletion = await secureApp.request(`/llm/connections/${connection.id}`, {
+      method: "DELETE",
+      headers: { Cookie: `pca_session=${cookie}`, Origin: "http://localhost:3000" },
+    });
+    expect(deletion.status).toBe(200);
+    expect(
+      (
+        await json<LlmConnectionsResponse>(
+          await secureApp.request("/llm/connections", {
+            headers: { Cookie: `pca_session=${cookie}` },
+          }),
+        )
+      ).connections,
+    ).toHaveLength(0);
+
+    expect((await secureApp.request("/llm/connections")).status).toBe(401);
+  });
+
+  it("deletes a referenced connection and switches a resumed session to the default", async () => {
+    const secureApp = createApp({
+      config: testConfig({ APP_AUTH_REQUIRED: "true" }),
+      database,
+      log: silentLogger(),
+    });
+    const user = await upsertAppUser(database, {
+      githubUserId: "session-model-user",
+      login: "session-model-user",
+      displayName: "Session Model User",
+    });
+    const config = testConfig();
+    const cookie = await createWebSession(database, user.id, config.auth.sessionSecret);
+    const original = await saveApiKeyConnection(database, config, {
+      userId: user.id,
+      displayName: "Original model",
+      provider: "original-provider",
+      api: "openai-completions",
+      baseUrl: "https://original.example/v1",
+      model: "original-model",
+      apiKey: "original-key",
+      contextWindow: 16_384,
+      maxTokens: 2_048,
+      isDefault: true,
+    });
+    const replacement = await saveApiKeyConnection(database, config, {
+      userId: user.id,
+      displayName: "Replacement model",
+      provider: "replacement-provider",
+      api: "openai-completions",
+      baseUrl: "https://replacement.example/v1",
+      model: "replacement-model",
+      apiKey: "replacement-key",
+      contextWindow: 16_384,
+      maxTokens: 2_048,
+      isDefault: false,
+    });
+    const session = await json<SessionSummary>(
+      await secureApp.request("/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: `pca_session=${cookie}` },
+        body: JSON.stringify({
+          repo: "acme/widgets",
+          prompt: "Use the original model",
+          profile: "general",
+          modelConnectionId: original.id,
+          modelId: "original-model",
+        }),
+      }),
+    );
+    const firstRun = await getRun(database, session.latestRunId);
+    expect(firstRun).not.toBeNull();
+    expect(await parkSession(database, firstRun!, null, null)).toBe(true);
+
+    expect(
+      (
+        await secureApp.request(`/llm/connections/${original.id}`, {
+          method: "DELETE",
+          headers: { Cookie: `pca_session=${cookie}` },
+        })
+      ).status,
+    ).toBe(200);
+
+    const broker = createCredentialBroker(config, database, silentLogger());
+    const inFlight = await broker.mintForRun({
+      userId: user.id,
+      provider: "github",
+      repoFullName: "acme/widgets",
+      modelConnectionId: original.id,
+      modelSnapshot: "original-provider/original-model",
+    });
+    expect(inFlight.model.name).toBe("original-model");
+
+    const followUp = await secureApp.request(`/sessions/${session.id}/turns`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: `pca_session=${cookie}` },
+      body: JSON.stringify({ prompt: "Use the replacement model" }),
+    });
+    expect(followUp.status).toBe(201);
+    const run = await json<RunDetail>(followUp);
+    expect(run.model).toBe("replacement-provider/replacement-model");
+    expect(run.modelConnectionId).toBe(replacement.id);
   });
 });

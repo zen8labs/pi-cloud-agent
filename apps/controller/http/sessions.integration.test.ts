@@ -8,18 +8,33 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase, type Database } from "../db/client";
 import { getRun } from "../db/runs";
 import { parkSession } from "../db/sessions";
-import { resetTables, setupTestDatabase, silentLogger, testConfig } from "../test-support";
+import {
+  resetTables,
+  seedTestUser,
+  setupTestDatabase,
+  silentLogger,
+  testConfig,
+  withTestModel,
+} from "../test-support";
 import { createApp } from "./app";
 
 let database: Database;
 let app: ReturnType<typeof createApp>;
+let testCookie: string;
+let testModelConnectionId: string;
 
 beforeAll(() => {
   database = setupTestDatabase();
   app = createApp({ config: testConfig(), database, log: silentLogger() });
 });
 
-beforeEach(async () => resetTables(database));
+beforeEach(async () => {
+  await resetTables(database);
+  const config = testConfig();
+  const seeded = await seedTestUser(database, config);
+  testCookie = seeded.cookie;
+  testModelConnectionId = seeded.modelConnectionId;
+});
 afterAll(async () => closeDatabase(database));
 
 function send(method: "POST" | "PUT", path: string, body: unknown, token?: string) {
@@ -27,9 +42,12 @@ function send(method: "POST" | "PUT", path: string, body: unknown, token?: strin
     method,
     headers: {
       "Content-Type": "application/json",
+      Cookie: `pca_session=${testCookie}`,
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(
+      path === "/sessions" ? withTestModel(body, testModelConnectionId) : body,
+    ),
   });
 }
 
@@ -49,12 +67,20 @@ describe("durable session HTTP contract", () => {
     expect(session.status).toBe("queued");
     expect(session.activeRunId).toBe(session.latestRunId);
 
-    const detail = await json<SessionDetail>(await app.request(`/sessions/${session.id}`));
+    const detail = await json<SessionDetail>(
+      await app.request(`/sessions/${session.id}`, {
+        headers: { Cookie: `pca_session=${testCookie}` },
+      }),
+    );
     expect(detail.runs).toHaveLength(1);
     expect(detail.runs[0]?.sessionId).toBe(session.id);
     expect(detail.runs[0]?.turnNumber).toBe(1);
 
-    const listing = await json<SessionListResponse>(await app.request("/sessions"));
+    const listing = await json<SessionListResponse>(
+      await app.request("/sessions", {
+        headers: { Cookie: `pca_session=${testCookie}` },
+      }),
+    );
     expect(listing.sessions.map((item) => item.id)).toContain(session.id);
     expect(
       (await send("POST", `/sessions/${session.id}/turns`, { prompt: "too soon" })).status,

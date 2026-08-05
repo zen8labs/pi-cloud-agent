@@ -1,6 +1,11 @@
-import { SANDBOX_ENV, type Secret } from "@pi-cloud-agent/protocol";
+import { SANDBOX_ENV, Secret } from "@pi-cloud-agent/protocol";
 import type { Config } from "../config";
 import type { Database } from "../db/client";
+import {
+  modelIdFromSnapshot,
+  type ResolvedLlmModel,
+  resolveLlmModelForRun,
+} from "../llm/connections";
 import type { Logger } from "../logger";
 import { getVcsProvider } from "../vcs/connections";
 
@@ -19,6 +24,8 @@ interface MintInput {
   userId: string | null;
   provider: string;
   repoFullName: string;
+  modelConnectionId: string | null;
+  modelSnapshot: string;
 }
 
 interface RunCredentials {
@@ -26,6 +33,7 @@ interface RunCredentials {
   secrets: Record<string, Secret>;
   /** Non-secret companions to those credentials (usernames, hosts). */
   env: Record<string, string>;
+  model: ResolvedLlmModel;
 }
 
 /** Conventional variable names expected by GitHub's CLI and git. */
@@ -46,10 +54,31 @@ export function createCredentialBroker(
   log: Logger,
 ): CredentialBroker {
   return {
-    async mintForRun({ userId, provider, repoFullName }): Promise<RunCredentials> {
+    async mintForRun({
+      userId,
+      provider,
+      repoFullName,
+      modelConnectionId,
+      modelSnapshot,
+    }): Promise<RunCredentials> {
+      if (!userId) throw new Error("authentication is required to run a task");
+      if (!modelConnectionId) throw new Error("run has no model connection");
+      const model = await resolveLlmModelForRun(
+        database,
+        config,
+        userId,
+        modelConnectionId,
+        modelIdFromSnapshot(modelSnapshot),
+      );
       const secrets: Record<string, Secret> = {
-        [SANDBOX_ENV.modelApiKey]: config.model.apiKey,
+        [SANDBOX_ENV.modelApiKey]: new Secret(model.apiKey, "model api key"),
       };
+      if (model.authJson) {
+        secrets[SANDBOX_ENV.modelAuthJson] = new Secret(
+          model.authJson,
+          "model OAuth credential",
+        );
+      }
       const env: Record<string, string> = {};
 
       // Public repositories remain usable when no identity is connected. A
@@ -70,7 +99,8 @@ export function createCredentialBroker(
         });
       }
 
-      return { secrets, env };
+      env[SANDBOX_ENV.modelAuthType] = model.authType;
+      return { secrets, env, model };
     },
   };
 }
