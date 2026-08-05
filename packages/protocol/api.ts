@@ -19,6 +19,10 @@ export const createRunRequestSchema = z.object({
   provider: z.string().default("github"),
   /** Branch to clone. Omitted means "ask the provider for the default". */
   branch: z.string().nullish(),
+  /** User-owned model connection. Required for every task. */
+  modelConnectionId: z.string().uuid(),
+  /** Model selected from the connection's available model catalog. */
+  modelId: z.string().min(1),
 });
 
 export type CreateRunRequest = z.input<typeof createRunRequestSchema>;
@@ -44,6 +48,7 @@ export interface RunSummary {
   repo: string;
   /** Resolved when the run was created, so it stays accurate if config changes. */
   model: string;
+  modelConnectionId: string | null;
   error: string | null;
   createdAt: string;
   updatedAt: string;
@@ -77,6 +82,7 @@ export interface SessionSummary {
   provider: string;
   repo: string;
   model: string;
+  modelConnectionId: string | null;
   activeRunId: string | null;
   latestRunId: string;
   workspaceAvailable: boolean;
@@ -99,8 +105,6 @@ export interface ProfileInfo {
 }
 
 export interface ConfigResponse {
-  /** The single configured model id, e.g. "openai/gpt-5.6-sol". */
-  model: string;
   profiles: ProfileInfo[];
   defaultProfile: string;
 }

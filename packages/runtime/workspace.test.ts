@@ -18,8 +18,11 @@ const config: RuntimeConfig = {
   prompt: "test",
   profile: "general",
   model: {
-    provider: "aigateway",
+    provider: "test-provider",
     name: "test-model",
+    api: "openai-completions",
+    authType: "api_key",
+    authJson: "",
     baseUrl: "https://gateway.test/v1",
     contextWindow: 1000,
     maxTokens: 100,

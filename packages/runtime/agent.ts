@@ -1,9 +1,11 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   createAgentSession,
   ModelRuntime,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { SANDBOX_ENV } from "@pi-cloud-agent/protocol";
+import { SANDBOX_ENV, SANDBOX_PATHS } from "@pi-cloud-agent/protocol";
 import type { RuntimeConfig } from "./config";
 import type { Reporter } from "./reporter";
 import { loadSessionManager, saveSessionCheckpoint } from "./session-state";
@@ -20,7 +22,11 @@ export async function runAgentSession(
   config: RuntimeConfig,
   reporter: Reporter,
 ): Promise<void> {
+  if (config.model.authType === "oauth") {
+    await configureOAuthCredential(config);
+  }
   const modelRuntime = await ModelRuntime.create({
+    authPath: join(SANDBOX_PATHS.state, "auth.json"),
     // No catalog on disk, no catalog over the network: the one model this run
     // uses is registered explicitly below. A sandbox should not be discovering
     // models at boot.
@@ -28,30 +34,32 @@ export async function runAgentSession(
     allowModelNetwork: false,
   });
 
-  modelRuntime.registerProvider(config.model.provider, {
-    name: config.model.provider,
-    baseUrl: config.model.baseUrl,
-    // Pi resolves this from the environment, so the key is not passed as a value
-    // through another layer.
-    apiKey: `$${SANDBOX_ENV.modelApiKey}`,
-    api: "openai-completions",
-    models: [
-      {
-        id: config.model.name,
-        name: config.model.name,
-        reasoning: true,
-        input: ["text"],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: config.model.contextWindow,
-        maxTokens: config.model.maxTokens,
-        compat: {
-          supportsDeveloperRole: false,
-          supportsReasoningEffort: false,
-          maxTokensField: "max_tokens",
+  if (config.model.authType !== "oauth") {
+    modelRuntime.registerProvider(config.model.provider, {
+      name: config.model.provider,
+      baseUrl: config.model.baseUrl,
+      // Pi resolves this from the environment, so the key is not passed as a value
+      // through another layer.
+      apiKey: `$${SANDBOX_ENV.modelApiKey}`,
+      api: config.model.api,
+      models: [
+        {
+          id: config.model.name,
+          name: config.model.name,
+          reasoning: true,
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: config.model.contextWindow,
+          maxTokens: config.model.maxTokens,
+          compat: {
+            supportsDeveloperRole: false,
+            supportsReasoningEffort: false,
+            maxTokensField: "max_tokens",
+          },
         },
-      },
-    ],
-  });
+      ],
+    });
+  }
 
   const model = modelRuntime.getModel(config.model.provider, config.model.name);
   if (!model) {
@@ -158,6 +166,17 @@ export async function runAgentSession(
     unsubscribe();
     session.dispose();
   }
+}
+
+async function configureOAuthCredential(config: RuntimeConfig): Promise<void> {
+  if (!config.model.authJson) throw new Error("LLM_AUTH_JSON is required for OAuth models");
+  JSON.parse(config.model.authJson);
+  await mkdir(SANDBOX_PATHS.state, { recursive: true });
+  await writeFile(
+    join(SANDBOX_PATHS.state, "auth.json"),
+    JSON.stringify({ [config.model.provider]: JSON.parse(config.model.authJson) }),
+    { mode: 0o600 },
+  );
 }
 
 function textOf(
