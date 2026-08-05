@@ -48,12 +48,10 @@
     "sandbox:image": "pnpm --filter @pi-cloud-agent/runtime build && docker build -t \"${MICROSANDBOX_IMAGE:-pi-cloud-agent:local}\" -f packages/runtime/Dockerfile.sandbox packages/runtime && docker save \"${MICROSANDBOX_IMAGE:-pi-cloud-agent:local}\" | pnpm --filter @pi-cloud-agent/sandbox exec msb load --tag \"${MICROSANDBOX_IMAGE:-pi-cloud-agent:local}\"",
     "up": "docker compose up -d --build",
     "down": "docker compose down",
-    "verify": "pnpm lint && pnpm boundaries && pnpm docs:check && pnpm files:check && pnpm deadcode && pnpm dupes && pnpm typecheck && pnpm test && pnpm test:integration",
-    "test:e2e": "playwright test --config apps/web/playwright.config.ts"
+    "verify": "pnpm lint && pnpm boundaries && pnpm docs:check && pnpm files:check && pnpm deadcode && pnpm dupes && pnpm typecheck && pnpm test && pnpm test:integration"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.6",
-    "@playwright/test": "1.62.0",
     "@types/node": "catalog:",
     "husky": "9.1.7",
     "jscpd": "5.0.14",
