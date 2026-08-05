@@ -60,6 +60,22 @@ curl -s localhost:8080/runs/$RUN_ID/events | jq '.events[]'
 curl -s "localhost:8080/runs/$RUN_ID/events?afterSeq=42" | jq '.events[]'
 ```
 
+## Sending agent traces to Langfuse
+
+The controller exports completed runs over OTLP/HTTP. Configure the Langfuse public OTLP endpoint and Basic Auth header in the controller environment, then restart it:
+
+```bash
+export LANGFUSE_PUBLIC_KEY=pk-lf-...
+export LANGFUSE_SECRET_KEY=sk-lf-...
+export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://cloud.langfuse.com/api/public/otel/v1/traces
+export OTEL_EXPORTER_OTLP_TRACES_HEADERS="Authorization=Basic $(printf '%s:%s' "$LANGFUSE_PUBLIC_KEY" "$LANGFUSE_SECRET_KEY" | base64),x-langfuse-ingestion-version=4"
+export OTEL_SERVICE_NAME=pi-cloud-agent
+export OTEL_CAPTURE_CONTENT=true
+pnpm controller
+```
+
+Run an agent normally. Its completed trace will appear in Langfuse. The exporter sets Langfuse's normalized input/output fields for runs, turns, and tools; old OTLP observations are immutable, so create a new run after changing the mapping or configuration. `OTEL_CAPTURE_CONTENT=false` is safer when prompts, generated text, tool arguments, or tool output should not leave the controller. For self-hosted or regional Langfuse, replace the hostname while keeping `/api/public/otel/v1/traces`. The exporter uses protobuf over HTTP; no Langfuse SDK is required in this repository.
+
 ## Reading the state directly
 
 ```bash
@@ -91,8 +107,8 @@ psql -c "select id, active_run_id, latest_run_id, turn_count, sandbox_id, worksp
 ```text
 status: queued → provisioning → running → succeeded
 events: git.cloned → git.checkout_ready → setup.skipped
-        → agent.session_start → token… → tool_call… → agent.turn_end
-        → agent.session_complete → status{done}
+        → agent.session_start → agent.turn_start → message… → token…
+        → tool_call… → agent.turn_end → agent.session_complete → status{done}
 ```
 
 The terminal evidence is a `status` event followed by the run row reaching `succeeded` or `failed`. **Token and tool-call events are telemetry and never control completion**. A run that streamed a thousand tokens and never reported a status is a timeout, not a success.

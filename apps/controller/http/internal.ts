@@ -10,6 +10,7 @@ import type { Database } from "../db/client";
 import { appendEvent, completeRun, getRunByCallbackToken } from "../db/runs";
 import type { RunRow } from "../db/schema";
 import { getSessionForRun, saveSessionCheckpoint } from "../db/sessions";
+import type { Observability } from "../observability";
 import type { AppEnv } from "./deps";
 
 /**
@@ -24,7 +25,7 @@ import type { AppEnv } from "./deps";
  * Authentication is a per-run bearer token compared in constant time, so a token
  * is useless for any run but its own.
  */
-export function internalRoutes(): Hono<AppEnv> {
+export function internalRoutes(observability?: Observability): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   app.post("/runs/:runId/events", async (c) => {
@@ -75,6 +76,8 @@ export function internalRoutes(): Hono<AppEnv> {
       status === "done" ? "succeeded" : "failed",
       status === "done" ? null : (detail ?? "the agent reported an error"),
     );
+
+    observability?.enqueue(run.id);
 
     c.get("log").info("terminal status from sandbox", { runId: run.id, status, applied });
     return c.json({ ok: true });

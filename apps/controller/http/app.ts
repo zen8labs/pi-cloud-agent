@@ -85,7 +85,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   app.route("/auth", authRoutes());
   app.route("/runs", runRoutes());
   app.route("/sessions", sessionRoutes());
-  app.route("/internal", internalRoutes());
+  app.route("/internal", internalRoutes(deps.observability));
   app.route("/vcs", vcsRoutes());
   app.route("/", metaRoutes());
 

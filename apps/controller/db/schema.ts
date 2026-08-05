@@ -197,6 +197,35 @@ export const runEvents = pgTable(
   ],
 );
 
+export type ObservabilityExportStatus = "pending" | "processing" | "exported";
+
+/** Durable delivery state for the configured OTLP destination. */
+export const observabilityExports = pgTable(
+  "observability_exports",
+  {
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => runs.id, { onDelete: "cascade" }),
+    /** Hash of the destination configuration; credentials never enter the key. */
+    destination: text("destination").notNull(),
+    status: text("status").notNull().default("pending").$type<ObservabilityExportStatus>(),
+    attempt: integer("attempt").notNull().default(0),
+    claimedAt: timestamptz("claimed_at"),
+    exportedAt: timestamptz("exported_at"),
+    lastError: text("last_error"),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.runId, table.destination] }),
+    index("observability_exports_pending_idx").on(
+      table.destination,
+      table.status,
+      table.updatedAt,
+    ),
+  ],
+);
+
 export const webSessions = pgTable(
   "web_sessions",
   {
@@ -217,6 +246,7 @@ export const webSessions = pgTable(
 export type RunRow = typeof runs.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
 export type RunEventRow = typeof runEvents.$inferSelect;
+export type ObservabilityExportRow = typeof observabilityExports.$inferSelect;
 export type VcsConnectionRow = typeof vcsConnections.$inferSelect;
 export type OAuthStateRow = typeof oauthStates.$inferSelect;
 export type AppUserRow = typeof appUsers.$inferSelect;

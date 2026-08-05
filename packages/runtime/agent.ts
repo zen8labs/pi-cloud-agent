@@ -86,13 +86,39 @@ export async function runAgentSession(
 
   const unsubscribe = session.subscribe((event) => {
     switch (event.type) {
+      case "agent_start":
+        reporter.log("agent.start");
+        break;
+      case "agent_end":
+        reporter.log("agent.end", {
+          willRetry: event.willRetry,
+          messageCount: event.messages.length,
+        });
+        break;
+      case "agent_settled":
+        reporter.log("agent.settled");
+        break;
+      case "turn_start":
+        reporter.log("agent.turn_start");
+        break;
       case "message_update":
         if (event.assistantMessageEvent.type === "text_delta") {
           reporter.event({
             type: "token",
             data: { content: event.assistantMessageEvent.delta },
           });
+        } else if ("delta" in event.assistantMessageEvent) {
+          reporter.log("agent.message_update", {
+            updateType: event.assistantMessageEvent.type,
+            delta: event.assistantMessageEvent.delta,
+          });
         }
+        break;
+      case "message_start":
+        reporter.log("agent.message_start", summarizeMessage(event.message));
+        break;
+      case "message_end":
+        reporter.log("agent.message_end", summarizeMessage(event.message));
         break;
       case "tool_execution_start":
         reporter.event({
@@ -119,11 +145,20 @@ export async function runAgentSession(
         });
         break;
       }
+      case "tool_execution_update":
+        reporter.log("agent.tool_update", {
+          callId: event.toolCallId,
+          tool: event.toolName,
+          args: event.args,
+          partialResult: event.partialResult,
+        });
+        break;
       case "turn_end": {
         const assistant = asAssistant(event.message);
         reporter.log("agent.turn_end", {
           stopReason: assistant?.stopReason ?? null,
           usage: assistant?.usage ?? null,
+          output: assistant?.content ?? null,
         });
         break;
       }
@@ -134,8 +169,41 @@ export async function runAgentSession(
           detail: event.errorMessage,
         });
         break;
-      default:
+      case "auto_retry_end":
+        reporter.log("agent.retry_end", {
+          attempt: event.attempt,
+          success: event.success,
+          finalError: event.finalError,
+        });
         break;
+      case "compaction_start":
+        reporter.log("agent.compaction_start", { reason: event.reason });
+        break;
+      case "compaction_end":
+        reporter.log("agent.compaction_end", {
+          reason: event.reason,
+          aborted: event.aborted,
+          willRetry: event.willRetry,
+          errorMessage: event.errorMessage,
+        });
+        break;
+      case "queue_update":
+        reporter.log("agent.queue_update", {
+          steeringCount: event.steering.length,
+          followUpCount: event.followUp.length,
+        });
+        break;
+      case "thinking_level_changed":
+        reporter.log("agent.thinking_level_changed", { level: event.level });
+        break;
+      case "bash_execution_update":
+        reporter.log("agent.bash_update", {
+          id: event.id,
+          delta: event.delta,
+        });
+        break;
+      default:
+        reporter.log("agent.event", { type: event.type, payload: event });
     }
   });
 
@@ -178,6 +246,7 @@ function textOf(
  */
 interface AssistantLike {
   role: "assistant";
+  content?: unknown;
   stopReason?: string;
   errorMessage?: string;
   usage?: unknown;
@@ -188,4 +257,14 @@ function asAssistant(message: unknown): AssistantLike | null {
   return (message as { role?: string }).role === "assistant"
     ? (message as AssistantLike)
     : null;
+}
+
+function summarizeMessage(message: unknown): Record<string, unknown> {
+  if (!message || typeof message !== "object") return {};
+  const value = message as Record<string, unknown>;
+  return {
+    role: value.role,
+    stopReason: value.stopReason,
+    usage: value.usage,
+  };
 }

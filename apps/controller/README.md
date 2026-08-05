@@ -4,7 +4,7 @@
 
 Decides what runs and when, resolves connected identities, mints run credentials, starts sandboxes, records what happened, and reclaims machines.
 
-**Depends on:** `protocol`, `profiles`, `sandbox`, `vcs`. It is the only package allowed to compose everything, and the only one that reaches Postgres.
+**Depends on:** `protocol`, `profiles`, `sandbox`, `vcs`, and the optional OTLP trace exporter. It is the only package allowed to compose everything, and the only one that reaches Postgres.
 
 ## Files
 
@@ -13,7 +13,7 @@ Decides what runs and when, resolves connected identities, mints run credentials
 | `index.ts` | bootstrap: HTTP surface + reconciler in one process, graceful shutdown |
 | `config.ts` | **the only file in the repo that reads `process.env`** |
 | `logger.ts` | structured JSON lines; level is passed in, never read from globals |
-| `db/schema.ts` | seven tables: application users, browser sessions, execution state, and VCS connections |
+| `db/schema.ts` | application users, browser sessions, execution state, VCS connections, and OTLP delivery state |
 | `db/sessions.ts` | ordered turns, Pi checkpoints, and parked workspace ownership |
 | `db/runs.ts` | every write to a run, each a single guarded statement |
 | `db/client.ts` | the pool, plus `LISTEN/NOTIFY`, the bus replacement |
@@ -23,6 +23,7 @@ Decides what runs and when, resolves connected identities, mints run credentials
 | `http/runs.ts` | the operator API, including the resumable SSE stream |
 | `http/sessions.ts` | durable chat sessions and guarded follow-up turns |
 | `http/internal.ts` | events, terminal status, and checkpoint callbacks, authenticated per run |
+| `observability.ts` | projects completed run journals into vendor-neutral OTLP traces from the trusted side |
 | `http/meta.ts` | what the dashboard needs to render itself |
 | `http/vcs.ts` | OAuth connect callbacks and connection management |
 | `reconcile/loop.ts` | the one loop that repairs durable state |
@@ -40,6 +41,7 @@ Decides what runs and when, resolves connected identities, mints run credentials
 - **No profile- or provider-specific behavior.** Intake asks the owning profile whether it accepts a trigger; this app contains no mention of code review. If you find yourself adding a condition here, it belongs in a profile's `accepts`.
 - **`attachSandbox` is the first durable write after a machine exists.** Before it commits a crash leaks a sandbox; after it, the reconciler always finds it.
 - **The controller never parses agent output.** The agent actuates its own outcomes. Adding a parser here is one of the changes to raise first.
+- **OTLP export is optional and best-effort.** The durable run journal remains the source of truth; exporter credentials stay in the controller, never in the sandbox. Delivery retries use `observability_exports` and do not affect run completion.
 - **Migrations are never applied on boot.** A schema change is a deliberate step, not a side effect of one replica winning a race during a deploy.
 
 ## Working on it

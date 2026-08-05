@@ -14,6 +14,10 @@
   },
   "dependencies": {
     "@hono/node-server": "catalog:",
+    "@opentelemetry/api": "catalog:",
+    "@opentelemetry/exporter-trace-otlp-proto": "catalog:",
+    "@opentelemetry/resources": "catalog:",
+    "@opentelemetry/sdk-trace-base": "catalog:",
     "@pi-cloud-agent/profiles": "workspace:*",
     "@pi-cloud-agent/protocol": "workspace:*",
     "@pi-cloud-agent/sandbox": "workspace:*",
