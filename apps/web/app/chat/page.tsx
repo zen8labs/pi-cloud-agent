@@ -1,6 +1,10 @@
 "use client";
 
-import type { ConfigResponse, VcsRepository } from "@pi-cloud-agent/protocol";
+import type {
+  ConfigResponse,
+  LlmConnectionSummary,
+  VcsRepository,
+} from "@pi-cloud-agent/protocol";
 import { FolderGit2Icon, GitBranchIcon, SlidersHorizontalIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -29,9 +33,11 @@ function NewSession() {
   const params = useSearchParams();
   const [config, setConfig] = useState<ConfigResponse | null>(null);
   const [repos, setRepos] = useState<VcsRepository[]>([]);
+  const [modelConnections, setModelConnections] = useState<LlmConnectionSummary[]>([]);
   const [repo, setRepo] = useState(params.get("repo") ?? "");
   const [provider, setProvider] = useState("github");
   const [profile, setProfile] = useState(params.get("profile") ?? "");
+  const [modelSelection, setModelSelection] = useState("");
   const [prompt, setPrompt] = useState("");
   const [branches, setBranches] = useState<string[]>([]);
   const [branch, setBranch] = useState("");
@@ -41,11 +47,16 @@ function NewSession() {
 
   useEffect(() => {
     let alive = true;
-    Promise.all([api.getConfig(), api.listRepos()])
-      .then(([loadedConfig, loadedRepos]) => {
+    Promise.all([api.getConfig(), api.listRepos(), api.listLlmConnections()])
+      .then(([loadedConfig, loadedRepos, loadedConnections]) => {
         if (!alive) return;
         setConfig(loadedConfig);
         setRepos(loadedRepos);
+        setModelConnections(loadedConnections);
+        const defaultConnection = loadedConnections.find((entry) => entry.isDefault);
+        if (defaultConnection) {
+          setModelSelection(modelSelectionValue(defaultConnection.id, defaultConnection.model));
+        }
         setProfile((current) => current || loadedConfig.defaultProfile);
         const selected = loadedRepos[0];
         if (selected) {
@@ -91,7 +102,12 @@ function NewSession() {
     };
   }, [provider, repo]);
 
-  const canSubmit = Boolean(repo) && Boolean(profile) && Boolean(prompt.trim()) && !submitting;
+  const canSubmit =
+    Boolean(repo) &&
+    Boolean(profile) &&
+    Boolean(prompt.trim()) &&
+    !submitting &&
+    Boolean(modelSelection);
   const activeProfile = config?.profiles.find((entry) => entry.name === profile);
 
   const submit = async () => {
@@ -99,12 +115,16 @@ function NewSession() {
     setSubmitting(true);
     setError(null);
     try {
+      const selection = parseModelSelection(modelSelection);
+      if (!selection) throw new Error("choose a model before starting a task");
       const session = await api.createSession({
         repo,
         provider,
         profile,
         prompt: prompt.trim(),
         branch: branch || null,
+        modelConnectionId: selection.connectionId,
+        modelId: selection.modelId,
       });
       saveSessionTitle(session.id, prompt.trim());
       router.push(`/sessions/${session.id}`);
@@ -129,7 +149,6 @@ function NewSession() {
             onChange={setPrompt}
             onSubmit={submit}
             placeholder="Describe the task for Pi…"
-            model={config?.model}
             submitLabel="Start"
             submitEnabled={canSubmit}
             submitting={submitting}
@@ -150,6 +169,9 @@ function NewSession() {
                 profile={profile}
                 profiles={config?.profiles.map((entry) => entry.name) ?? []}
                 onProfileChange={setProfile}
+                modelSelection={modelSelection}
+                modelConnections={modelConnections}
+                onModelSelectionChange={setModelSelection}
                 branch={branch}
                 branches={branches}
                 branchesLoading={branchesLoading}
@@ -158,7 +180,15 @@ function NewSession() {
             }
           />
           <p className="mt-3 px-2 text-center text-xs text-muted-foreground">
-            {repos.length === 0 ? (
+            {modelConnections.length === 0 ? (
+              <>
+                Add a model connection in{" "}
+                <Link href="/settings" className="underline underline-offset-2">
+                  Settings
+                </Link>{" "}
+                before starting a task.
+              </>
+            ) : repos.length === 0 ? (
               <>
                 Connect a VCS identity in{" "}
                 <Link href="/settings" className="underline underline-offset-2">
@@ -193,6 +223,9 @@ type ComposerOptionsProps = {
   profile: string;
   profiles: string[];
   onProfileChange: (value: string) => void;
+  modelSelection: string;
+  modelConnections: LlmConnectionSummary[];
+  onModelSelectionChange: (value: string) => void;
   branch: string;
   branches: string[];
   branchesLoading: boolean;
@@ -202,6 +235,16 @@ type ComposerOptionsProps = {
 function ComposerOptions(props: ComposerOptionsProps) {
   const triggerClass =
     "h-7 min-w-0 max-w-36 shrink border-0 bg-transparent px-1.5 text-xs shadow-none dark:bg-transparent";
+  const selected = parseModelSelection(props.modelSelection);
+  const selectedModel = selected
+    ? props.modelConnections
+        .flatMap((connection) => connection.models.map((model) => ({ connection, model })))
+        .find(
+          (entry) =>
+            entry.connection.id === selected.connectionId &&
+            entry.model.id === selected.modelId,
+        )
+    : null;
   return (
     <>
       <FolderGit2Icon className="size-3.5 shrink-0 text-muted-foreground" />
@@ -233,22 +276,6 @@ function ComposerOptions(props: ComposerOptionsProps) {
           </SelectContent>
         </Select>
       )}
-      <SlidersHorizontalIcon className="ml-1 size-3.5 shrink-0 text-muted-foreground" />
-      <Select
-        value={props.profile}
-        onValueChange={(value) => props.onProfileChange(value ?? "")}
-      >
-        <SelectTrigger aria-label="Profile" className={triggerClass}>
-          <SelectValue placeholder="Profile" />
-        </SelectTrigger>
-        <SelectContent>
-          {props.profiles.map((name) => (
-            <SelectItem key={name} value={name}>
-              {name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
       <GitBranchIcon className="ml-1 size-3.5 shrink-0 text-muted-foreground" />
       <Select
         value={props.branch}
@@ -266,6 +293,52 @@ function ComposerOptions(props: ComposerOptionsProps) {
           ))}
         </SelectContent>
       </Select>
+      <SlidersHorizontalIcon className="ml-1 size-3.5 shrink-0 text-muted-foreground" />
+      <Select
+        value={props.profile}
+        onValueChange={(value) => props.onProfileChange(value ?? "")}
+      >
+        <SelectTrigger aria-label="Profile" className={triggerClass}>
+          <SelectValue placeholder="Profile" />
+        </SelectTrigger>
+        <SelectContent>
+          {props.profiles.map((name) => (
+            <SelectItem key={name} value={name}>
+              {name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select
+        value={props.modelSelection}
+        onValueChange={(value) => props.onModelSelectionChange(value ?? "")}
+      >
+        <SelectTrigger aria-label="Model" className={triggerClass}>
+          <SelectValue placeholder="Model">{selectedModel?.model.id}</SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          {props.modelConnections.map((connection) =>
+            connection.models.map((model) => (
+              <SelectItem
+                key={modelSelectionValue(connection.id, model.id)}
+                value={modelSelectionValue(connection.id, model.id)}
+              >
+                {model.id}
+              </SelectItem>
+            )),
+          )}
+        </SelectContent>
+      </Select>
     </>
   );
+}
+
+function modelSelectionValue(connectionId: string, modelId: string): string {
+  return `${connectionId}::${modelId}`;
+}
+
+function parseModelSelection(value: string): { connectionId: string; modelId: string } | null {
+  const separator = value.indexOf("::");
+  if (separator < 1 || separator === value.length - 2) return null;
+  return { connectionId: value.slice(0, separator), modelId: value.slice(separator + 2) };
 }

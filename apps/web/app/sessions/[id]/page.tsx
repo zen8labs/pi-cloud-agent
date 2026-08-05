@@ -1,7 +1,7 @@
 "use client";
 
-import type { ConfigResponse, RunDetail, SessionDetail } from "@pi-cloud-agent/protocol";
-import { ArrowLeftIcon, ExternalLinkIcon, PanelRightIcon, SquareIcon } from "lucide-react";
+import type { RunDetail, SessionDetail } from "@pi-cloud-agent/protocol";
+import { ArrowLeftIcon, PanelRightIcon, SquareIcon } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -13,7 +13,7 @@ import {
 } from "@/components/ai-elements/conversation";
 import { ChatComposer } from "@/components/ChatComposer";
 import { StatusBadge } from "@/components/StatusBadge";
-import { API_BASE, api } from "@/lib/api";
+import { api } from "@/lib/api";
 import { absoluteTime } from "@/lib/format";
 import { useSession } from "@/lib/useSession";
 
@@ -197,9 +197,6 @@ function SessionAside({
         </Detail>
         <Detail label="Created">{run ? absoluteTime(run.createdAt) : "—"}</Detail>
       </dl>
-      {run && (
-        <AsideLink href={`${API_BASE}/runs/${run.id}/stream`}>Raw event stream</AsideLink>
-      )}
       {run?.error && (
         <div className="border-t border-border px-4 py-4">
           <h3 className="text-xs font-medium text-destructive">Error</h3>
@@ -221,20 +218,6 @@ function Detail({ label, children }: { label: string; children: React.ReactNode 
   );
 }
 
-function AsideLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      className="flex items-center justify-between border-t border-border px-4 py-3 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-    >
-      {children}
-      <ExternalLinkIcon className="size-3" />
-    </a>
-  );
-}
-
 /** Transport seam for multi-turn sessions. It can switch from replay to Pi session resume without changing the composer. */
 function FollowUp({
   sessionId,
@@ -248,15 +231,8 @@ function FollowUp({
   onQueued: () => Promise<void>;
 }) {
   const [prompt, setPrompt] = useState("");
-  const [config, setConfig] = useState<ConfigResponse | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    api
-      .getConfig()
-      .then(setConfig)
-      .catch(() => setConfig(null));
-  }, []);
 
   const submit = async () => {
     if (active || submitting || !prompt.trim()) return;
@@ -280,7 +256,6 @@ function FollowUp({
         onChange={setPrompt}
         onSubmit={submit}
         placeholder={active ? "Pi is still working…" : `Follow up on ${repo}…`}
-        model={config?.model}
         submitLabel="Send"
         submitting={submitting}
         disabled={active}

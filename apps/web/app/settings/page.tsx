@@ -1,17 +1,19 @@
 "use client";
 
-import type { VcsConnectionSummary } from "@pi-cloud-agent/protocol";
+import type { LlmConnectionSummary, VcsConnectionSummary } from "@pi-cloud-agent/protocol";
 import {
   AlertCircleIcon,
   CheckCircle2Icon,
   ExternalLinkIcon,
-  GitBranchIcon,
-  PlugIcon,
   UnplugIcon,
   XIcon,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
+import { LlmConnectionSection } from "@/components/LlmConnectionSection";
+import { AzureDevOpsMarkIcon, GithubMarkIcon } from "@/components/ProviderIcons";
+import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api } from "@/lib/api";
 
 export default function SettingsPage() {
@@ -25,33 +27,48 @@ export default function SettingsPage() {
 function SettingsContent() {
   const searchParams = useSearchParams();
   const [connections, setConnections] = useState<VcsConnectionSummary[]>([]);
+  const [llmConnections, setLlmConnections] = useState<LlmConnectionSummary[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<{
+    message: string;
+    kind: "success" | "error";
+  } | null>(null);
   const result = searchParams.get("connection");
   const callbackMessage = searchParams.get("message");
-  const noticeMessage = error
-    ? error
-    : result === "connected"
+  const callbackNotice = result
+    ? result === "connected"
       ? "Connection saved."
-      : result
-        ? callbackMessage || `Connection ${result.replaceAll("_", " ")}.`
-        : null;
-  const noticeKind = error || result !== "connected" ? "error" : "success";
+      : callbackMessage || `Connection ${result.replaceAll("_", " ")}.`
+    : null;
+  const noticeMessage = error ?? actionNotice?.message ?? callbackNotice;
+  const noticeKind = error
+    ? "error"
+    : (actionNotice?.kind ?? (result === "connected" ? "success" : "error"));
   const [dismissedNotice, setDismissedNotice] = useState(false);
 
+  const notify = (message: string, kind: "success" | "error") => {
+    setError(null);
+    setActionNotice({ message, kind });
+    setDismissedNotice(false);
+  };
+
   useEffect(() => {
-    void api
-      .listConnections()
-      .then(setConnections)
+    void Promise.all([api.listConnections(), api.listLlmConnections()])
+      .then(([vcs, llm]) => {
+        setConnections(vcs);
+        setLlmConnections(llm);
+      })
       .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
   }, []);
 
   useEffect(() => {
     setDismissedNotice(false);
-    if (!noticeMessage) return;
+    // Errors persist until dismissed; only successes auto-dismiss.
+    if (!noticeMessage || noticeKind !== "success") return;
     const timer = window.setTimeout(() => setDismissedNotice(true), 7000);
     return () => window.clearTimeout(timer);
-  }, [noticeMessage]);
+  }, [noticeMessage, noticeKind]);
 
   const disconnect = async (provider: string) => {
     setBusy(provider);
@@ -59,23 +76,26 @@ function SettingsContent() {
     try {
       await api.deleteConnection(provider);
       setConnections(await api.listConnections());
+      notify("Connection disconnected.", "success");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      notify(cause instanceof Error ? cause.message : String(cause), "error");
     } finally {
       setBusy(null);
     }
   };
 
+  const refreshLlm = async () => setLlmConnections(await api.listLlmConnections());
+
   return (
-    <div className="min-h-full bg-background">
-      <header className="flex h-12 items-center border-b border-border px-5">
+    <div data-testid="settings-scroll" className="h-full overflow-y-auto bg-background">
+      <header className="sticky top-0 z-10 flex h-12 items-center border-b border-border bg-background px-5">
         <h1 className="text-[13px] font-medium">Settings</h1>
       </header>
-      <main className="mx-auto max-w-2xl px-5 py-10 sm:px-8">
+      <main className="mx-auto max-w-3xl px-5 py-10 sm:px-8">
         <div className="mb-8">
-          <h2 className="text-xl font-medium tracking-[-0.02em]">Connected identities</h2>
+          <h2 className="text-xl font-medium tracking-[-0.02em]">Git Connections</h2>
           <p className="mt-2 text-sm text-muted-foreground">
-            Connect the accounts Pi should use when listing and accessing repositories.
+            Repository access for your tasks.
           </p>
         </div>
 
@@ -85,10 +105,23 @@ function SettingsContent() {
               key={connection.provider}
               connection={connection}
               busy={busy === connection.provider}
-              onDisconnect={() => void disconnect(connection.provider)}
+              onDisconnect={() => disconnect(connection.provider)}
             />
           ))}
         </div>
+
+        <div className="mb-8 mt-12">
+          <h2 className="text-xl font-medium tracking-[-0.02em]">Model connections</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Choose the model used by each task.
+          </p>
+        </div>
+
+        <LlmConnectionSection
+          connections={llmConnections}
+          onChanged={refreshLlm}
+          onNotice={notify}
+        />
       </main>
       {noticeMessage && !dismissedNotice && (
         <ConnectionNotice
@@ -144,34 +177,47 @@ function ConnectionCard({
 }: {
   connection: VcsConnectionSummary;
   busy: boolean;
-  onDisconnect: () => void;
+  onDisconnect: () => Promise<void>;
 }) {
+  const [confirming, setConfirming] = useState(false);
   const isGithub = connection.provider === "github";
   return (
     <section className="flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-4">
       <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-muted">
-        {isGithub ? <GitBranchIcon className="size-5" /> : <PlugIcon className="size-5" />}
+        {isGithub ? (
+          <GithubMarkIcon className="size-5" />
+        ) : (
+          <AzureDevOpsMarkIcon className="size-5" />
+        )}
       </div>
       <div className="min-w-0 flex-1">
         <h3 className="text-sm font-medium">{connection.displayName}</h3>
-        <p className="mt-1 truncate text-xs text-muted-foreground">
-          {connection.connected
-            ? connection.accountName || "Connected"
-            : connection.configured
-              ? "Not connected"
-              : "OAuth client not configured"}
+        <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span
+            className={`size-1.5 shrink-0 rounded-full ${
+              connection.connected ? "bg-emerald-500" : "bg-muted-foreground/40"
+            }`}
+          />
+          <span className="truncate">
+            {connection.connected
+              ? `Connected${connection.accountName ? ` as ${connection.accountName}` : ""}`
+              : connection.configured
+                ? "Not connected"
+                : "OAuth client not configured"}
+          </span>
         </p>
       </div>
       {connection.connected ? (
-        <button
+        <Button
           type="button"
-          onClick={onDisconnect}
+          onClick={() => setConfirming(true)}
           disabled={busy}
-          className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+          variant="destructive"
+          size="sm"
         >
           <UnplugIcon className="size-3.5" />
           Disconnect
-        </button>
+        </Button>
       ) : (
         <a
           href={connection.configured ? api.connectUrl(connection.provider) : undefined}
@@ -182,6 +228,16 @@ function ConnectionCard({
           Connect
         </a>
       )}
+      <ConfirmDialog
+        open={confirming}
+        title={`Disconnect ${connection.displayName}?`}
+        description="Tasks will lose repository access through this identity until you connect again."
+        confirmLabel="Disconnect"
+        busyLabel="Disconnecting…"
+        busy={busy}
+        onCancel={() => setConfirming(false)}
+        onConfirm={() => void onDisconnect().finally(() => setConfirming(false))}
+      />
     </section>
   );
 }
