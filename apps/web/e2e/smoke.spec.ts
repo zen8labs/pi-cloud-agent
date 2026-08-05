@@ -14,7 +14,7 @@ import { expect, type Page, test } from "@playwright/test";
 
 const PROMPT = "What is this repository about? Answer in one sentence.";
 const MODEL_CONNECTION = {
-  id: "00000000-0000-4000-8000-000000000001",
+  id: process.env.E2E_MODEL_CONNECTION_ID ?? "00000000-0000-4000-8000-000000000001",
   displayName: "Test gateway",
   provider: "openai-compatible",
   api: "openai-completions",
@@ -25,6 +25,15 @@ const MODEL_CONNECTION = {
   maxTokens: 32_000,
   isDefault: true,
 };
+
+test.beforeEach(async ({ context }) => {
+  const cookie = process.env.E2E_SESSION_COOKIE;
+  if (cookie) {
+    await context.addCookies([
+      { name: "pca_session", value: cookie, domain: "localhost", path: "/" },
+    ]);
+  }
+});
 
 /** Console errors fail the test; the missing favicon is a known, benign 404. */
 function watchConsole(page: Page) {
@@ -144,7 +153,7 @@ test("model connection form derives provider and gates required fields", async (
 
   await expect(page.getByLabel("Provider ID")).toHaveCount(0);
   const save = page.getByRole("button", { name: "Save" });
-  const testConnection = page.getByRole("button", { name: "Test" });
+  const testConnection = page.getByRole("button", { name: "Test", exact: true });
   await expect(save).toBeDisabled();
   await expect(testConnection).toBeDisabled();
 

@@ -74,11 +74,21 @@ jobs:
         run: pnpm --filter @pi-cloud-agent/web build
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
+      - name: Seed browser test account
+        run: |
+          set -o pipefail
+          pnpm --filter @pi-cloud-agent/controller e2e:seed | sed -n '/^E2E_/p' >> "$GITHUB_ENV"
+        env:
+          DATABASE_URL: postgres://pi_cloud_agent:pi_cloud_agent@localhost:5532/pi_cloud_agent
+          APP_SESSION_SECRET: "ci-browser-session-secret-012345678901234567890123"
+          VCS_ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+          LLM_ENCRYPTION_KEY: "1111111111111111111111111111111111111111111111111111111111111111"
       - name: Browser smoke tests
         run: pnpm test:e2e
         env:
           CI: "true"
           DATABASE_URL: postgres://pi_cloud_agent:pi_cloud_agent@localhost:5532/pi_cloud_agent
+          APP_SESSION_SECRET: "ci-browser-session-secret-012345678901234567890123"
           # Browser smoke tests use isolated, non-production encryption keys.
           VCS_ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
           LLM_ENCRYPTION_KEY: "1111111111111111111111111111111111111111111111111111111111111111"
