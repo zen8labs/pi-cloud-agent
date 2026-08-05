@@ -174,8 +174,8 @@ test("model connection form derives provider and gates required fields", async (
   });
   await testConnection.click();
   await expect(page.getByRole("status")).toHaveText("Connection test succeeded.");
-  await page.getByRole("button", { name: "Endpoint type details" }).click();
-  await expect(page.getByRole("tooltip")).toContainText("derived from this choice");
+  await page.getByRole("button", { name: "What the test does" }).click();
+  await expect(page.getByRole("tooltip")).toContainText("one-token request");
 });
 
 test("the new-session form gates submit on a repo and a prompt", async ({ page }) => {
