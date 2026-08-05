@@ -1,5 +1,4 @@
 import { type Context, Hono } from "hono";
-import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import {
   beginVcsConnection,
   disconnectVcsConnection,
@@ -7,6 +6,7 @@ import {
   listConnectionSummaries,
 } from "../vcs/connections";
 import type { AppEnv } from "./deps";
+import { redirectToOAuthStart, takeOAuthCallback } from "./oauth-cookie";
 
 const OAUTH_STATE_COOKIE = "pca_vcs_oauth_state";
 
@@ -19,37 +19,15 @@ export function vcsRoutes(): Hono<AppEnv> {
     return c.json(await listConnectionSummaries(c.get("database"), c.get("config"), user.id));
   });
 
-  app.get("/connections/:provider/connect", async (c) => {
-    try {
-      const provider = c.req.param("provider");
-      const user = c.get("user");
-      if (!user) return c.json({ error: "authentication required" }, 401);
-      const started = await beginVcsConnection(
-        c.get("database"),
-        c.get("config"),
-        provider,
-        user.id,
-      );
-      setCookie(c, OAUTH_STATE_COOKIE, started.state, {
-        httpOnly: true,
-        sameSite: "Lax",
-        secure: c.req.url.startsWith("https://"),
-        path: "/",
-        maxAge: 600,
-      });
-      return c.redirect(started.url);
-    } catch (error) {
-      return c.json({ error: error instanceof Error ? error.message : String(error) }, 503);
-    }
-  });
+  app.get("/connections/:provider/connect", async (c) =>
+    redirectToOAuthStart(c, OAUTH_STATE_COOKIE, (userId) =>
+      beginVcsConnection(c.get("database"), c.get("config"), c.req.param("provider"), userId),
+    ),
+  );
 
   app.get("/connections/:provider/callback", async (c) => {
     const provider = c.req.param("provider");
-    const state = c.req.query("state") ?? "";
-    const code = c.req.query("code") ?? "";
-    const error = c.req.query("error");
-    const savedState = getCookie(c, OAUTH_STATE_COOKIE);
-    deleteCookie(c, OAUTH_STATE_COOKIE, { path: "/" });
+    const { state, code, error, savedState } = takeOAuthCallback(c, OAUTH_STATE_COOKIE);
     if (error) {
       return redirectToSettings(c, "connection_denied", oauthErrorMessage(c));
     }

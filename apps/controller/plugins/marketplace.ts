@@ -265,17 +265,10 @@ export async function installPluginForUser(
   name: string,
   enable: boolean,
 ): Promise<void> {
-  const approved = await findApprovedVersion(database, name);
-  if (!approved) throw new Error(`no approved version for plugin: ${name}`);
-
-  const [settings] = await database
-    .select()
-    .from(pluginSettings)
-    .where(eq(pluginSettings.pluginId, approved.pluginId))
-    .limit(1);
-  if (settings?.installMode === "required" && !enable) {
-    throw new Error(`plugin "${name}" is required and cannot be disabled`);
-  }
+  const approved = await requireApprovedPlugin(database, name, {
+    blockIfRequired: !enable,
+    requiredAction: "disabled",
+  });
 
   // Install and enable/disable keep installedVersionId so Uninstall stays a separate action.
   await database
@@ -307,17 +300,10 @@ export async function uninstallPluginForUser(
   userId: string,
   name: string,
 ): Promise<void> {
-  const approved = await findApprovedVersion(database, name);
-  if (!approved) throw new Error(`no approved version for plugin: ${name}`);
-
-  const [settings] = await database
-    .select()
-    .from(pluginSettings)
-    .where(eq(pluginSettings.pluginId, approved.pluginId))
-    .limit(1);
-  if (settings?.installMode === "required") {
-    throw new Error(`plugin "${name}" is required and cannot be uninstalled`);
-  }
+  const approved = await requireApprovedPlugin(database, name, {
+    blockIfRequired: true,
+    requiredAction: "uninstalled",
+  });
 
   await database
     .delete(pluginOauthTokens)
@@ -388,6 +374,25 @@ async function findVersion(database: Database, name: string, version: string) {
     .where(and(eq(plugins.name, name), eq(pluginVersions.version, version)))
     .limit(1);
   return row ?? null;
+}
+
+async function requireApprovedPlugin(
+  database: Database,
+  name: string,
+  options: { blockIfRequired: boolean; requiredAction: string },
+) {
+  const approved = await findApprovedVersion(database, name);
+  if (!approved) throw new Error(`no approved version for plugin: ${name}`);
+
+  const [settings] = await database
+    .select()
+    .from(pluginSettings)
+    .where(eq(pluginSettings.pluginId, approved.pluginId))
+    .limit(1);
+  if (options.blockIfRequired && settings?.installMode === "required") {
+    throw new Error(`plugin "${name}" is required and cannot be ${options.requiredAction}`);
+  }
+  return approved;
 }
 
 async function findApprovedVersion(database: Database, name: string) {

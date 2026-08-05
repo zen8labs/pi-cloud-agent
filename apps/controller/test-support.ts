@@ -1,12 +1,14 @@
 import { randomBytes } from "node:crypto";
 import type { Trigger } from "@pi-cloud-agent/protocol";
 import { sql } from "drizzle-orm";
+import { afterAll, beforeAll, beforeEach } from "vitest";
 import { type Config, configFrom } from "./config";
-import { createDatabase, type Database } from "./db/client";
+import { closeDatabase, createDatabase, type Database } from "./db/client";
 
 import { createRun } from "./db/runs";
 import type { RunRow, SessionRow } from "./db/schema";
 import { createSessionWithRun } from "./db/sessions";
+import { createApp } from "./http/app";
 import { createLogger, type Logger } from "./logger";
 
 /**
@@ -23,11 +25,41 @@ export const TEST_DATABASE_URL =
   "postgres://pi_cloud_agent:pi_cloud_agent@localhost:5532/pi_cloud_agent_test";
 
 /** Connect to the already-migrated test database. See test-global-setup.ts. */
-export function setupTestDatabase(): Database {
+function setupTestDatabase(): Database {
   return createDatabase(TEST_DATABASE_URL);
 }
 
-export async function resetTables(database: Database): Promise<void> {
+/**
+ * Shared Postgres lifecycle for an integration test file.
+ * Assign with `bindTestDatabase((db) => { database = db; })` — do not destructure.
+ */
+export function bindTestDatabase(assign: (database: Database) => void): void {
+  let database: Database;
+  beforeAll(() => {
+    database = setupTestDatabase();
+    assign(database);
+  });
+  beforeEach(async () => {
+    await resetTables(database);
+  });
+  afterAll(async () => {
+    await closeDatabase(database);
+  });
+}
+
+/** Postgres lifecycle plus a Hono app wired to the same database. */
+export function bindTestApp(
+  assign: (deps: { database: Database; app: ReturnType<typeof createApp> }) => void,
+): void {
+  bindTestDatabase((database) => {
+    assign({
+      database,
+      app: createApp({ config: testConfig(), database, log: silentLogger() }),
+    });
+  });
+}
+
+async function resetTables(database: Database): Promise<void> {
   await database.execute(
     sql`truncate table plugin_audit_log, plugin_oauth_tokens, plugin_oauth_clients, plugin_user_variables, plugin_user_state, plugin_settings, plugin_versions, plugins, web_sessions, oauth_states, vcs_connections, run_events, runs, sessions, app_users cascade`,
   );

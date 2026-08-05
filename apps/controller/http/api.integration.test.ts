@@ -6,18 +6,17 @@ import type {
   RunSummary,
 } from "@pi-cloud-agent/protocol";
 import { and, eq } from "drizzle-orm";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createWebSession, upsertAppUser } from "../db/auth";
-import { closeDatabase, type Database } from "../db/client";
+import type { Database } from "../db/client";
 import { completeRun, createRun, getRun } from "../db/runs";
 import { oauthStates } from "../db/schema";
 import { parkSession } from "../db/sessions";
 import {
+  bindTestApp,
   manualTrigger,
-  resetTables,
   seedRun,
   seedSession,
-  setupTestDatabase,
   silentLogger,
   testConfig,
 } from "../test-support";
@@ -33,18 +32,9 @@ import { createApp } from "./app";
 
 let database: Database;
 let app: ReturnType<typeof createApp>;
-
-beforeAll(async () => {
-  database = setupTestDatabase();
-  app = createApp({ config: testConfig(), database, log: silentLogger() });
-});
-
-beforeEach(async () => {
-  await resetTables(database);
-});
-
-afterAll(async () => {
-  await closeDatabase(database);
+bindTestApp((deps) => {
+  database = deps.database;
+  app = deps.app;
 });
 
 function post(path: string, body: unknown, headers: Record<string, string> = {}) {

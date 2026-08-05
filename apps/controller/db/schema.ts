@@ -275,15 +275,22 @@ export const pluginSettings = pgTable("plugin_settings", {
   updatedAt: timestamptz("updated_at").notNull().defaultNow(),
 });
 
-export const pluginUserState = pgTable(
-  "plugin_user_state",
-  {
+/** Shared owner columns for per-user plugin state tables. */
+function userPluginOwner() {
+  return {
     userId: uuid("user_id")
       .notNull()
       .references(() => appUsers.id, { onDelete: "cascade" }),
     pluginId: uuid("plugin_id")
       .notNull()
       .references(() => plugins.id, { onDelete: "cascade" }),
+  };
+}
+
+export const pluginUserState = pgTable(
+  "plugin_user_state",
+  {
+    ...userPluginOwner(),
     override: text("override").$type<UserPluginOverride | null>(),
     installedVersionId: uuid("installed_version_id").references(() => pluginVersions.id, {
       onDelete: "set null",
@@ -296,12 +303,7 @@ export const pluginUserState = pgTable(
 export const pluginUserVariables = pgTable(
   "plugin_user_variables",
   {
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => appUsers.id, { onDelete: "cascade" }),
-    pluginId: uuid("plugin_id")
-      .notNull()
-      .references(() => plugins.id, { onDelete: "cascade" }),
+    ...userPluginOwner(),
     name: text("name").notNull(),
     /** AES-GCM ciphertext from encryptSecret. */
     valueEncrypted: text("value_encrypted").notNull(),
@@ -342,12 +344,7 @@ export const pluginOauthClients = pgTable(
 export const pluginOauthTokens = pgTable(
   "plugin_oauth_tokens",
   {
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => appUsers.id, { onDelete: "cascade" }),
-    pluginId: uuid("plugin_id")
-      .notNull()
-      .references(() => plugins.id, { onDelete: "cascade" }),
+    ...userPluginOwner(),
     accessEncrypted: text("access_encrypted").notNull(),
     refreshEncrypted: text("refresh_encrypted"),
     expiresAt: timestamptz("expires_at"),

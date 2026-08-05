@@ -1,6 +1,6 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { resetTables, seedSession, setupTestDatabase } from "../test-support";
-import { closeDatabase, type Database } from "./client";
+import { describe, expect, it } from "vitest";
+import { bindTestDatabase, seedSession } from "../test-support";
+import type { Database } from "./client";
 import { completeRun } from "./runs";
 import {
   createSessionTurn,
@@ -12,17 +12,8 @@ import {
 } from "./sessions";
 
 let database: Database;
-
-beforeAll(() => {
-  database = setupTestDatabase();
-});
-
-beforeEach(async () => {
-  await resetTables(database);
-});
-
-afterAll(async () => {
-  await closeDatabase(database);
+bindTestDatabase((value) => {
+  database = value;
 });
 
 describe("durable sessions", () => {
