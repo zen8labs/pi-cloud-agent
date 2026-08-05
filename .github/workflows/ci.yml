@@ -92,6 +92,9 @@ jobs:
           # Browser smoke tests use isolated, non-production encryption keys.
           VCS_ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
           LLM_ENCRYPTION_KEY: "1111111111111111111111111111111111111111111111111111111111111111"
+          # The dummy hosted-provider key should fail the intentional run path quickly.
+          SANDBOX_TIMEOUT_SECONDS: "5"
+          RUN_WALL_CLOCK_SECONDS: "5"
           # This browser test deliberately exercises the hosted-provider failure
           # surface without requiring a local microVM or a runtime image.
           SANDBOX_PROVIDER: e2b
