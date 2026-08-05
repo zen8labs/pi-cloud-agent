@@ -42,6 +42,7 @@ export interface CreateRunInput {
   repoFullName: string;
   trigger: Trigger;
   model: string;
+  modelConnectionId?: string | null;
   callbackToken: string;
 }
 

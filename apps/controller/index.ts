@@ -41,7 +41,6 @@ const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   log.info("controller listening", {
     port: info.port,
     controlPlaneUrl: config.controlPlaneUrl,
-    model: config.model.id,
     sandbox: config.sandbox.provider,
   });
 });

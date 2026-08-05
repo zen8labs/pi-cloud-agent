@@ -29,6 +29,17 @@ ngrok http --url <your-domain>.ngrok.app 8080
 
 Set `CONTROL_PLANE_URL` to that HTTPS URL and restart the controller after any change. A run that provisions, produces no events, and fails ten minutes later with "stopped reporting" is almost always this.
 
+If a run has a sandbox id but no events, check the machine before changing model settings:
+
+```bash
+msb status
+msb inspect <sandbox-id>
+msb ping <sandbox-id>
+msb exec <sandbox-id> -- cat /tmp/pi-cloud-agent-runtime.log
+```
+
+After changing `packages/runtime/**`, an existing machine still contains the old bundled runtime. Rebuild and reload the image with `pnpm sandbox:image`, then retry the run. A stale image can report removed variables such as `AGENT_MODEL` even though the current controller injects only the `LLM_*` contract.
+
 ## When to rebuild the sandbox image or template
 
 Rebuild the local image after changing `packages/runtime/**`, `Dockerfile.sandbox`, or the pinned agent harness version:

@@ -89,22 +89,13 @@ export async function markExported(
   database: Database,
   exportRow: ObservabilityExportRow,
 ): Promise<void> {
-  await database
-    .update(observabilityExports)
-    .set({
-      status: "exported",
-      exportedAt: new Date(),
-      claimedAt: null,
-      lastError: null,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(observabilityExports.runId, exportRow.runId),
-        eq(observabilityExports.destination, exportRow.destination),
-        eq(observabilityExports.status, "processing"),
-      ),
-    );
+  await updateProcessingExport(database, exportRow, {
+    status: "exported",
+    exportedAt: new Date(),
+    claimedAt: null,
+    lastError: null,
+    updatedAt: new Date(),
+  });
 }
 
 export async function retryExport(
@@ -112,14 +103,30 @@ export async function retryExport(
   exportRow: ObservabilityExportRow,
   error: string,
 ): Promise<void> {
+  await updateProcessingExport(database, exportRow, {
+    status: "pending",
+    claimedAt: null,
+    lastError: error.slice(0, 1000),
+    updatedAt: new Date(),
+  });
+}
+
+type ExportUpdate = {
+  status: "pending" | "exported";
+  exportedAt?: Date;
+  claimedAt: Date | null;
+  lastError: string | null;
+  updatedAt: Date;
+};
+
+async function updateProcessingExport(
+  database: Database,
+  exportRow: ObservabilityExportRow,
+  values: ExportUpdate,
+): Promise<void> {
   await database
     .update(observabilityExports)
-    .set({
-      status: "pending",
-      claimedAt: null,
-      lastError: error.slice(0, 1000),
-      updatedAt: new Date(),
-    })
+    .set(values)
     .where(
       and(
         eq(observabilityExports.runId, exportRow.runId),

@@ -13,7 +13,6 @@ type ChatComposerProps = {
   onChange: (value: string) => void;
   onSubmit: () => void | Promise<void>;
   placeholder?: string;
-  model?: string | null;
   submitLabel?: string;
   submitEnabled?: boolean;
   submitting?: boolean;
@@ -28,7 +27,6 @@ export function ChatComposer({
   onChange,
   onSubmit,
   placeholder = "Give Pi a task…",
-  model,
   submitLabel = "Send",
   submitEnabled,
   submitting = false,
@@ -55,14 +53,7 @@ export function ChatComposer({
         className={compact ? "min-h-12" : undefined}
       />
       <PromptInputFooter>
-        <PromptInputTools className="min-w-0 flex-1">
-          {tools}
-          {model && (
-            <span className="max-w-40 shrink truncate rounded-md px-1.5 py-1 text-[11px] text-muted-foreground/80">
-              {model}
-            </span>
-          )}
-        </PromptInputTools>
+        <PromptInputTools className="min-w-0 flex-1">{tools}</PromptInputTools>
         <div className="ml-auto flex shrink-0 items-center">
           <PromptInputSubmit
             aria-label={submitLabel}

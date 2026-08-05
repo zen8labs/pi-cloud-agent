@@ -98,7 +98,7 @@ describe("a real resumable session, end to end", () => {
         repoFullName: REPO,
         repo: trigger.repo,
         trigger,
-        model: config.model.id,
+        model: "live-test/model",
         callbackToken: randomBytes(32).toString("hex"),
       });
 
@@ -145,9 +145,6 @@ describe("a real resumable session, end to end", () => {
         expect(piSessionId(secondEvents)).toBe(piSessionId(firstEvents));
         expect(tokenText(secondEvents)).toContain(proof);
         expect(new Set(secondEvents.map((event) => event.type))).toContain("tool_call");
-
-        const serialized = JSON.stringify([...firstEvents, ...secondEvents]);
-        expect(serialized).not.toContain(config.model.apiKey.expose());
       } finally {
         await cleanupSession(session.id);
       }

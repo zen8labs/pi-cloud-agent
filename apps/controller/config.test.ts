@@ -6,6 +6,8 @@ const baseEnv = {
   APP_AUTH_REQUIRED: "false",
   AIGATEWAY_BASE_URL: "https://gateway.example/v1",
   AIGATEWAY_API_KEY: "model-key",
+  VCS_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  LLM_ENCRYPTION_KEY: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
 };
 
 describe("observability configuration", () => {

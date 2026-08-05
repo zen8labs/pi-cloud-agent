@@ -2,7 +2,10 @@ import type {
   AppUserSummary,
   BranchesResponse,
   ConfigResponse,
+  CreateLlmConnectionRequest,
   CreateRunRequest,
+  LlmConnectionSummary,
+  LlmConnectionsResponse,
   RunDetail,
   RunEvent,
   RunEventsResponse,
@@ -16,6 +19,29 @@ import type {
   VcsRepository,
 } from "@pi-cloud-agent/protocol";
 
+export type LlmOAuthEvent =
+  | {
+      type: "auth";
+      event: {
+        type: "auth_url" | "device_code";
+        url?: string;
+        verificationUri?: string;
+        userCode?: string;
+        instructions?: string;
+      };
+    }
+  | {
+      type: "prompt";
+      prompt: {
+        type: string;
+        message: string;
+        placeholder?: string;
+        options?: Array<{ id: string; label: string }>;
+      };
+    }
+  | { type: "complete"; connection: LlmConnectionSummary }
+  | { type: "error"; message: string };
+
 /**
  * The controller's HTTP API, typed from the same definitions the controller uses.
  *
@@ -24,7 +50,7 @@ import type {
  * screen.
  */
 
-export const API_BASE =
+const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE?.replace(/\/$/, "") || "http://localhost:8080";
 
 /**
@@ -123,6 +149,71 @@ export const api = {
     provider === "github"
       ? `${API_BASE}/auth/github/connect?returnTo=settings`
       : `${API_BASE}/vcs/connections/${encodeURIComponent(provider)}/connect`,
+
+  listLlmConnections: (): Promise<LlmConnectionSummary[]> =>
+    request<LlmConnectionsResponse>("/llm/connections").then((r) => r.connections),
+
+  createLlmConnection: (body: CreateLlmConnectionRequest): Promise<LlmConnectionSummary> =>
+    request<LlmConnectionSummary>("/llm/connections", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  testLlmConnection: (body: CreateLlmConnectionRequest): Promise<{ ok: boolean }> =>
+    request<{ ok: boolean }>("/llm/connections/test", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  setDefaultLlmConnection: (id: string): Promise<{ ok: boolean }> =>
+    request<{ ok: boolean }>(`/llm/connections/${encodeURIComponent(id)}/default`, {
+      method: "POST",
+    }),
+
+  deleteLlmConnection: (id: string): Promise<{ ok: boolean }> =>
+    request<{ ok: boolean }>(`/llm/connections/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+
+  startLlmOAuth: (
+    provider: "chatgpt" | "claude",
+  ): Promise<{ flowId: string; eventsUrl: string }> =>
+    request<{ flowId: string; eventsUrl: string }>(`/llm/connections/oauth/${provider}/start`, {
+      method: "POST",
+    }),
+
+  submitLlmOAuthInput: (flowId: string, value: string): Promise<{ ok: boolean }> =>
+    request<{ ok: boolean }>(`/llm/oauth/${encodeURIComponent(flowId)}/input`, {
+      method: "POST",
+      body: JSON.stringify({ value }),
+    }),
+
+  streamLlmOAuth: async (
+    eventsUrl: string,
+    onEvent: (event: LlmOAuthEvent) => void,
+  ): Promise<void> => {
+    const response = await fetch(`${API_BASE}${eventsUrl}`, {
+      credentials: "include",
+      cache: "no-store",
+      headers: { Accept: "text/event-stream" },
+    });
+    if (!response.ok || !response.body)
+      throw new Error(`OAuth stream failed (${response.status})`);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      const messages = buffer.split("\n\n");
+      buffer = messages.pop() ?? "";
+      for (const message of messages) {
+        const line = message.split("\n").find((entry) => entry.startsWith("data: "));
+        if (line) onEvent(JSON.parse(line.slice(6)) as LlmOAuthEvent);
+      }
+      if (done) return;
+    }
+  },
 };
 
 export function streamUrl(id: string): string {

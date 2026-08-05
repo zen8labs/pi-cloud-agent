@@ -10,6 +10,7 @@ import { streamSSE } from "hono/streaming";
 import type { Database } from "../db/client";
 import { completeRun, createRun, getRun, listEvents, listRuns } from "../db/runs";
 import type { RunRow } from "../db/schema";
+import { resolveLlmModel } from "../llm/connections";
 import { userOwns } from "./auth";
 import type { AppEnv } from "./deps";
 import { readManualRouteRequest } from "./manual";
@@ -30,19 +31,29 @@ export function runRoutes(): Hono<AppEnv> {
   });
 
   app.post("/", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "authentication required" }, 401);
     const config = c.get("config");
     const resolved = await readManualRouteRequest(c);
     if (!resolved.ok) return c.json(resolved.error, 422);
     const { body, request: manual } = resolved;
+    const model = await resolveLlmModel(
+      c.get("database"),
+      config,
+      user.id,
+      body.modelConnectionId,
+      body.modelId,
+    );
 
     const run = await createRun(c.get("database"), {
-      userId: c.get("user")?.id ?? null,
+      userId: user.id,
       profile: manual.profile,
       provider: body.provider,
       repoFullName: body.repo,
       trigger: manual.trigger,
       // Pinned at creation, so a run stays reproducible if configuration changes.
-      model: config.model.id,
+      model: `${model.provider}/${model.name}`,
+      modelConnectionId: model.connectionId,
       callbackToken: randomBytes(32).toString("hex"),
     });
 
@@ -189,6 +200,7 @@ function toSummary(run: RunRow): RunSummary {
     provider: run.provider,
     repo: run.repoFullName,
     model: run.model,
+    modelConnectionId: run.modelConnectionId,
     error: run.error,
     createdAt: run.createdAt.toISOString(),
     updatedAt: run.updatedAt.toISOString(),

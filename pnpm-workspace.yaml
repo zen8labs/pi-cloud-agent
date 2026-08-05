@@ -5,12 +5,13 @@ packages:
 # One version of every shared dependency, declared once. Packages reference
 # these with "catalog:" so a bump happens in exactly one place.
 catalog:
+  "@earendil-works/pi-ai": 0.82.1
+  "@earendil-works/pi-coding-agent": 0.82.1
+  "@hono/node-server": 2.0.12
   "@opentelemetry/api": 1.9.1
   "@opentelemetry/exporter-trace-otlp-proto": 0.221.0
   "@opentelemetry/resources": 2.10.0
   "@opentelemetry/sdk-trace-base": 2.10.0
-  "@earendil-works/pi-coding-agent": 0.82.1
-  "@hono/node-server": 2.0.12
   # Tracks the engines.node floor, not the newest release: typings for a runtime
   # we do not target describe APIs we cannot call.
   "@types/node": 24.13.3

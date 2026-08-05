@@ -77,7 +77,22 @@ function fakeProvider(
 
 const broker: CredentialBroker = {
   async mintForRun() {
-    return { secrets: {}, env: {} };
+    return {
+      model: {
+        connectionId: "00000000-0000-4000-8000-000000000099",
+        authType: "api_key",
+        provider: "test-provider",
+        name: "test-model",
+        api: "openai-completions",
+        baseUrl: "https://model.example.test/v1",
+        contextWindow: 16_384,
+        maxTokens: 2_048,
+        apiKey: "test-key",
+        authJson: null,
+      },
+      secrets: {},
+      env: {},
+    };
   },
 };
 
