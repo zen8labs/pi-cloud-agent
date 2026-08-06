@@ -18,7 +18,7 @@ These are known limitations, not solved problems:
 - Azure DevOps permissions are delegated through the Microsoft Entra app and must be reviewed separately for least privilege.
 - Disconnect deletes the local connection but does not yet revoke the provider token. Add provider-side revocation to the broker/provider adapter.
 - Database backups, logs, crash dumps, controller memory, and OAuth client secrets are sensitive. Never return or log them.
-- The runtime must not persist model OAuth credentials in the parked session workspace. Pi may use a run-scoped temporary auth file during a turn, but the file is removed before the sandbox can be suspended.
+- The runtime must not persist model OAuth credentials in the parked session workspace. Pi may use a run-scoped temporary auth file during a turn. A rotated credential is returned only through the authenticated run callback using compare-and-set persistence, and the file is removed before the sandbox can be suspended.
 - Session cookies are signed and HttpOnly. Local HTTP uses `SameSite=Lax`; HTTPS uses `SameSite=None` so a dashboard hosted on another site can call the controller. The controller requires an allowed `Origin` on authenticated state-changing browser requests, and `WEB_CORS_ORIGINS` must contain explicit origins rather than `*`. `APP_SESSION_SECRET` must be at least 32 characters and must be rotated using a planned session invalidation procedure.
 
 ## Application isolation

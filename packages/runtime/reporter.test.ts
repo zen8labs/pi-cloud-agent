@@ -52,7 +52,7 @@ beforeEach(() => {
         throw new Error("network down");
       }
       sent.push({ path: new URL(url).pathname, body: JSON.parse(init.body) });
-      return { ok: true } as Response;
+      return { ok: true, json: async () => ({ updated: true }) } as Response;
     }),
   );
 });
@@ -122,6 +122,20 @@ describe("reporter", () => {
     const reporter = createReporter(readConfig());
     await reporter.status({ status: "error", detail: `clone failed using ${SCM_TOKEN}` });
     expect(JSON.stringify(sent[0]?.body)).not.toContain(SCM_TOKEN);
+  });
+
+  it("retries refreshed OAuth credential delivery because the next run depends on it", async () => {
+    const reporter = createReporter(readConfig());
+    failNext = 2;
+    const previous = { type: "oauth" as const, access: "old", refresh: "r1", expires: 1 };
+    const credential = { type: "oauth" as const, access: "new", refresh: "r2", expires: 2 };
+    await expect(reporter.modelCredential({ previous, credential })).resolves.toBe(true);
+    expect(sent).toEqual([
+      {
+        path: "/internal/runs/run-1/model-credential",
+        body: { previous, credential },
+      },
+    ]);
   });
 
   it("uses the same redactor for stderr-bound failures", () => {

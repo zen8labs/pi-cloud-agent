@@ -1,4 +1,8 @@
-import type { RunEventInput, RunStatusReport } from "@pi-cloud-agent/protocol";
+import type {
+  OAuthCredentialUpdate,
+  RunEventInput,
+  RunStatusReport,
+} from "@pi-cloud-agent/protocol";
 import type { RuntimeConfig } from "./config";
 import { createRuntimeRedactor } from "./config";
 
@@ -19,6 +23,7 @@ export interface Reporter {
   event(event: RunEventInput): void;
   log(event: string, fields?: Record<string, unknown>): void;
   status(report: RunStatusReport): Promise<void>;
+  modelCredential(update: OAuthCredentialUpdate): Promise<boolean>;
   /** Wait for queued telemetry to drain. Called before reporting terminal status. */
   flush(): Promise<void>;
 }
@@ -82,6 +87,34 @@ export function createReporter(config: RuntimeConfig): Reporter {
         }
       }
       throw new Error(`could not report terminal status: ${clean(String(lastError))}`);
+    },
+
+    async modelCredential(update: OAuthCredentialUpdate): Promise<boolean> {
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= STATUS_ATTEMPTS; attempt += 1) {
+        try {
+          const response = await fetch(
+            `${config.controlPlaneUrl}/internal/runs/${config.runId}/model-credential`,
+            {
+              method: "POST",
+              headers,
+              body: JSON.stringify(update),
+              signal: AbortSignal.timeout(TELEMETRY_TIMEOUT_MS),
+            },
+          );
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const result: unknown = await response.json();
+          return Boolean(
+            result && typeof result === "object" && (result as { updated?: unknown }).updated,
+          );
+        } catch (error) {
+          lastError = error;
+          if (attempt < STATUS_ATTEMPTS) {
+            await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** (attempt - 1)));
+          }
+        }
+      }
+      throw new Error(`could not persist model credential: ${clean(String(lastError))}`);
     },
 
     async flush(): Promise<void> {

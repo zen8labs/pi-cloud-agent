@@ -4,7 +4,6 @@ import { closeDatabase, type Database } from "../db/client";
 import { createRun } from "../db/runs";
 import { resolveLlmModelForRun, saveOAuthConnections } from "../llm/connections";
 import {
-  bindTestApp,
   manualTrigger,
   resetTables,
   seedTestUser,
@@ -20,7 +19,6 @@ let app: ReturnType<typeof createApp>;
 beforeAll(() => {
   database = setupTestDatabase();
   app = createApp({ config: testConfig(), database, log: silentLogger() });
-  bindTestApp(app, database);
 });
 
 beforeEach(() => resetTables(database));

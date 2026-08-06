@@ -1,4 +1,5 @@
 import {
+  oauthCredentialUpdateSchema,
   redactUrlCredentials,
   runEventInputSchema,
   runStatusReportSchema,
@@ -10,6 +11,7 @@ import type { Database } from "../db/client";
 import { appendEvent, completeRun, getRunByCallbackToken } from "../db/runs";
 import type { RunRow } from "../db/schema";
 import { getSessionForRun, saveSessionCheckpoint } from "../db/sessions";
+import { persistRefreshedOAuthCredential } from "../llm/connections";
 import type { Observability } from "../observability";
 import type { AppEnv } from "./deps";
 
@@ -17,10 +19,10 @@ import type { AppEnv } from "./deps";
  * The sandbox's outbound callbacks.
  *
  * This is the only surface an untrusted sandbox can reach, so it stays as small
- * as it can be: append telemetry, report the terminal status. There is no
- * endpoint to fetch a credential, read another run, or influence scheduling —
- * the sandbox is handed everything it needs at boot and can only talk about
- * itself afterwards.
+ * as it can be: append telemetry, persist a credential Pi rotated, and report
+ * the terminal status. There is no endpoint to fetch a credential, read another
+ * run, or influence scheduling — the sandbox is handed everything it needs at
+ * boot and can only talk about itself afterwards.
  *
  * Authentication is a per-run bearer token compared in constant time, so a token
  * is useless for any run but its own.
@@ -104,6 +106,24 @@ export function internalRoutes(observability?: Observability): Hono<AppEnv> {
     const saved = await saveSessionCheckpoint(c.get("database"), run, parsed.data.content);
     if (!saved) return c.json({ error: "run is not an active session turn" }, 409);
     return c.json({ ok: true });
+  });
+
+  app.post("/runs/:runId/model-credential", async (c) => {
+    const run = await requireRun(c, c.req.param("runId"));
+    if (run instanceof Response) return run;
+    const parsed = oauthCredentialUpdateSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "invalid model credential" }, 422);
+    if (!run.userId || !run.modelConnectionId) {
+      return c.json({ error: "run has no model connection" }, 409);
+    }
+    const separator = run.model.indexOf("/");
+    const updated = await persistRefreshedOAuthCredential(c.get("database"), c.get("config"), {
+      userId: run.userId,
+      connectionId: run.modelConnectionId,
+      provider: separator < 1 ? "" : run.model.slice(0, separator),
+      ...parsed.data,
+    });
+    return c.json({ updated });
   });
 
   return app;

@@ -22,7 +22,7 @@ Decides what runs and when, resolves connected identities, mints run credentials
 | `http/manual.ts` | request parsing shared by the run and session routes |
 | `http/runs.ts` | the operator API, including the resumable SSE stream |
 | `http/sessions.ts` | durable chat sessions and guarded follow-up turns |
-| `http/internal.ts` | events, terminal status, and checkpoint callbacks, authenticated per run |
+| `http/internal.ts` | events, terminal status, checkpoint, and model-credential callbacks, authenticated per run |
 | `observability.ts` | projects completed run journals into vendor-neutral OTLP traces from the trusted side |
 | `http/meta.ts` | what the dashboard needs to render itself |
 | `http/vcs.ts` | OAuth connect callbacks and connection management |

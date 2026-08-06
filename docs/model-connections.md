@@ -10,7 +10,7 @@ Deleting a connection removes it from the active Settings list immediately. Runs
 
 API-key connections support OpenAI-compatible Chat Completions, OpenAI Responses, and Anthropic Messages endpoints. LiteLLM works when its proxy exposes one of the supported OpenAI-compatible APIs. The Test action sends one minimal request using the selected API format, endpoint, model, and credential: `POST /chat/completions`, `POST /responses`, or `POST /messages` with a one-token budget. It is a real provider request and may count as usage; a non-2xx response is shown to the user instead of being reported as success.
 
-Pi's native ChatGPT OAuth provider is exposed as a ChatGPT Codex subscription connection button. Pi owns the provider login and token refresh. The browser receives only short-lived OAuth-flow events; the controller stores the resulting credential encrypted.
+Pi's native ChatGPT OAuth provider is exposed as a ChatGPT Codex subscription connection button. Pi owns the provider login and token refresh. The browser receives only short-lived OAuth-flow events; the controller stores the resulting credential encrypted. When Pi refreshes during a task, the runtime sends the rotated credential through its authenticated run callback. The controller replaces only the exact connection revision and previous credential that run received, so a stale task cannot overwrite a newer rotation.
 
 Every task resolves a user-owned model connection. There is no deployment-wide model credential.
 
@@ -18,7 +18,7 @@ Each OAuth model also advertises its available thinking levels from Pi's provide
 
 ## Sandbox handoff and future vault migration
 
-Today the trusted controller's `CredentialBroker` decrypts the selected model credential and injects the minimum values into the sandbox environment. API-key connections receive `LLM_API_KEY`; Pi OAuth connections additionally receive `LLM_AUTH_TYPE=oauth` and `LLM_AUTH_JSON`; every run receives its validated `LLM_THINKING_LEVEL`. The runtime writes the OAuth credential only to a run-scoped temporary Pi auth file and removes it when the process exits; it is not part of the parked session state. This is still not containment: repository code and the agent can read any credential visible to their process during the turn.
+Today the trusted controller's `CredentialBroker` decrypts the selected model credential and injects the minimum values into the sandbox environment. API-key connections receive `LLM_API_KEY`; Pi OAuth connections additionally receive `LLM_AUTH_TYPE=oauth` and `LLM_AUTH_JSON`; every run receives its validated `LLM_THINKING_LEVEL`. The runtime writes the OAuth credential only to a run-scoped temporary Pi auth file. If Pi changes it, the runtime persists the replacement through a compare-and-set controller callback, then removes the file when the process exits; it is not part of the parked session state. This is still not containment: repository code and the agent can read any credential visible to their process during the turn.
 
 When a vault is introduced, preserve the reconciler-facing `CredentialBroker` interface and replace the implementation behind it. The likely target is:
 

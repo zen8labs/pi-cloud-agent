@@ -79,6 +79,24 @@ export async function getLlmConnectionForRun(
   return findLlmConnection(database, userId, id, true);
 }
 
+export async function compareAndSetLlmCredential(
+  database: Database,
+  input: { userId: string; id: string; previous: string; credential: string },
+): Promise<boolean> {
+  const updated = await database
+    .update(llmConnections)
+    .set({ credential: input.credential, updatedAt: new Date() })
+    .where(
+      and(
+        eq(llmConnections.id, input.id),
+        eq(llmConnections.userId, input.userId),
+        eq(llmConnections.credential, input.previous),
+      ),
+    )
+    .returning({ id: llmConnections.id });
+  return updated.length > 0;
+}
+
 async function findLlmConnection(
   database: Database,
   userId: string,

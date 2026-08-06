@@ -11,6 +11,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { SANDBOX_ENV } from "@pi-cloud-agent/protocol";
 import type { RuntimeConfig } from "./config";
+import { persistRefreshedOAuthCredential } from "./oauth-credential";
 import type { Reporter } from "./reporter";
 import { loadSessionManager, saveSessionCheckpoint } from "./session-state";
 
@@ -258,7 +259,13 @@ export async function runAgentSession(
       session.dispose();
     }
   } finally {
-    await rm(authDirectory, { recursive: true, force: true });
+    try {
+      if (config.model.authType === "oauth") {
+        await persistRefreshedOAuthCredential(config, reporter, authPath);
+      }
+    } finally {
+      await rm(authDirectory, { recursive: true, force: true });
+    }
   }
 }
 

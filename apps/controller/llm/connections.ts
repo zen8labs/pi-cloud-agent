@@ -8,6 +8,7 @@ import type {
 import type { Config } from "../config";
 import type { Database } from "../db/client";
 import {
+  compareAndSetLlmCredential,
   createLlmConnection,
   getLlmConnection,
   getLlmConnectionForRun,
@@ -167,6 +168,37 @@ export async function resolveLlmModelForRun(
   const connection = await getLlmConnectionForRun(database, userId, connectionId);
   if (!connection) throw new Error("run model connection is no longer available");
   return decryptModel(connection, config, modelId);
+}
+
+export async function persistRefreshedOAuthCredential(
+  database: Database,
+  config: Config,
+  input: {
+    userId: string;
+    connectionId: string;
+    provider: string;
+    previous: StoredOAuthCredential;
+    credential: StoredOAuthCredential;
+  },
+): Promise<boolean> {
+  const connection = await getLlmConnectionForRun(database, input.userId, input.connectionId);
+  if (connection?.authType !== "oauth" || connection.provider !== input.provider) return false;
+  const encryptedPrevious = connection.credential;
+  const stored = parseCredential(decryptSecret(encryptedPrevious, config.llm.encryptionKey));
+  if (
+    stored.type !== "oauth" ||
+    stored.access !== input.previous.access ||
+    stored.refresh !== input.previous.refresh ||
+    stored.expires !== input.previous.expires
+  ) {
+    return false;
+  }
+  return compareAndSetLlmCredential(database, {
+    userId: input.userId,
+    id: input.connectionId,
+    previous: encryptedPrevious,
+    credential: encryptSecret(JSON.stringify(input.credential), config.llm.encryptionKey),
+  });
 }
 
 export function modelIdFromSnapshot(snapshot: string): string {
