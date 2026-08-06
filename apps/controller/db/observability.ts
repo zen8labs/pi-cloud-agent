@@ -4,6 +4,7 @@ import type { Database } from "./client";
 import { type ObservabilityExportRow, observabilityExports, runs } from "./schema";
 
 const CLAIM_LEASE_MS = 120_000;
+const MAX_EXPORT_ATTEMPTS = 5;
 
 export async function enqueueExport(
   database: Database,
@@ -25,7 +26,16 @@ export async function ensurePendingExports(
   const terminalRuns = await database
     .select({ id: runs.id })
     .from(runs)
-    .where(inArray(runs.status, [...TERMINAL_STATUSES]))
+    .leftJoin(
+      observabilityExports,
+      and(
+        eq(observabilityExports.runId, runs.id),
+        eq(observabilityExports.destination, destination),
+      ),
+    )
+    .where(
+      and(inArray(runs.status, [...TERMINAL_STATUSES]), isNull(observabilityExports.runId)),
+    )
     .orderBy(asc(runs.updatedAt))
     .limit(limit);
   if (terminalRuns.length === 0) return;
@@ -103,8 +113,9 @@ export async function retryExport(
   exportRow: ObservabilityExportRow,
   error: string,
 ): Promise<void> {
+  const exhausted = exportRow.attempt >= MAX_EXPORT_ATTEMPTS;
   await updateProcessingExport(database, exportRow, {
-    status: "pending",
+    status: exhausted ? "failed" : "pending",
     claimedAt: null,
     lastError: error.slice(0, 1000),
     updatedAt: new Date(),
@@ -112,7 +123,7 @@ export async function retryExport(
 }
 
 type ExportUpdate = {
-  status: "pending" | "exported";
+  status: "pending" | "exported" | "failed";
   exportedAt?: Date;
   claimedAt: Date | null;
   lastError: string | null;

@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createObservability } from "../observability";
 import { projectRun } from "../observability-projection";
@@ -13,6 +14,7 @@ import {
 import { closeDatabase, type Database } from "./client";
 import { claimExport, ensurePendingExports, markExported, retryExport } from "./observability";
 import { appendEvent, completeRun, listEvents } from "./runs";
+import { observabilityExports, runs } from "./schema";
 
 let database: Database;
 
@@ -58,6 +60,51 @@ describe("durable observability delivery", () => {
 
     expect((await claimExport(database, "destination-a"))?.destination).toBe("destination-a");
     expect((await claimExport(database, "destination-b"))?.destination).toBe("destination-b");
+  });
+
+  it("advances past terminal runs already seeded for a destination", async () => {
+    const oldest = await seedRun(database);
+    const newer = await seedRun(database);
+    await completeRun(database, oldest.id, "succeeded");
+    await completeRun(database, newer.id, "succeeded");
+    await database
+      .update(runs)
+      .set({ updatedAt: new Date(1) })
+      .where(eq(runs.id, oldest.id));
+    await database
+      .update(runs)
+      .set({ updatedAt: new Date(2) })
+      .where(eq(runs.id, newer.id));
+
+    await ensurePendingExports(database, "destination-a", 1);
+    const first = await claimExport(database, "destination-a");
+    if (!first) throw new Error("expected oldest export claim");
+    expect(first.runId).toBe(oldest.id);
+    await markExported(database, first);
+
+    await ensurePendingExports(database, "destination-a", 1);
+    expect((await claimExport(database, "destination-a"))?.runId).toBe(newer.id);
+  });
+
+  it("stops retrying an export after the attempt limit", async () => {
+    const run = await seedRun(database);
+    await completeRun(database, run.id, "succeeded");
+    await ensurePendingExports(database, "destination-a", 1);
+
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      const claimed = await claimExport(database, "destination-a");
+      if (!claimed) throw new Error(`expected export claim ${attempt}`);
+      expect(claimed.attempt).toBe(attempt);
+      await retryExport(database, claimed, "collector rejected the trace");
+    }
+
+    expect(await claimExport(database, "destination-a")).toBeNull();
+    const [delivery] = await database
+      .select()
+      .from(observabilityExports)
+      .where(eq(observabilityExports.runId, run.id));
+    expect(delivery?.status).toBe("failed");
+    expect(delivery?.lastError).toBe("collector rejected the trace");
   });
 
   it("exports a completed run as OTLP/HTTP", async () => {

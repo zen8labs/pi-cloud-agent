@@ -249,7 +249,7 @@ export const runEvents = pgTable(
   ],
 );
 
-export type ObservabilityExportStatus = "pending" | "processing" | "exported";
+export type ObservabilityExportStatus = "pending" | "processing" | "exported" | "failed";
 
 /** Durable delivery state for the configured OTLP destination. */
 export const observabilityExports = pgTable(
