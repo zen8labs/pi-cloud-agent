@@ -7,19 +7,18 @@ import type {
   RunSummary,
   SessionSummary,
 } from "@pi-cloud-agent/protocol";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { createWebSession, upsertAppUser } from "../db/auth";
-import { closeDatabase, type Database } from "../db/client";
+import type { Database } from "../db/client";
 import { getRun } from "../db/runs";
 import { parkSession } from "../db/sessions";
 import { saveApiKeyConnection } from "../llm/connections";
 import { createCredentialBroker } from "../secrets/broker";
 import {
+  bindTestApp,
   manualTrigger,
-  resetTables,
   seedRun,
   seedTestUser,
-  setupTestDatabase,
   silentLogger,
   testConfig,
   withTestModel,
@@ -40,22 +39,17 @@ let testCookie: string;
 let testUserId: string;
 let testModelConnectionId: string;
 
-beforeAll(async () => {
-  database = setupTestDatabase();
-  app = createApp({ config: testConfig(), database, log: silentLogger() });
+bindTestApp((deps) => {
+  database = deps.database;
+  app = deps.app;
 });
 
 beforeEach(async () => {
-  await resetTables(database);
   const config = testConfig();
   const seeded = await seedTestUser(database, config);
   testUserId = seeded.userId;
   testCookie = seeded.cookie;
   testModelConnectionId = seeded.modelConnectionId;
-});
-
-afterAll(async () => {
-  await closeDatabase(database);
 });
 
 function post(path: string, body: unknown, headers: Record<string, string> = {}) {

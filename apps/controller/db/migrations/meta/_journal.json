@@ -92,6 +92,13 @@
       "when": 1785995646731,
       "tag": "0012_skinny_brother_voodoo",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1786004698129,
+      "tag": "0013_fixed_sprite",
+      "breakpoints": true
     }
   ]
 }

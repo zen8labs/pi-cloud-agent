@@ -3,6 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createAgentSession,
+  DefaultResourceLoader,
+  type ExtensionAPI,
+  getAgentDir,
   ModelRuntime,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -72,12 +75,14 @@ export async function runAgentSession(
     }
 
     const sessionManager = await loadSessionManager(config, reporter);
+    const resourceLoader = await buildResourceLoader(config);
     const { session, extensionsResult } = await createAgentSession({
       cwd: config.repo.path,
       model,
       thinkingLevel: config.model.thinkingLevel,
       modelRuntime,
       sessionManager,
+      resourceLoader,
       settingsManager: SettingsManager.inMemory({
         compaction: { enabled: true },
         retry: { enabled: true, maxRetries: 3 },
@@ -91,11 +96,22 @@ export async function runAgentSession(
       throw new Error(`Pi could not load its extensions: ${detail}`);
     }
 
+    // Pi modes emit session_start via bindExtensions. Without it, extensions that
+    // hook the event (notably pi-mcp-adapter) never initialize — tools register
+    // but every call returns "MCP not initialized".
+    await session.bindExtensions({
+      mode: "print",
+      onError: (err) => {
+        process.stderr.write(`extension error (${err.extensionPath}): ${err.error}\n`);
+      },
+    });
+
     reporter.log("agent.session_start", {
       sessionId: session.sessionId,
       model: `${config.model.provider}/${config.model.name}`,
       thinkingLevel: config.model.thinkingLevel,
       cwd: config.repo.path,
+      mcp: Boolean(config.mcpConfig),
     });
 
     const unsubscribe = session.subscribe((event) => {
@@ -120,8 +136,6 @@ export async function runAgentSession(
           });
           break;
         case "tool_execution_end": {
-          // Arguments were already reported on the matching "running" event; the
-          // client pairs the two by callId rather than carrying them twice.
           reporter.event({
             type: "tool_call",
             data: {
@@ -177,6 +191,25 @@ export async function runAgentSession(
   }
 }
 
+/**
+ * Optional MCP via an isolated config snapshot. Never discovers `.mcp.json`
+ * from the cloned repository. The adapter is loaded only when MCP is configured
+ * so a normal run does not pay its dependency graph at boot.
+ */
+async function buildResourceLoader(config: RuntimeConfig) {
+  if (!config.mcpConfig) return undefined;
+  const { createMcpAdapter } = await import("pi-mcp-adapter");
+  const loader = new DefaultResourceLoader({
+    cwd: config.repo.path,
+    agentDir: getAgentDir(),
+    extensionFactories: [
+      createMcpAdapter({ config: config.mcpConfig }) as (pi: ExtensionAPI) => void,
+    ],
+  });
+  await loader.reload();
+  return loader;
+}
+
 function oauthCredentialDirectory(runId: string): string {
   return join(tmpdir(), "pi-cloud-agent", runId);
 }
@@ -204,13 +237,6 @@ function textOf(
     .join("\n");
 }
 
-/**
- * Narrow one of Pi's messages to the assistant shape.
- *
- * `AgentMessage` is an open union that extensions can widen, so this reads the
- * two fields we care about structurally rather than importing a type from a
- * transitive dependency and pinning ourselves to its internals.
- */
 interface AssistantLike {
   role: "assistant";
   stopReason?: string;

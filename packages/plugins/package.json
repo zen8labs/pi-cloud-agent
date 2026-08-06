@@ -1,0 +1,22 @@
+{
+  "name": "@pi-cloud-agent/plugins",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Plugin package format, attach resolution, and skill/MCP composition",
+  "main": "./index.ts",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@pi-cloud-agent/tsconfig": "workspace:*",
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

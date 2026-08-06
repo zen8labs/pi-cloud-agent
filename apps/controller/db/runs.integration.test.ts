@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { resetTables, seedRun, setupTestDatabase } from "../test-support";
-import { closeDatabase, type Database } from "./client";
+import { describe, expect, it } from "vitest";
+import { bindTestDatabase, seedRun } from "../test-support";
+import type { Database } from "./client";
 import {
   appendEvent,
   attachSandbox,
@@ -31,18 +31,19 @@ import { runs } from "./schema";
  */
 
 let database: Database;
-
-beforeAll(async () => {
-  database = setupTestDatabase();
+bindTestDatabase((value) => {
+  database = value;
 });
 
-beforeEach(async () => {
-  await resetTables(database);
-});
-
-afterAll(async () => {
-  await closeDatabase(database);
-});
+async function claimAndAttach(
+  runId: string,
+  sandboxId: string,
+  deadline: Date,
+  claimLeaseSeconds = 60,
+): Promise<void> {
+  await claimNextRun(database, claimLeaseSeconds);
+  await attachSandbox(database, runId, { provider: "fake", id: sandboxId }, deadline);
+}
 
 describe("claiming", () => {
   it("hands one run to exactly one worker", async () => {
@@ -78,13 +79,7 @@ describe("claiming", () => {
 
   it("does not reclaim a run that already has a sandbox", async () => {
     const run = await seedRun(database);
-    await claimNextRun(database, 60);
-    await attachSandbox(
-      database,
-      run.id,
-      { provider: "fake", id: "sb-1" },
-      new Date(Date.now() + 1000),
-    );
+    await claimAndAttach(run.id, "sb-1", new Date(Date.now() + 1000));
     expect(await claimNextRun(database, 60)).toBeNull();
   });
 });
@@ -117,12 +112,9 @@ describe("transitions", () => {
 
   it("records the sandbox and the deadline together", async () => {
     const run = await seedRun(database);
-    await claimNextRun(database, 60);
     const deadline = new Date(Date.now() + 30_000);
+    await claimAndAttach(run.id, "sb-9", deadline);
 
-    expect(
-      await attachSandbox(database, run.id, { provider: "fake", id: "sb-9" }, deadline),
-    ).toBe(true);
     const stored = await getRun(database, run.id);
     expect(stored?.sandboxId).toBe("sb-9");
     expect(stored?.sandboxProvider).toBe("fake");
@@ -146,13 +138,7 @@ describe("transitions", () => {
     expect(await requeueRun(database, run.id)).toBe(true);
     expect((await getRun(database, run.id))?.status).toBe("queued");
 
-    await claimNextRun(database, 60);
-    await attachSandbox(
-      database,
-      run.id,
-      { provider: "fake", id: "sb-2" },
-      new Date(Date.now() + 1000),
-    );
+    await claimAndAttach(run.id, "sb-2", new Date(Date.now() + 1000));
     // A live sandbox means retrying would double-run the task.
     expect(await requeueRun(database, run.id)).toBe(false);
   });
@@ -223,13 +209,7 @@ describe("callback authentication", () => {
 describe("reconciler queries", () => {
   it("finds in-flight runs past their deadline", async () => {
     const run = await seedRun(database);
-    await claimNextRun(database, 60);
-    await attachSandbox(
-      database,
-      run.id,
-      { provider: "fake", id: "sb" },
-      new Date(Date.now() - 1000),
-    );
+    await claimAndAttach(run.id, "sb", new Date(Date.now() - 1000));
 
     expect((await findExpiredRuns(database, 10)).map((r) => r.id)).toEqual([run.id]);
 
@@ -240,26 +220,14 @@ describe("reconciler queries", () => {
 
   it("finds a sandbox that has gone quiet, with or without earlier events", async () => {
     const noEvents = await seedRun(database);
-    await claimNextRun(database, 60);
-    await attachSandbox(
-      database,
-      noEvents.id,
-      { provider: "fake", id: "a" },
-      new Date(Date.now() + 60_000),
-    );
+    await claimAndAttach(noEvents.id, "a", new Date(Date.now() + 60_000));
     await database
       .update(runs)
       .set({ claimedAt: new Date(Date.now() - 60_000) })
       .where(eq(runs.id, noEvents.id));
 
     const stale = await seedRun(database);
-    await claimNextRun(database, 60);
-    await attachSandbox(
-      database,
-      stale.id,
-      { provider: "fake", id: "b" },
-      new Date(Date.now() + 60_000),
-    );
+    await claimAndAttach(stale.id, "b", new Date(Date.now() + 60_000));
     await appendEvent(database, stale.id, "token", { content: "hi" });
     await database
       .update(runs)
@@ -285,13 +253,7 @@ describe("reconciler queries", () => {
 
   it("finds finished runs whose machine was never confirmed reclaimed", async () => {
     const run = await seedRun(database);
-    await claimNextRun(database, 60);
-    await attachSandbox(
-      database,
-      run.id,
-      { provider: "fake", id: "sb" },
-      new Date(Date.now() + 1000),
-    );
+    await claimAndAttach(run.id, "sb", new Date(Date.now() + 1000));
 
     // Still running: nothing to clean up yet.
     expect(await findSandboxesToStop(database, 10)).toHaveLength(0);

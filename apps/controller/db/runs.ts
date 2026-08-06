@@ -22,7 +22,13 @@ import {
   sql,
 } from "drizzle-orm";
 import { CHANNELS, type Database, notify } from "./client";
-import { type RunEventRow, type RunRow, runEvents, runs } from "./schema";
+import {
+  type AttachedPluginRef,
+  type RunEventRow,
+  type RunRow,
+  runEvents,
+  runs,
+} from "./schema";
 
 /**
  * Every write to a run goes through this file, and every one of them is a
@@ -124,6 +130,18 @@ export async function attachSandbox(
     .where(and(eq(runs.id, runId), eq(runs.status, "provisioning")))
     .returning({ id: runs.id });
   return updated.length > 0;
+}
+
+/** Persist the plugin set resolved for this run (replay + events). */
+export async function setRunPlugins(
+  database: Database,
+  runId: string,
+  attached: AttachedPluginRef[],
+): Promise<void> {
+  await database
+    .update(runs)
+    .set({ plugins: attached, updatedAt: new Date() })
+    .where(eq(runs.id, runId));
 }
 
 export async function markRunning(database: Database, runId: string): Promise<boolean> {

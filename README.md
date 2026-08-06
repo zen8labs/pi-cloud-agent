@@ -11,7 +11,7 @@ You write the other 20%.
 ## Principles
 
 - **Small enough to read.** Under 8,000 lines of TypeScript. You can audit every line that touches your credentials in an evening, which is the only honest reason to trust it with one.
-- **Composable, not configurable.** Three contracts: a vertical, a compute backend, a forge. No plugin registry, no config DSL, no lifecycle hooks.
+- **Composable, not configurable.** Three contracts: a vertical, a compute backend, a forge. Plugins are installable skill/MCP bundles beside those contracts — not a second controller.
 - **Boring on purpose.** Postgres and one reconciliation loop. No workflow engine, no message broker, no cache.
 - **Deleting is design work.** Every feature is a liability. The default answer to "should we add this?" is "not yet, and probably not here."
 

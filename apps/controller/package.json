@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx db/migrate.ts",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "plugins:seed": "tsx plugins/seed.ts"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "catalog:",
@@ -18,6 +19,7 @@
     "@hono/node-server": "catalog:",
     "@pi-cloud-agent/profiles": "workspace:*",
     "@pi-cloud-agent/protocol": "workspace:*",
+    "@pi-cloud-agent/plugins": "workspace:*",
     "@pi-cloud-agent/sandbox": "workspace:*",
     "@pi-cloud-agent/vcs": "workspace:*",
     "drizzle-orm": "catalog:",

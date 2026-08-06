@@ -23,6 +23,7 @@ Forget existing products for a moment. If you want a coding agent to do useful w
 - **Actuation**: the run has to change something in the outside world. A PR comment, a commit, a status. The agent does this itself with ordinary tools (`git`, `gh`), the same way a human would.
 - **Observability**: no human is watching the loop live, so the run has to be *recorded*, both streamed as it happens and stored for later. This is how you trust, debug, and improve the agent.
 - **Profiles**: a way to turn the generic core into a specific job (review this PR, triage this issue) without editing the core. This is the extension surface and the whole point of the project.
+- **Plugins**: installable bundles of skills and/or MCP servers that attach beside a profile for a user. The kernel stays three contracts; plugins are a named distribution primitive, not a workflow engine.
 
 Everything we build should slot into one of these seven and stay out of the others.
 
@@ -37,7 +38,7 @@ Notably *not* irreducible: MCP, sub-agents, to-do plan tracking. Useful sometime
 Saying no is how the core stays small. These are deliberate omissions, not missing features:
 
 - **No controller-side publish step.** The controller does *not* collect structured findings and post them on the agent's behalf. The agent actuates its own outcomes with `git`/`gh` inside the sandbox. Parsing and re-structuring agent output on the controller is brittle, strips the agent's agency, and duplicates work the model already does well. (We used to have this; we removed it. This doc just names the principle.)
-- **No baked-in MCP.** MCP is opt-in per profile, never in the kernel. A popular MCP server can burn 7–9% of the context window on tool descriptions before any work starts. Default runs carry zero MCP servers; a profile that genuinely needs one declares it, and it runs inside the sandbox boundary. Prefer a CLI tool with a README the agent reads on demand (progressive disclosure).
+- **No baked-in MCP.** MCP is opt-in via an installed plugin, never in the kernel. A popular MCP server can burn 7–9% of the context window on tool descriptions before any work starts. Default runs carry zero MCP servers; when a plugin contributes MCP it runs inside the sandbox from a controller-resolved config snapshot — never from the cloned repository. Prefer a CLI tool with a README the agent reads on demand (progressive disclosure).
 - **No baked sub-agents / plan mode / to-dos.** These add hidden state the model has to track and hurt observability. If a vertical wants them, it builds them as an extension or writes a plan/TODO file in the repo.
 
 The one place we are *not* minimal, because the cloud makes it real: **a credential with write access to someone else's repo, sitting next to untrusted code.** That risk is handled properly (brokered, narrowly scoped, and short-lived) rather than waved away.

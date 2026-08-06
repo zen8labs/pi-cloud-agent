@@ -23,6 +23,9 @@ const ALLOWED: Record<string, string[]> = {
   profiles: ["protocol"],
   sandbox: ["protocol"],
   vcs: ["protocol"],
+  // Plugin package format + attach resolution. Trusted-side only; runtime never
+  // imports this — skills fold into TASK_PROMPT and MCP arrives as MCP_CONFIG.
+  plugins: [],
   // UNTRUSTED ZONE. Runs inside the sandbox alongside repository code.
   // It must never be able to reach a credential broker, a VCS client, a
   // sandbox provider, or the database. It talks to the controller over HTTP.
@@ -30,9 +33,9 @@ const ALLOWED: Record<string, string[]> = {
   // full prompt, so the sandbox image carries no profile code at all.
   runtime: ["protocol"],
   // TRUSTED ZONE. The only package that may compose everything.
-  controller: ["protocol", "profiles", "sandbox", "vcs"],
+  controller: ["protocol", "profiles", "sandbox", "vcs", "plugins"],
   // Browser client. Types only — it reaches the controller over HTTP.
-  web: ["protocol"],
+  web: ["protocol", "plugins"],
   tsconfig: [],
 };
 
