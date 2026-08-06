@@ -89,6 +89,7 @@ const broker: CredentialBroker = {
         maxTokens: 2_048,
         apiKey: "test-key",
         authJson: null,
+        thinkingLevels: ["off", "medium"],
       },
       secrets: {},
       env: {},

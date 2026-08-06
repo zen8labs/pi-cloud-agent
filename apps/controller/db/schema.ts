@@ -5,6 +5,7 @@ import type {
   RepoRef,
   RunEventType,
   RunStatus,
+  ThinkingLevel,
   Trigger,
 } from "@pi-cloud-agent/protocol";
 import { sql } from "drizzle-orm";
@@ -176,6 +177,7 @@ export const runs = pgTable(
 
     /** Resolved at creation so a run is reproducible even if config changes. */
     model: text("model").notNull(),
+    thinkingLevel: text("thinking_level").notNull().default("medium").$type<ThinkingLevel>(),
     modelConnectionId: uuid("model_connection_id").references(() => llmConnections.id, {
       onDelete: "restrict",
     }),

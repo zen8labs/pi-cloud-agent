@@ -3,6 +3,7 @@ import type {
   LlmAuthType,
   LlmConnectionSummary,
   LlmModelOption,
+  ThinkingLevel,
 } from "@pi-cloud-agent/protocol";
 import type { Config } from "../config";
 import type { Database } from "../db/client";
@@ -45,6 +46,7 @@ export interface ResolvedLlmModel {
   maxTokens: number;
   apiKey: string;
   authJson: string | null;
+  thinkingLevels: ThinkingLevel[];
 }
 
 export class LlmModelSelectionError extends Error {
@@ -110,6 +112,7 @@ export async function saveApiKeyConnection(
     apiKey: string;
     contextWindow: number;
     maxTokens: number;
+    thinkingLevels?: ThinkingLevel[];
     isDefault: boolean;
   },
 ): Promise<LlmConnectionRow> {
@@ -120,6 +123,7 @@ export async function saveApiKeyConnection(
         id: input.model,
         contextWindow: input.contextWindow,
         maxTokens: input.maxTokens,
+        thinkingLevels: input.thinkingLevels ?? ["off"],
       },
     ],
     authType: "api_key",
@@ -232,6 +236,7 @@ function decryptModel(
     maxTokens: selected.maxTokens,
     apiKey: credential.type === "api_key" ? credential.key : credential.access,
     authJson: credential.type === "oauth" ? JSON.stringify(credential) : null,
+    thinkingLevels: selected.thinkingLevels ?? ["off"],
   };
 }
 
@@ -272,7 +277,10 @@ export function toSummary(row: LlmConnectionRow): LlmConnectionSummary {
     api: row.api,
     baseUrl: row.baseUrl,
     model: row.model,
-    models: row.models,
+    models: row.models.map((model) => ({
+      ...model,
+      thinkingLevels: model.thinkingLevels ?? ["off"],
+    })),
     contextWindow: row.contextWindow,
     maxTokens: row.maxTokens,
     isDefault: row.isDefault,

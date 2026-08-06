@@ -1,4 +1,8 @@
-import type { LlmConnectionSummary } from "@pi-cloud-agent/protocol";
+import type {
+  LlmConnectionSummary,
+  LlmModelOption,
+  ThinkingLevel,
+} from "@pi-cloud-agent/protocol";
 
 export interface ModelSelection {
   connectionId: string;
@@ -18,6 +22,30 @@ export function parseModelSelection(value: string): ModelSelection | null {
 export function defaultModelSelection(connections: LlmConnectionSummary[]): string {
   const connection = connections.find((entry) => entry.isDefault) ?? connections[0];
   return connection ? modelSelectionValue(connection.id, connection.model) : "";
+}
+
+export function selectedModel(
+  connections: LlmConnectionSummary[],
+  value: string,
+): LlmModelOption | null {
+  const selection = parseModelSelection(value);
+  if (!selection) return null;
+  return (
+    connections
+      .find((connection) => connection.id === selection.connectionId)
+      ?.models.find((model) => model.id === selection.modelId) ?? null
+  );
+}
+
+export function preferredThinkingLevel(
+  model: LlmModelOption | null,
+  previous?: ThinkingLevel,
+): ThinkingLevel {
+  if (!model) return "off";
+  const levels = model.thinkingLevels ?? ["off"];
+  if (previous && levels.includes(previous)) return previous;
+  if (levels.includes("medium")) return "medium";
+  return levels[0] ?? "off";
 }
 
 export function preferredModelSelection(

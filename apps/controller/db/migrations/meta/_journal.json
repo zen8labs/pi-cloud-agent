@@ -85,6 +85,13 @@
       "when": 1785914320819,
       "tag": "0011_dry_tomorrow_man",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1785995646731,
+      "tag": "0012_skinny_brother_voodoo",
+      "breakpoints": true
     }
   ]
 }

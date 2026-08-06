@@ -7,6 +7,7 @@ import type {
   CredentialInfo,
   CredentialStore,
 } from "@earendil-works/pi-ai";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { LlmApi, LlmConnectionSummary } from "@pi-cloud-agent/protocol";
 import type { Config } from "../config";
@@ -152,7 +153,13 @@ export class OAuthFlowManager {
         provider: provider.piId,
         api: provider.api,
         baseUrl: provider.baseUrl,
-        models,
+        models: models.map((model) => ({
+          id: model.id,
+          baseUrl: model.baseUrl,
+          contextWindow: model.contextWindow,
+          maxTokens: model.maxTokens,
+          thinkingLevels: getSupportedThinkingLevels(model),
+        })),
         credential: asOAuthCredential(credential),
         isDefault: connections.length === 0,
       });

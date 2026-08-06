@@ -1,0 +1,1 @@
+ALTER TABLE "runs" ADD COLUMN "thinking_level" text DEFAULT 'medium' NOT NULL;

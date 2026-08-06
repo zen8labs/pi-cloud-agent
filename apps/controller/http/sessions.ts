@@ -52,6 +52,7 @@ export function sessionRoutes(): Hono<AppEnv> {
       user.id,
       body.modelConnectionId,
       body.modelId,
+      body.thinkingLevel,
     );
     if (!selected.ok) return c.json({ error: selected.error }, 422);
     const model = selected.model;
@@ -66,6 +67,7 @@ export function sessionRoutes(): Hono<AppEnv> {
       trigger: manual.trigger,
       model: `${model.provider}/${model.name}`,
       modelConnectionId: model.connectionId,
+      thinkingLevel: body.thinkingLevel,
       callbackToken: randomBytes(32).toString("hex"),
     });
     c.get("log").info("session queued", {
@@ -105,6 +107,7 @@ export function sessionRoutes(): Hono<AppEnv> {
       parsed.data.prompt,
       parsed.data.modelConnectionId,
       parsed.data.modelId,
+      parsed.data.thinkingLevel,
     );
     if (!result.ok) return c.json({ error: result.error }, result.status);
     c.get("log").info("session turn queued", {
@@ -130,6 +133,7 @@ async function queueSessionTurn(
   prompt: string,
   modelConnectionId: string,
   modelId: string,
+  thinkingLevel: import("@pi-cloud-agent/protocol").ThinkingLevel,
 ): Promise<SessionTurnResult> {
   const session = await getSession(database, sessionId, userId);
   if (!session) return { ok: false, error: "session not found", status: 404 };
@@ -139,6 +143,7 @@ async function queueSessionTurn(
     userId,
     modelConnectionId,
     modelId,
+    thinkingLevel,
   );
   if (!selected.ok) return { ok: false, error: selected.error, status: 422 };
 
@@ -152,6 +157,7 @@ async function queueSessionTurn(
       {
         model: `${selected.model.provider}/${selected.model.name}`,
         modelConnectionId: selected.model.connectionId,
+        thinkingLevel,
       },
     );
     return { ok: true, run };

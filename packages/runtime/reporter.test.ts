@@ -37,6 +37,7 @@ beforeEach(() => {
     [SANDBOX_ENV.modelApiKey]: MODEL_KEY,
     [SANDBOX_ENV.modelContextWindow]: "16384",
     [SANDBOX_ENV.modelMaxTokens]: "2048",
+    [SANDBOX_ENV.modelThinkingLevel]: "medium",
     [SANDBOX_ENV.repoCloneUrl]: "https://github.com/acme/widgets.git",
     [SANDBOX_ENV.repoName]: "widgets",
     [SANDBOX_ENV.scmToken]: SCM_TOKEN,

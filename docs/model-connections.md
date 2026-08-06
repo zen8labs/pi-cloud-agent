@@ -14,9 +14,11 @@ Pi's native OAuth providers are exposed as subscription connection buttons for C
 
 Every task resolves a user-owned model connection. There is no deployment-wide model credential.
 
+Each model also advertises its available thinking levels. OAuth connections derive that list from Pi's provider catalog. Custom API-key endpoints declare it explicitly in Settings because the supported APIs do not expose a portable capability endpoint; they default to `off` until the user opts into additional levels. The controller rejects a level outside the selected model's catalog. The chosen level is stored on the run and passed to Pi, so historical runs remain explainable and resumed sessions may change model and thinking level independently.
+
 ## Sandbox handoff and future vault migration
 
-Today the trusted controller's `CredentialBroker` decrypts the selected model credential and injects the minimum values into the sandbox environment. API-key connections receive `LLM_API_KEY`; Pi OAuth connections additionally receive `LLM_AUTH_TYPE=oauth` and `LLM_AUTH_JSON`. The runtime writes the OAuth credential only to a run-scoped temporary Pi auth file and removes it when the process exits; it is not part of the parked session state. This is still not containment: repository code and the agent can read any credential visible to their process during the turn.
+Today the trusted controller's `CredentialBroker` decrypts the selected model credential and injects the minimum values into the sandbox environment. API-key connections receive `LLM_API_KEY`; Pi OAuth connections additionally receive `LLM_AUTH_TYPE=oauth` and `LLM_AUTH_JSON`; every run receives its validated `LLM_THINKING_LEVEL`. The runtime writes the OAuth credential only to a run-scoped temporary Pi auth file and removes it when the process exits; it is not part of the parked session state. This is still not containment: repository code and the agent can read any credential visible to their process during the turn.
 
 When a vault is introduced, preserve the reconciler-facing `CredentialBroker` interface and replace the implementation behind it. The likely target is:
 

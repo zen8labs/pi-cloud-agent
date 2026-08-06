@@ -383,13 +383,13 @@ describe("model connections", () => {
         prompt: "use my model",
         modelConnectionId: connection.id,
         modelId: "gpt-test",
+        thinkingLevel: "off",
       }),
     });
     expect(queued.status).toBe(201);
     const run = await json<RunSummary>(queued);
     expect(run.model).toBe("litellm/gpt-test");
     expect(run.modelConnectionId).toBe(connection.id);
-
     const deletion = await secureApp.request(`/llm/connections/${connection.id}`, {
       method: "DELETE",
       headers: { Cookie: `pca_session=${cookie}`, Origin: "http://localhost:3000" },
@@ -455,6 +455,7 @@ describe("model connections", () => {
           profile: "general",
           modelConnectionId: original.id,
           modelId: "original-model",
+          thinkingLevel: "off",
         }),
       }),
     );
@@ -488,6 +489,7 @@ describe("model connections", () => {
         prompt: "Use the replacement model",
         modelConnectionId: replacement.id,
         modelId: "replacement-model",
+        thinkingLevel: "off",
       }),
     });
     expect(followUp.status).toBe(201);

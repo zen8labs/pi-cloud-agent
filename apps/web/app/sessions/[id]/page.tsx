@@ -1,6 +1,11 @@
 "use client";
 
-import type { LlmConnectionSummary, RunDetail, SessionDetail } from "@pi-cloud-agent/protocol";
+import type {
+  LlmConnectionSummary,
+  RunDetail,
+  SessionDetail,
+  ThinkingLevel,
+} from "@pi-cloud-agent/protocol";
 import { ArrowLeftIcon, GitBranchIcon, SquareIcon, WaypointsIcon } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -15,12 +20,15 @@ import { ChatComposer } from "@/components/ChatComposer";
 import { ModelSelect } from "@/components/ModelSelect";
 import { AzureDevOpsMarkIcon, GithubMarkIcon } from "@/components/ProviderIcons";
 import { StatusBadge } from "@/components/StatusBadge";
+import { ThinkingLevelSelect } from "@/components/ThinkingLevelSelect";
 import { api } from "@/lib/api";
 import { absoluteTime } from "@/lib/format";
 import {
   defaultModelSelection,
   parseModelSelection,
   preferredModelSelection,
+  preferredThinkingLevel,
+  selectedModel,
 } from "@/lib/model-selection";
 import { resolveBranch, summarizeChanges } from "@/lib/session-meta";
 import { useSession } from "@/lib/useSession";
@@ -94,6 +102,7 @@ export default function SessionPage() {
                   previousModelConnectionId={
                     latest?.modelConnectionId ?? session.modelConnectionId
                   }
+                  previousThinkingLevel={latest?.thinkingLevel ?? "medium"}
                   active={active}
                   onQueued={refresh}
                 />
@@ -264,6 +273,7 @@ function FollowUp({
   repo,
   previousModel,
   previousModelConnectionId,
+  previousThinkingLevel,
   active,
   onQueued,
 }: {
@@ -271,12 +281,14 @@ function FollowUp({
   repo: string;
   previousModel: string;
   previousModelConnectionId: string | null;
+  previousThinkingLevel: ThinkingLevel;
   active: boolean;
   onQueued: () => Promise<void>;
 }) {
   const [prompt, setPrompt] = useState("");
   const [modelConnections, setModelConnections] = useState<LlmConnectionSummary[]>([]);
   const [modelSelection, setModelSelection] = useState("");
+  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>("off");
   const [modelsLoading, setModelsLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -290,8 +302,14 @@ function FollowUp({
       .then((connections) => {
         if (!alive) return;
         setModelConnections(connections);
-        setModelSelection(
-          preferredModelSelection(connections, previousModelConnectionId, previousModel),
+        const selection = preferredModelSelection(
+          connections,
+          previousModelConnectionId,
+          previousModel,
+        );
+        setModelSelection(selection);
+        setThinkingLevel(
+          preferredThinkingLevel(selectedModel(connections, selection), previousThinkingLevel),
         );
       })
       .catch((cause) => {
@@ -303,7 +321,7 @@ function FollowUp({
     return () => {
       alive = false;
     };
-  }, [active, previousModel, previousModelConnectionId]);
+  }, [active, previousModel, previousModelConnectionId, previousThinkingLevel]);
 
   const selected = parseModelSelection(modelSelection);
   const canSubmit = !active && !submitting && Boolean(prompt.trim()) && Boolean(selected);
@@ -317,6 +335,7 @@ function FollowUp({
         prompt: prompt.trim(),
         modelConnectionId: selected.connectionId,
         modelId: selected.modelId,
+        thinkingLevel,
       });
       setPrompt("");
       await onQueued();
@@ -327,6 +346,8 @@ function FollowUp({
       if (connections) {
         setModelConnections(connections);
         setModelSelection(defaultModelSelection(connections));
+        const selection = defaultModelSelection(connections);
+        setThinkingLevel(preferredThinkingLevel(selectedModel(connections, selection)));
       }
       setSubmitting(false);
     }
@@ -349,11 +370,25 @@ function FollowUp({
             <ModelSelect
               connections={modelConnections}
               value={modelSelection}
-              onChange={setModelSelection}
+              onChange={(value) => {
+                setModelSelection(value);
+                setThinkingLevel(
+                  preferredThinkingLevel(selectedModel(modelConnections, value), thinkingLevel),
+                );
+              }}
               disabled={active || modelsLoading}
               ariaLabel="Model for next turn"
               placeholder={modelsLoading ? "Loading models…" : "Choose model"}
               className="h-7 min-w-0 max-w-44 border-0 bg-transparent px-1.5 text-xs shadow-none dark:bg-transparent"
+            />
+            <ThinkingLevelSelect
+              levels={
+                selectedModel(modelConnections, modelSelection)?.thinkingLevels ?? ["off"]
+              }
+              value={thinkingLevel}
+              onChange={setThinkingLevel}
+              disabled={active || modelsLoading}
+              className="h-7 min-w-0 max-w-36 border-0 bg-transparent px-1.5 text-xs shadow-none dark:bg-transparent"
             />
           </div>
         }

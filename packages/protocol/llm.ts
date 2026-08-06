@@ -14,6 +14,18 @@ export const LLM_AUTH_TYPES = ["api_key", "oauth"] as const;
 export const llmAuthTypeSchema = z.enum(LLM_AUTH_TYPES);
 export type LlmAuthType = (typeof LLM_AUTH_TYPES)[number];
 
+export const THINKING_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+export const thinkingLevelSchema = z.enum(THINKING_LEVELS);
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
 export const createLlmConnectionSchema = z.object({
   displayName: z.string().trim().min(1).max(80),
   provider: z
@@ -41,6 +53,7 @@ export const createLlmConnectionSchema = z.object({
   apiKey: z.string().min(1).max(10_000),
   contextWindow: z.number().int().positive().max(10_000_000).default(196_608),
   maxTokens: z.number().int().positive().max(1_000_000).default(32_000),
+  thinkingLevels: z.array(thinkingLevelSchema).min(1).default(["off"]),
   isDefault: z.boolean().default(false),
 });
 
@@ -52,6 +65,7 @@ export interface LlmModelOption {
   baseUrl?: string;
   contextWindow: number;
   maxTokens: number;
+  thinkingLevels?: ThinkingLevel[];
 }
 
 export interface LlmConnectionSummary {

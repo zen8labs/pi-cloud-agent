@@ -58,6 +58,8 @@ conversation and repository continuity remain intact. A removed model is never
 silently reused: the client refreshes the catalog and submits an available
 selection for the next turn.
 
+Thinking level follows the same per-turn rule. The composer keeps the latest run's level when the newly selected model supports it, otherwise it chooses that model's preferred available level (`medium` when present, then the first advertised level). This preserves the previous model and inference shape when possible while making capability changes explicit.
+
 The terminal run status and workspace suspension are separate durable facts.
 After a runtime reports completion, the session briefly remains busy while the
 reconciler suspends its workspace. A controller restart at any point simply

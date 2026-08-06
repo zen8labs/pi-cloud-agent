@@ -199,6 +199,7 @@ function buildEnv(
     [SANDBOX_ENV.modelBaseUrl]: model.baseUrl,
     [SANDBOX_ENV.modelContextWindow]: String(model.contextWindow),
     [SANDBOX_ENV.modelMaxTokens]: String(model.maxTokens),
+    [SANDBOX_ENV.modelThinkingLevel]: run.thinkingLevel,
 
     [SANDBOX_ENV.repoProvider]: repo.provider,
     [SANDBOX_ENV.repoHost]: repo.host,

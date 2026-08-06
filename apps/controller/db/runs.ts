@@ -4,6 +4,7 @@ import {
   type RunEventType,
   type RunStatus,
   TERMINAL_STATUSES,
+  type ThinkingLevel,
   type Trigger,
 } from "@pi-cloud-agent/protocol";
 import {
@@ -42,6 +43,7 @@ export interface CreateRunInput {
   repoFullName: string;
   trigger: Trigger;
   model: string;
+  thinkingLevel?: ThinkingLevel;
   modelConnectionId?: string | null;
   callbackToken: string;
 }

@@ -84,6 +84,7 @@ export function validateConnectionForm(form: CreateLlmConnectionRequest): string
   }
   if (!form.model.trim()) return "Model is required";
   if (!form.apiKey.trim()) return "API key is required";
+  if (form.thinkingLevels?.length === 0) return "Choose at least one thinking level";
   if (
     form.contextWindow !== undefined &&
     (!Number.isInteger(form.contextWindow) || form.contextWindow < 1)

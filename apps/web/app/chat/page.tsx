@@ -3,6 +3,7 @@
 import type {
   ConfigResponse,
   LlmConnectionSummary,
+  ThinkingLevel,
   VcsRepository,
 } from "@pi-cloud-agent/protocol";
 import { FolderGit2Icon, GitBranchIcon, SlidersHorizontalIcon } from "lucide-react";
@@ -11,6 +12,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { ChatComposer } from "@/components/ChatComposer";
 import { ModelSelect } from "@/components/ModelSelect";
+import { ThinkingLevelSelect } from "@/components/ThinkingLevelSelect";
 import {
   Select,
   SelectContent,
@@ -19,7 +21,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
-import { defaultModelSelection, parseModelSelection } from "@/lib/model-selection";
+import {
+  defaultModelSelection,
+  parseModelSelection,
+  preferredThinkingLevel,
+  selectedModel,
+} from "@/lib/model-selection";
 import { saveSessionTitle } from "@/lib/session-titles";
 
 export default function ChatPage() {
@@ -40,6 +47,7 @@ function NewSession() {
   const [provider, setProvider] = useState("github");
   const [profile, setProfile] = useState(params.get("profile") ?? "");
   const [modelSelection, setModelSelection] = useState("");
+  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>("off");
   const [prompt, setPrompt] = useState("");
   const [branches, setBranches] = useState<string[]>([]);
   const [branch, setBranch] = useState("");
@@ -55,7 +63,9 @@ function NewSession() {
         setConfig(loadedConfig);
         setRepos(loadedRepos);
         setModelConnections(loadedConnections);
-        setModelSelection(defaultModelSelection(loadedConnections));
+        const selection = defaultModelSelection(loadedConnections);
+        setModelSelection(selection);
+        setThinkingLevel(preferredThinkingLevel(selectedModel(loadedConnections, selection)));
         setProfile((current) => current || loadedConfig.defaultProfile);
         const selected = loadedRepos[0];
         if (selected) {
@@ -124,6 +134,7 @@ function NewSession() {
         branch: branch || null,
         modelConnectionId: selection.connectionId,
         modelId: selection.modelId,
+        thinkingLevel,
       });
       saveSessionTitle(session.id, prompt.trim());
       router.push(`/sessions/${session.id}`);
@@ -171,6 +182,8 @@ function NewSession() {
                 modelSelection={modelSelection}
                 modelConnections={modelConnections}
                 onModelSelectionChange={setModelSelection}
+                thinkingLevel={thinkingLevel}
+                onThinkingLevelChange={setThinkingLevel}
                 branch={branch}
                 branches={branches}
                 branchesLoading={branchesLoading}
@@ -225,6 +238,8 @@ type ComposerOptionsProps = {
   modelSelection: string;
   modelConnections: LlmConnectionSummary[];
   onModelSelectionChange: (value: string) => void;
+  thinkingLevel: ThinkingLevel;
+  onThinkingLevelChange: (value: ThinkingLevel) => void;
   branch: string;
   branches: string[];
   branchesLoading: boolean;
@@ -234,6 +249,7 @@ type ComposerOptionsProps = {
 function ComposerOptions(props: ComposerOptionsProps) {
   const triggerClass =
     "h-7 min-w-0 max-w-36 shrink border-0 bg-transparent px-1.5 text-xs shadow-none dark:bg-transparent";
+  const model = selectedModel(props.modelConnections, props.modelSelection);
   return (
     <>
       <FolderGit2Icon className="size-3.5 shrink-0 text-muted-foreground" />
@@ -301,7 +317,21 @@ function ComposerOptions(props: ComposerOptionsProps) {
       <ModelSelect
         connections={props.modelConnections}
         value={props.modelSelection}
-        onChange={props.onModelSelectionChange}
+        onChange={(value) => {
+          props.onModelSelectionChange(value);
+          props.onThinkingLevelChange(
+            preferredThinkingLevel(
+              selectedModel(props.modelConnections, value),
+              props.thinkingLevel,
+            ),
+          );
+        }}
+        className={triggerClass}
+      />
+      <ThinkingLevelSelect
+        levels={model?.thinkingLevels ?? ["off"]}
+        value={props.thinkingLevel}
+        onChange={props.onThinkingLevelChange}
         className={triggerClass}
       />
     </>

@@ -15,7 +15,7 @@ function connection(id: string, model: string, isDefault: boolean): LlmConnectio
     api: "openai-responses",
     baseUrl: "https://models.example/v1",
     model,
-    models: [{ id: model, contextWindow: 16_384, maxTokens: 2_048 }],
+    models: [{ id: model, contextWindow: 16_384, maxTokens: 2_048, thinkingLevels: ["off"] }],
     contextWindow: 16_384,
     maxTokens: 2_048,
     isDefault,

@@ -4,6 +4,8 @@ import {
   redactUrlCredentials,
   SANDBOX_ENV,
   SANDBOX_PATHS,
+  THINKING_LEVELS,
+  type ThinkingLevel,
 } from "@pi-cloud-agent/protocol";
 
 /**
@@ -33,6 +35,7 @@ export interface RuntimeConfig {
     baseUrl: string;
     contextWindow: number;
     maxTokens: number;
+    thinkingLevel: ThinkingLevel;
   };
 
   repo: {
@@ -95,6 +98,7 @@ export function readConfig(): RuntimeConfig {
       baseUrl: required(SANDBOX_ENV.modelBaseUrl),
       contextWindow: positiveInteger(SANDBOX_ENV.modelContextWindow),
       maxTokens: positiveInteger(SANDBOX_ENV.modelMaxTokens),
+      thinkingLevel: readThinkingLevel(),
     },
 
     repo: {
@@ -113,6 +117,13 @@ export function readConfig(): RuntimeConfig {
       hasToken: Boolean(optional(SANDBOX_ENV.scmToken)),
     },
   };
+}
+
+function readThinkingLevel(): ThinkingLevel {
+  const value = required(SANDBOX_ENV.modelThinkingLevel);
+  const level = THINKING_LEVELS.find((candidate) => candidate === value);
+  if (!level) throw new Error(`${SANDBOX_ENV.modelThinkingLevel} is invalid`);
+  return level;
 }
 
 function readAuthType(): "api_key" | "oauth" {

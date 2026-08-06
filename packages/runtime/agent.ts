@@ -75,7 +75,7 @@ export async function runAgentSession(
     const { session, extensionsResult } = await createAgentSession({
       cwd: config.repo.path,
       model,
-      thinkingLevel: "medium",
+      thinkingLevel: config.model.thinkingLevel,
       modelRuntime,
       sessionManager,
       settingsManager: SettingsManager.inMemory({
@@ -94,6 +94,7 @@ export async function runAgentSession(
     reporter.log("agent.session_start", {
       sessionId: session.sessionId,
       model: `${config.model.provider}/${config.model.name}`,
+      thinkingLevel: config.model.thinkingLevel,
       cwd: config.repo.path,
     });
 
