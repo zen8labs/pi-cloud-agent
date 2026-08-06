@@ -7,7 +7,10 @@
 
 import { closeDatabase, createDatabase } from "./db/client";
 import { migrateDatabase } from "./db/migrate-runner";
-import { TEST_DATABASE_URL } from "./test-support";
+
+const TEST_DATABASE_URL =
+  process.env.TEST_DATABASE_URL ??
+  "postgres://pi_cloud_agent:pi_cloud_agent@localhost:5532/pi_cloud_agent_test";
 
 export async function setup(): Promise<void> {
   await ensureTestDatabase();
