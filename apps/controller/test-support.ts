@@ -21,7 +21,7 @@ import { createLogger, type Logger } from "./logger";
  * insert. A fake database would only test the mock. See docs/testing.md.
  */
 
-export const TEST_DATABASE_URL =
+const TEST_DATABASE_URL =
   process.env.TEST_DATABASE_URL ??
   "postgres://pi_cloud_agent:pi_cloud_agent@localhost:5532/pi_cloud_agent_test";
 
