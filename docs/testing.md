@@ -58,7 +58,7 @@ it("completeRun returns false when already terminal", …)     // no
 // same run out can arrive together.
 ```
 
-**Use the shared helpers.** `apps/controller/test-support.ts` provides `setupTestDatabase`, `resetTables`, `testConfig`, `seedRun`, `manualTrigger`, and `silentLogger`. Do not hand-roll a config object. `testConfig` goes through the real `configFrom`, so a config change breaks the tests rather than drifting past them.
+**Use the shared helpers.** `apps/controller/test-support.ts` provides `bindTestDatabase`, `bindTestApp`, `testConfig`, `seedRun`, `manualTrigger`, and `silentLogger`. Do not hand-roll a config object. `testConfig` goes through the real `configFrom`, so a config change breaks the tests rather than drifting past them.
 
 **Inject providers, do not mock modules.** The reconciler takes a `createProvider` factory, so tests substitute a recording fake. There is no module mocking anywhere in this suite.
 

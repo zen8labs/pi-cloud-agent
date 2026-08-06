@@ -23,9 +23,10 @@ import {
 } from "drizzle-orm/pg-core";
 
 /**
- * Seven tables. Users and web sessions own the application identity boundary;
- * runs and sessions own execution state; connections own encrypted VCS tokens
- * and short-lived OAuth state.
+ * Users and web sessions own the application identity boundary; runs and
+ * sessions own execution state; connections own encrypted VCS tokens and
+ * short-lived OAuth state; plugin tables own the operator marketplace catalog
+ * and per-user install/configure state.
  *
  * `runs` is simultaneously the queue, the lifecycle record, and the crash
  * recovery journal — which is deliberate. Because every fact the controller
@@ -182,6 +183,12 @@ export const runs = pgTable(
       onDelete: "restrict",
     }),
 
+    /**
+     * Plugins attached at provision: `{ name, version, components }[]`.
+     * Null until provision resolves the effective set (or empty when none).
+     */
+    plugins: jsonb("plugins").$type<AttachedPluginRef[] | null>(),
+
     /** Bearer token the sandbox uses on its outbound callbacks. */
     callbackToken: text("callback_token").notNull(),
 
@@ -288,6 +295,138 @@ export const webSessions = pgTable(
   ],
 );
 
+/** Replay pin for plugins attached to a run. */
+export interface AttachedPluginRef {
+  name: string;
+  version: string;
+  components: { skills: boolean; mcp: boolean };
+}
+
+export type InstallMode = "default_off" | "default_on" | "required";
+export type ReviewStatus = "draft" | "approved" | "yanked";
+export type UserPluginOverride = "enabled" | "disabled";
+
+export const plugins = pgTable(
+  "plugins",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    publisher: text("publisher").notNull().default("Zen8"),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("plugins_name_idx").on(table.name)],
+);
+
+export const pluginVersions = pgTable(
+  "plugin_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    pluginId: uuid("plugin_id")
+      .notNull()
+      .references(() => plugins.id, { onDelete: "cascade" }),
+    version: text("version").notNull(),
+    source: text("source").notNull(),
+    artifactPath: text("artifact_path").notNull(),
+    components: jsonb("components")
+      .notNull()
+      .$type<{ skills: boolean; mcp: boolean }>()
+      .default({ skills: false, mcp: false }),
+    reviewStatus: text("review_status").notNull().default("draft").$type<ReviewStatus>(),
+    manifest: jsonb("manifest").notNull().$type<Record<string, unknown>>().default({}),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("plugin_versions_plugin_version_idx").on(table.pluginId, table.version),
+    index("plugin_versions_status_idx").on(table.reviewStatus),
+  ],
+);
+
+export const pluginSettings = pgTable("plugin_settings", {
+  pluginId: uuid("plugin_id")
+    .primaryKey()
+    .references(() => plugins.id, { onDelete: "cascade" }),
+  installMode: text("install_mode").notNull().default("default_off").$type<InstallMode>(),
+  updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+});
+
+/** Shared owner columns for per-user plugin state tables. */
+function userPluginOwner() {
+  return {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => appUsers.id, { onDelete: "cascade" }),
+    pluginId: uuid("plugin_id")
+      .notNull()
+      .references(() => plugins.id, { onDelete: "cascade" }),
+  };
+}
+
+export const pluginUserState = pgTable(
+  "plugin_user_state",
+  {
+    ...userPluginOwner(),
+    override: text("override").$type<UserPluginOverride | null>(),
+    installedVersionId: uuid("installed_version_id").references(() => pluginVersions.id, {
+      onDelete: "set null",
+    }),
+    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.pluginId] })],
+);
+
+export const pluginUserVariables = pgTable(
+  "plugin_user_variables",
+  {
+    ...userPluginOwner(),
+    name: text("name").notNull(),
+    /** AES-GCM ciphertext from encryptSecret. */
+    valueEncrypted: text("value_encrypted").notNull(),
+    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.pluginId, table.name] })],
+);
+
+export const pluginAuditLog = pgTable(
+  "plugin_audit_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    actorUserId: uuid("actor_user_id").references(() => appUsers.id, { onDelete: "set null" }),
+    pluginName: text("plugin_name").notNull(),
+    action: text("action").notNull(),
+    detail: jsonb("detail").notNull().default({}),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+  },
+  (table) => [index("plugin_audit_log_created_idx").on(table.createdAt.desc())],
+);
+
+/** Cached OAuth Dynamic Client Registration result (public client, PKCE). */
+export const pluginOauthClients = pgTable(
+  "plugin_oauth_clients",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    issuer: text("issuer").notNull(),
+    redirectUri: text("redirect_uri").notNull(),
+    clientId: text("client_id").notNull(),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("plugin_oauth_clients_issuer_redirect_idx").on(table.issuer, table.redirectUri),
+  ],
+);
+
+/** Per-user OAuth tokens for a marketplace plugin (host-mediated MCP OAuth). */
+export const pluginOauthTokens = pgTable(
+  "plugin_oauth_tokens",
+  {
+    ...userPluginOwner(),
+    accessEncrypted: text("access_encrypted").notNull(),
+    refreshEncrypted: text("refresh_encrypted"),
+    expiresAt: timestamptz("expires_at"),
+    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.pluginId] })],
+);
+
 export type RunRow = typeof runs.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
 export type RunEventRow = typeof runEvents.$inferSelect;
@@ -297,3 +436,7 @@ export type LlmConnectionRow = typeof llmConnections.$inferSelect;
 export type OAuthStateRow = typeof oauthStates.$inferSelect;
 export type AppUserRow = typeof appUsers.$inferSelect;
 export type WebSessionRow = typeof webSessions.$inferSelect;
+export type PluginRow = typeof plugins.$inferSelect;
+export type PluginVersionRow = typeof pluginVersions.$inferSelect;
+export type PluginOauthClientRow = typeof pluginOauthClients.$inferSelect;
+export type PluginOauthTokenRow = typeof pluginOauthTokens.$inferSelect;

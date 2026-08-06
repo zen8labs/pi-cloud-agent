@@ -142,6 +142,37 @@ export interface AppUserSummary {
   login: string;
   displayName: string;
   avatarUrl: string | null;
+  isOperator?: boolean;
+}
+
+export interface PluginCatalogEntry {
+  name: string;
+  publisher: string;
+  version: string;
+  versionId: string;
+  source: string;
+  components: { skills: boolean; mcp: boolean };
+  reviewStatus: "draft" | "approved" | "yanked";
+  installMode: "default_off" | "default_on" | "required";
+  description: string;
+  variables: unknown;
+  oauth: {
+    required: boolean;
+    connected: boolean;
+    connectPath: string | null;
+    tokenVariable: string | null;
+  };
+  user: {
+    installed: boolean;
+    override: "enabled" | "disabled" | null;
+    attached: boolean;
+    configuredVariables: string[];
+  };
+}
+
+export interface PluginCatalogResponse {
+  plugins: PluginCatalogEntry[];
+  isOperator: boolean;
 }
 
 export interface BranchesResponse {

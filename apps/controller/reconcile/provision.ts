@@ -11,10 +11,18 @@ import {
 } from "@pi-cloud-agent/protocol";
 import type { Config } from "../config";
 import type { Database } from "../db/client";
-import { attachSandbox, completeRun, markRunning, requeueRun } from "../db/runs";
+import {
+  appendEvent,
+  attachSandbox,
+  completeRun,
+  markRunning,
+  requeueRun,
+  setRunPlugins,
+} from "../db/runs";
 import type { RunRow } from "../db/schema";
 import { clearSessionWorkspace, getSessionForRun } from "../db/sessions";
 import type { Logger } from "../logger";
+import { buildTaskPrompt, resolvePluginsForRun } from "../plugins/catalog";
 import type { CredentialBroker } from "../secrets/broker";
 
 /**
@@ -46,6 +54,14 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
 
   try {
     const task = buildTask(run);
+    const resolved = await resolvePluginsForRun(database, config, run.userId, run.profile);
+    await setRunPlugins(database, run.id, resolved.attached);
+    if (resolved.attached.length > 0) {
+      await appendEvent(database, run.id, "plugins.attached", {
+        plugins: resolved.attached,
+      });
+    }
+
     const credentials = await broker.mintForRun({
       userId: run.userId,
       provider: run.provider,
@@ -61,19 +77,28 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
 
     const session = await getSessionForRun(database, run);
     const workspaceResumed = Boolean(session?.sandboxId);
+    const env = {
+      ...buildEnv(run, task, config, workspaceResumed, resolved.skillText, credentials.model),
+      ...credentials.env,
+    };
+    const secrets: Record<string, Secret> = {
+      ...credentials.secrets,
+      [SANDBOX_ENV.callbackToken]: new Secret(run.callbackToken, "run callback token"),
+    };
+    if (resolved.mcpConfig) {
+      secrets[SANDBOX_ENV.mcpConfig] = new Secret(
+        JSON.stringify(resolved.mcpConfig),
+        "mcp config",
+      );
+    }
+
     const spec = {
       runId: run.id,
       image: "",
       timeoutSeconds: config.sandbox.timeoutSeconds,
-      env: {
-        ...buildEnv(run, task, config, workspaceResumed, credentials.model),
-        ...credentials.env,
-      },
-      secrets: {
-        ...credentials.secrets,
-        [SANDBOX_ENV.callbackToken]: new Secret(run.callbackToken, "run callback token"),
-      },
-      command: `node ${SANDBOX_PATHS.app}/run.js`,
+      env,
+      secrets,
+      command: `node --import tsx ${SANDBOX_PATHS.app}/run.js`,
     };
     const ref = await startSandbox(session, spec, sandbox, database, log);
 
@@ -98,7 +123,12 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
     }
 
     await markRunning(database, run.id);
-    log.info("sandbox running", { sandboxId: ref.id, wallClockSeconds, workspaceResumed });
+    log.info("sandbox running", {
+      sandboxId: ref.id,
+      wallClockSeconds,
+      workspaceResumed,
+      plugins: resolved.attached.map((plugin) => `${plugin.name}@${plugin.version}`),
+    });
   } catch (error) {
     await handleFailure(run, error, deps, log);
   }
@@ -178,6 +208,7 @@ function buildEnv(
   task: TaskSpec,
   config: Config,
   workspaceResumed: boolean,
+  skillText: string | undefined,
   model: import("../llm/connections").ResolvedLlmModel,
 ): Record<string, string> {
   const { repo } = task;
@@ -188,10 +219,7 @@ function buildEnv(
     [SANDBOX_ENV.workspaceResumed]: String(workspaceResumed),
 
     [SANDBOX_ENV.profile]: task.profile,
-    [SANDBOX_ENV.taskPrompt]:
-      run.turnNumber && run.turnNumber > 1
-        ? task.prompt
-        : composePrompt(run.profile, task.prompt),
+    [SANDBOX_ENV.taskPrompt]: buildTaskPrompt(skillText, task.prompt, run.turnNumber),
 
     [SANDBOX_ENV.model]: `${model.provider}/${model.name}`,
     [SANDBOX_ENV.modelApi]: model.api,
@@ -211,16 +239,4 @@ function buildEnv(
     [SANDBOX_ENV.repoHeadSha]: repo.headSha,
     [SANDBOX_ENV.repoHeadBranch]: repo.headBranch,
   };
-}
-
-/**
- * Prepend the profile's skill to the concrete request.
- *
- * Composed here, on the trusted side, so the sandbox image ships no profile code
- * at all — the runtime receives one finished prompt and never learns that
- * profiles exist.
- */
-function composePrompt(profileName: string, prompt: string): string {
-  const skill = getProfile(profileName).skill?.trim();
-  return skill ? `${skill}\n\n---\n\n${prompt}` : prompt;
 }

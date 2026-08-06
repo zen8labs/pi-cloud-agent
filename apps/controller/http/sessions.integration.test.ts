@@ -4,38 +4,29 @@ import type {
   SessionListResponse,
   SessionSummary,
 } from "@pi-cloud-agent/protocol";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { closeDatabase, type Database } from "../db/client";
+import { beforeEach, describe, expect, it } from "vitest";
+import type { Database } from "../db/client";
 import { getRun } from "../db/runs";
 import { parkSession } from "../db/sessions";
-import {
-  resetTables,
-  seedTestUser,
-  setupTestDatabase,
-  silentLogger,
-  testConfig,
-  withTestModel,
-} from "../test-support";
-import { createApp } from "./app";
+import { bindTestApp, seedTestUser, testConfig, withTestModel } from "../test-support";
+import type { createApp } from "./app";
 
 let database: Database;
 let app: ReturnType<typeof createApp>;
 let testCookie: string;
 let testModelConnectionId: string;
 
-beforeAll(() => {
-  database = setupTestDatabase();
-  app = createApp({ config: testConfig(), database, log: silentLogger() });
+bindTestApp((deps) => {
+  database = deps.database;
+  app = deps.app;
 });
 
 beforeEach(async () => {
-  await resetTables(database);
   const config = testConfig();
   const seeded = await seedTestUser(database, config);
   testCookie = seeded.cookie;
   testModelConnectionId = seeded.modelConnectionId;
 });
-afterAll(async () => closeDatabase(database));
 
 function send(method: "POST" | "PUT", path: string, body: unknown, token?: string) {
   return app.request(path, {

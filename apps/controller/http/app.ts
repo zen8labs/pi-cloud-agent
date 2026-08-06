@@ -8,6 +8,7 @@ import type { AppEnv, Deps } from "./deps";
 import { internalRoutes } from "./internal";
 import { llmRoutes } from "./llm";
 import { metaRoutes } from "./meta";
+import { pluginRoutes } from "./plugins";
 import { runRoutes } from "./runs";
 import { sessionRoutes } from "./sessions";
 import { vcsRoutes } from "./vcs";
@@ -87,6 +88,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   app.route("/auth", authRoutes());
   app.route("/runs", runRoutes());
   app.route("/sessions", sessionRoutes());
+  app.route("/plugins", pluginRoutes());
   app.route("/internal", internalRoutes(deps.observability));
   app.route("/llm", llmRoutes(new OAuthFlowManager(deps.database, deps.config)));
   app.route("/vcs", vcsRoutes());

@@ -4,7 +4,7 @@
 
 Decides what runs and when, resolves connected identities, mints run credentials, starts sandboxes, records what happened, and reclaims machines.
 
-**Depends on:** `protocol`, `profiles`, `sandbox`, `vcs`, and the optional OTLP trace exporter. It is the only package allowed to compose everything, and the only one that reaches Postgres.
+**Depends on:** `protocol`, `profiles`, `plugins`, `sandbox`, `vcs`, and the optional OTLP trace exporter. It is the only package allowed to compose everything, and the only one that reaches Postgres.
 
 ## Files
 
@@ -13,7 +13,7 @@ Decides what runs and when, resolves connected identities, mints run credentials
 | `index.ts` | bootstrap: HTTP surface + reconciler in one process, graceful shutdown |
 | `config.ts` | **the only file in the repo that reads `process.env`** |
 | `logger.ts` | structured JSON lines; level is passed in, never read from globals |
-| `db/schema.ts` | application users, browser sessions, execution state, VCS connections, and OTLP delivery state |
+| `db/schema.ts` | application users, browser sessions, execution state, VCS connections, plugin catalog, and OTLP delivery state |
 | `db/sessions.ts` | ordered turns, Pi checkpoints, and parked workspace ownership |
 | `db/runs.ts` | every write to a run, each a single guarded statement |
 | `db/client.ts` | the pool, plus `LISTEN/NOTIFY`, the bus replacement |

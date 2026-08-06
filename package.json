@@ -44,6 +44,7 @@
     "test:live": "vitest run --project live",
     "test:watch": "vitest",
     "db:migrate": "pnpm --filter @pi-cloud-agent/controller db:migrate",
+    "plugins:seed": "pnpm --filter @pi-cloud-agent/controller plugins:seed",
     "sandbox:template": "pnpm --filter @pi-cloud-agent/runtime template:build",
     "sandbox:image": "node --env-file-if-exists=.env --run sandbox:image:build",
     "sandbox:image:build": "pnpm --filter @pi-cloud-agent/runtime build && docker build -t \"${MICROSANDBOX_IMAGE:-pi-cloud-agent:local}\" -f packages/runtime/Dockerfile.sandbox packages/runtime && docker save \"${MICROSANDBOX_IMAGE:-pi-cloud-agent:local}\" | pnpm --filter @pi-cloud-agent/sandbox exec msb load --tag \"${MICROSANDBOX_IMAGE:-pi-cloud-agent:local}\"",

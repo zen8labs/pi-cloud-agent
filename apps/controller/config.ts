@@ -70,6 +70,19 @@ const schema = z.object({
   AZURE_DEVOPS_CLIENT_SECRET: z.string().default(""),
   AZURE_DEVOPS_TENANT_ID: z.string().default("common"),
   AZURE_DEVOPS_REDIRECT_URI: z.string().default(""),
+
+  /** Comma-separated GitHub logins allowed to publish/review plugins. Empty = none. */
+  OPERATOR_GITHUB_LOGINS: z.string().default(""),
+  /** Directory for published plugin artifacts. */
+  PLUGIN_ARTIFACT_ROOT: z.string().default(""),
+  /** In-repo marketplace plugins root (single source of truth; seeded into the catalog). */
+  PLUGIN_MARKETPLACE_ROOT: z.string().default(""),
+  /** Comma-separated binaries allowed for command-based MCP servers. Empty = URL only. */
+  MCP_COMMAND_ALLOWLIST: z.string().default(""),
+  /** Callback for plugin MCP OAuth. Defaults to CONTROL_PLANE_URL/plugins/oauth/callback. */
+  PLUGIN_OAUTH_REDIRECT_URI: z.string().default(""),
+  /** Comma-separated authorization-server hostnames allowed for plugin OAuth. */
+  PLUGIN_OAUTH_ISSUER_ALLOWLIST: z.string().default("auth.exa.ai"),
 });
 
 export type Env = Readonly<Record<string, string | undefined>>;
@@ -101,6 +114,14 @@ export interface Config {
   };
   vcs: { encryptionKey: string };
   llm: { encryptionKey: string };
+  plugins: {
+    operatorLogins: string[];
+    artifactRoot: string;
+    marketplaceRoot: string;
+    mcpCommandAllowlist: string[];
+    oauthRedirectUri: string;
+    oauthIssuerAllowlist: string[];
+  };
   /** Handed to provider factories so they can read their own variables. */
   env: Env;
 }
@@ -160,6 +181,26 @@ function build(env: Env): Config {
     },
     vcs: { encryptionKey: value.VCS_ENCRYPTION_KEY },
     llm: { encryptionKey: value.LLM_ENCRYPTION_KEY },
+    plugins: {
+      operatorLogins: value.OPERATOR_GITHUB_LOGINS.split(",")
+        .map((login) => login.trim().toLowerCase())
+        .filter((login) => login.length > 0),
+      artifactRoot:
+        value.PLUGIN_ARTIFACT_ROOT.trim() ||
+        resolve(import.meta.dirname, "../../.pi-plugin-artifacts"),
+      marketplaceRoot:
+        value.PLUGIN_MARKETPLACE_ROOT.trim() ||
+        resolve(import.meta.dirname, "../../marketplace/plugins"),
+      mcpCommandAllowlist: value.MCP_COMMAND_ALLOWLIST.split(",")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0),
+      oauthRedirectUri:
+        value.PLUGIN_OAUTH_REDIRECT_URI.trim() ||
+        `${value.CONTROL_PLANE_URL.replace(/\/$/, "")}/plugins/oauth/callback`,
+      oauthIssuerAllowlist: value.PLUGIN_OAUTH_ISSUER_ALLOWLIST.split(",")
+        .map((host) => host.trim().toLowerCase())
+        .filter((host) => host.length > 0),
+    },
     env,
   };
 }

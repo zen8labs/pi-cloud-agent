@@ -96,8 +96,15 @@
     {
       "idx": 13,
       "version": "7",
-      "when": 1786004738665,
-      "tag": "0013_striped_the_order",
+      "when": 1786004698129,
+      "tag": "0013_fixed_sprite",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1786006144113,
+      "tag": "0014_polite_gabe_jones",
       "breakpoints": true
     }
   ]

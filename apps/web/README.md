@@ -13,6 +13,7 @@ Next.js App Router, React, Tailwind 4, Base UI, and local-source [AI Elements](h
 | `app/page.tsx` | redirects the root route to the chat-first workspace |
 | `app/chat/page.tsx` | start a run; profiles come from the controller, not from here |
 | `app/settings/page.tsx` | connect and disconnect GitHub and Azure DevOps identities |
+| `app/plugins/page.tsx` | browse, install, configure marketplace plugins |
 | `app/sessions/[id]/page.tsx` | ordered turns: merged activity, live latest run, real follow-up |
 | `components/ActivityFeed.tsx` | renders the folded activity feed |
 | `lib/foldActivityEvents.ts` | folds the flat event log into conversation blocks |

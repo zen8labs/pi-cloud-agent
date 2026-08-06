@@ -50,6 +50,9 @@ export interface RuntimeConfig {
   };
 
   git: { username: string; hasToken: boolean };
+
+  /** Parsed MCP config JSON when plugins attached MCP; null means zero MCP. */
+  mcpConfig: unknown | null;
 }
 
 function required(name: string): string {
@@ -116,7 +119,18 @@ export function readConfig(): RuntimeConfig {
       username: optional(SANDBOX_ENV.scmTokenUsername, "x-access-token"),
       hasToken: Boolean(optional(SANDBOX_ENV.scmToken)),
     },
+
+    mcpConfig: parseMcpConfig(optional(SANDBOX_ENV.mcpConfig)),
   };
+}
+
+function parseMcpConfig(raw: string): unknown | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error(`${SANDBOX_ENV.mcpConfig} is not valid JSON`);
+  }
 }
 
 function readThinkingLevel(): ThinkingLevel {
@@ -147,7 +161,13 @@ function secretValues(): string[] {
   const values: string[] = [];
   for (const [name, value] of Object.entries(process.env)) {
     if (!value) continue;
-    if (pattern.test(name) || name === SANDBOX_ENV.callbackToken) values.push(value);
+    if (
+      pattern.test(name) ||
+      name === SANDBOX_ENV.callbackToken ||
+      name === SANDBOX_ENV.mcpConfig
+    ) {
+      values.push(value);
+    }
   }
   return values;
 }

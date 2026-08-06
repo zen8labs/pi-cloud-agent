@@ -18,6 +18,7 @@ Every package and app has one, and it is the local entry point: what that packag
 |---|---|
 | the contracts | [packages/protocol/README.md](packages/protocol/README.md) |
 | verticals | [packages/profiles/README.md](packages/profiles/README.md) |
+| plugins | [packages/plugins/README.md](packages/plugins/README.md) |
 | compute backends | [packages/sandbox/README.md](packages/sandbox/README.md) |
 | forges | [packages/vcs/README.md](packages/vcs/README.md) |
 | the untrusted sandbox side | [packages/runtime/README.md](packages/runtime/README.md) |
@@ -31,6 +32,7 @@ Every package and app has one, and it is the local entry point: what that packag
 | If you are… | Read |
 |---|---|
 | adding or changing a profile (a vertical) | [docs/adding-a-profile.md](docs/adding-a-profile.md) |
+| adding or changing a plugin (skills / MCP) | [docs/adding-a-plugin.md](docs/adding-a-plugin.md) |
 | adding a sandbox backend (Docker, Modal, Daytona…) | [docs/adding-a-sandbox-provider.md](docs/adding-a-sandbox-provider.md) |
 | adding a forge (GitHub Enterprise, Gitea, Forgejo…) | [docs/adding-a-vcs-provider.md](docs/adding-a-vcs-provider.md) |
 | touching run state, the queue, or the reconciler | [docs/resumability.md](docs/resumability.md) |
@@ -49,6 +51,7 @@ apps/
 packages/
   protocol/       the contracts: types, schemas, and the three provider interfaces
   profiles/       verticals: the registry ships general only (pr-review dormant on disk as a rebuild seed)
+  plugins/        plugin package format + attach resolution (skills / MCP)
   sandbox/        SandboxProvider implementations (e2b)
   vcs/            VCSProvider implementations (github, azure-devops)
   runtime/        runs INSIDE the sandbox (untrusted)
@@ -63,6 +66,7 @@ Everything runs from the repository root.
 pnpm install
 pnpm up                  # Postgres on 5532, plus the controller image
 pnpm db:migrate          # apply migrations (never automatic on boot)
+pnpm plugins:seed        # seed marketplace/plugins (context7, …) into the catalog
 pnpm controller          # controller on :8080, with reload
 pnpm web                 # dashboard on :3000
 

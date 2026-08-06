@@ -39,6 +39,7 @@ const config: RuntimeConfig = {
     path: "/workspace/widgets",
   },
   git: { username: "x-access-token", hasToken: false },
+  mcpConfig: null,
 };
 
 function fakeReporter(): Reporter {
@@ -46,6 +47,7 @@ function fakeReporter(): Reporter {
     event: vi.fn(),
     log: vi.fn(),
     status: vi.fn(),
+    modelCredential: vi.fn(async () => true),
     flush: vi.fn(),
   };
 }

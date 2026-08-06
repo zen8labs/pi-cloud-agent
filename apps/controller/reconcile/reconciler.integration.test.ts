@@ -6,17 +6,16 @@ import {
   WorkspaceNotFoundError,
 } from "@pi-cloud-agent/protocol";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { closeDatabase, type Database } from "../db/client";
+import { describe, expect, it } from "vitest";
+import type { Database } from "../db/client";
 import { appendEvent, attachSandbox, claimNextRun, completeRun, getRun } from "../db/runs";
 import { runs } from "../db/schema";
 import { createSessionTurn, getSession } from "../db/sessions";
 import type { CredentialBroker } from "../secrets/broker";
 import {
-  resetTables,
+  bindTestDatabase,
   seedRun,
   seedSession,
-  setupTestDatabase,
   silentLogger,
   testConfig,
 } from "../test-support";
@@ -25,6 +24,9 @@ import { createReconciler, type Reconciler } from "./loop";
 /** The reconciler, driven one tick at a time against real durable state. */
 
 let database: Database;
+bindTestDatabase((value) => {
+  database = value;
+});
 
 /** A sandbox provider that records what it was asked to do. */
 function fakeProvider(
@@ -116,18 +118,6 @@ async function tick(loop: Reconciler): Promise<void> {
   await loop.tick();
   await loop.drain();
 }
-
-beforeAll(async () => {
-  database = setupTestDatabase();
-});
-
-beforeEach(async () => {
-  await resetTables(database);
-});
-
-afterAll(async () => {
-  await closeDatabase(database);
-});
 
 describe("provisioning", () => {
   it("takes a queued run all the way to running in one tick", async () => {
