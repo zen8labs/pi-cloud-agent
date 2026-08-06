@@ -110,7 +110,7 @@ function SessionHeader({
   onCancel: () => void;
 }) {
   return (
-    <header className="flex h-12 shrink-0 items-center gap-2.5 px-3 sm:px-4">
+    <header className="app-header flex h-12 shrink-0 items-center gap-2.5 px-3 sm:px-4">
       <Link
         href="/"
         aria-label="Back to sessions"
