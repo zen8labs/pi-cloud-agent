@@ -166,10 +166,11 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  setDefaultLlmConnection: (id: string): Promise<{ ok: boolean }> =>
-    request<{ ok: boolean }>(`/llm/connections/${encodeURIComponent(id)}/default`, {
-      method: "POST",
-    }),
+  setDefaultLlmConnection: (id: string, modelId: string): Promise<{ ok: boolean }> =>
+    request<{ ok: boolean }>(
+      `/llm/connections/${encodeURIComponent(id)}/default?modelId=${encodeURIComponent(modelId)}`,
+      { method: "POST" },
+    ),
 
   deleteLlmConnection: (id: string): Promise<{ ok: boolean }> =>
     request<{ ok: boolean }>(`/llm/connections/${encodeURIComponent(id)}`, {

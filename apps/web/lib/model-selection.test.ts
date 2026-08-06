@@ -6,7 +6,12 @@ import {
   parseModelSelection,
 } from "./model-selection";
 
-function connection(id: string, model: string, isDefault: boolean): LlmConnectionSummary {
+function connection(
+  id: string,
+  model: string,
+  isDefault: boolean,
+  models = [model],
+): LlmConnectionSummary {
   return {
     id,
     displayName: id,
@@ -15,7 +20,12 @@ function connection(id: string, model: string, isDefault: boolean): LlmConnectio
     api: "openai-responses",
     baseUrl: "https://models.example/v1",
     model,
-    models: [{ id: model, contextWindow: 16_384, maxTokens: 2_048, thinkingLevels: ["off"] }],
+    models: models.map((id) => ({
+      id,
+      contextWindow: 16_384,
+      maxTokens: 2_048,
+      thinkingLevels: ["off"],
+    })),
     contextWindow: 16_384,
     maxTokens: 2_048,
     isDefault,
@@ -36,6 +46,19 @@ describe("turn model selection", () => {
       connectionId: "22222222-2222-4222-8222-222222222222",
       modelId: "default-model",
     });
+  });
+
+  it("starts on the preferred model within the default connection", () => {
+    const connections = [
+      connection("22222222-2222-4222-8222-222222222222", "gpt-5.6-luna", true, [
+        "gpt-5.3-codex-spark",
+        "gpt-5.6-luna",
+      ]),
+    ];
+
+    expect(parseModelSelection(defaultModelSelection(connections))?.modelId).toBe(
+      "gpt-5.6-luna",
+    );
   });
 
   it("round-trips an explicit connection and model choice", () => {

@@ -80,16 +80,17 @@ export async function saveOAuthConnections(
   const existing = (await listLlmConnections(database, input.userId)).find(
     (row) => row.authType === "oauth" && row.provider === input.provider,
   );
+  const preferredModel = models.find((model) => model.id === existing?.model) ?? firstModel;
   const inputRow = {
     userId: input.userId,
     displayName: input.displayName,
     provider: input.provider,
     api: input.api,
-    baseUrl: firstModel.baseUrl ?? input.baseUrl,
-    model: firstModel.id,
+    baseUrl: preferredModel.baseUrl ?? input.baseUrl,
+    model: preferredModel.id,
     models,
-    contextWindow: firstModel.contextWindow,
-    maxTokens: firstModel.maxTokens,
+    contextWindow: preferredModel.contextWindow,
+    maxTokens: preferredModel.maxTokens,
     authType: "oauth" as const,
     credential: encryptedCredential,
     isDefault: input.isDefault || existing?.isDefault === true,

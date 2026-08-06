@@ -48,7 +48,7 @@ export function ModelSelect({
               key={modelSelectionValue(connection.id, model.id)}
               value={modelSelectionValue(connection.id, model.id)}
             >
-              {model.id}
+              {model.id} · {connection.displayName}
             </SelectItem>
           )),
         )}

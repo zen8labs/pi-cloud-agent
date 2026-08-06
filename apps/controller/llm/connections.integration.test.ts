@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { upsertAppUser } from "../db/auth";
 import { closeDatabase, type Database } from "../db/client";
+import { listLlmConnections, setDefaultLlmConnection } from "../db/llm-connections";
 import { runs } from "../db/schema";
 import { createCredentialBroker } from "../secrets/broker";
 import {
@@ -22,6 +23,39 @@ beforeEach(async () => resetTables(database));
 afterAll(async () => closeDatabase(database));
 
 describe("model connection revisions", () => {
+  it("sets an exact model as the default within a multi-model connection", async () => {
+    const user = await upsertAppUser(database, {
+      githubUserId: "default-model-user",
+      login: "default-model-user",
+      displayName: "Default Model User",
+    });
+    const connection = await saveOAuthConnections(database, testConfig(), {
+      userId: user.id,
+      displayName: "Subscription",
+      provider: "subscription-provider",
+      api: "openai-responses",
+      baseUrl: "https://models.example/v1",
+      models: [
+        { id: "fast-model", contextWindow: 16_384, maxTokens: 2_048 },
+        { id: "deep-model", contextWindow: 32_768, maxTokens: 4_096 },
+      ],
+      credential: { type: "oauth", access: "access", refresh: "refresh", expires: 1 },
+      isDefault: true,
+    });
+
+    expect(await setDefaultLlmConnection(database, user.id, connection.id, "deep-model")).toBe(
+      true,
+    );
+    const [saved] = await listLlmConnections(database, user.id);
+    expect(saved).toMatchObject({
+      id: connection.id,
+      isDefault: true,
+      model: "deep-model",
+      contextWindow: 32_768,
+      maxTokens: 4_096,
+    });
+  });
+
   it("keeps a queued run on its immutable OAuth connection revision", async () => {
     const config = testConfig();
     const user = await upsertAppUser(database, {

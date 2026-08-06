@@ -140,12 +140,14 @@ export function llmRoutes(oauth: OAuthFlowManager): Hono<AppEnv> {
   app.post("/connections/:id/default", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "authentication required" }, 401);
+    const modelId = c.req.query("modelId");
     const updated = await setDefaultLlmConnection(
       c.get("database"),
       user.id,
       c.req.param("id"),
+      modelId,
     );
-    if (!updated) return c.json({ error: "model connection not found" }, 404);
+    if (!updated) return c.json({ error: "model connection or model not found" }, 404);
     return c.json({ ok: true });
   });
 

@@ -110,10 +110,11 @@ export async function setDefaultLlmConnection(
   database: Database,
   userId: string,
   id: string,
+  modelId?: string,
 ): Promise<boolean> {
   return database.transaction(async (tx) => {
     const [target] = await tx
-      .select({ id: llmConnections.id })
+      .select({ id: llmConnections.id, models: llmConnections.models })
       .from(llmConnections)
       .where(
         and(
@@ -125,13 +126,28 @@ export async function setDefaultLlmConnection(
       .limit(1);
     if (!target) return false;
 
+    const selectedModel = modelId
+      ? target.models.find((model) => model.id === modelId)
+      : undefined;
+    if (modelId && !selectedModel) return false;
+
     await tx
       .update(llmConnections)
       .set({ isDefault: false, updatedAt: new Date() })
       .where(eq(llmConnections.userId, userId));
     await tx
       .update(llmConnections)
-      .set({ isDefault: true, updatedAt: new Date() })
+      .set({
+        isDefault: true,
+        ...(selectedModel
+          ? {
+              model: selectedModel.id,
+              contextWindow: selectedModel.contextWindow,
+              maxTokens: selectedModel.maxTokens,
+            }
+          : {}),
+        updatedAt: new Date(),
+      })
       .where(and(eq(llmConnections.id, id), eq(llmConnections.userId, userId)));
     return true;
   });

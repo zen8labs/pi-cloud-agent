@@ -14,8 +14,10 @@ import {
   validateConnectionForm,
 } from "@/components/LlmConnectionSupport";
 import { LlmConnectionTable } from "@/components/LlmConnectionTable";
+import { ModelSelect } from "@/components/ModelSelect";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { defaultModelSelection, parseModelSelection } from "@/lib/model-selection";
 
 const ENDPOINT_OPTIONS = [
   {
@@ -153,11 +155,13 @@ export function LlmConnectionSection({
     }
   };
 
-  const makeDefault = async (id: string) => {
-    setBusy(id);
+  const makeDefault = async (value: string) => {
+    const selection = parseModelSelection(value);
+    if (!selection) return;
+    setBusy("default");
     setError(null);
     try {
-      await api.setDefaultLlmConnection(id);
+      await api.setDefaultLlmConnection(selection.connectionId, selection.modelId);
       await onChanged();
       onNotice("Default model updated.", "success");
     } catch (cause) {
@@ -191,12 +195,29 @@ export function LlmConnectionSection({
   return (
     <div className="space-y-3">
       {connections.length > 0 && (
-        <LlmConnectionTable
-          connections={connections}
-          busyId={busy}
-          onMakeDefault={(id) => void makeDefault(id)}
-          onRemove={remove}
-        />
+        <>
+          <section className="rounded-xl border border-border bg-card p-4">
+            <h3 className="text-sm font-medium">Default model</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              New tasks start with this model. You can still choose another model per task.
+            </p>
+            <ModelSelect
+              connections={connections}
+              value={defaultModelSelection(connections)}
+              onChange={(value) => void makeDefault(value)}
+              disabled={busy !== null}
+              ariaLabel="Default model"
+              className="mt-3 w-full max-w-sm justify-between"
+            />
+          </section>
+          <div className="pt-3">
+            <h3 className="text-sm font-medium">Connections</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Authentication and model catalogs available to your tasks.
+            </p>
+          </div>
+          <LlmConnectionTable connections={connections} busyId={busy} onRemove={remove} />
+        </>
       )}
       <section className="rounded-xl border border-border bg-card p-4">
         <h3 className="text-sm font-medium">Add a model</h3>
