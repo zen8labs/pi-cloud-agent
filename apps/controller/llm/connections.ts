@@ -8,11 +8,10 @@ import type { Config } from "../config";
 import type { Database } from "../db/client";
 import {
   createLlmConnection,
-  getDefaultLlmConnection,
   getLlmConnection,
   getLlmConnectionForRun,
   listLlmConnections,
-  updateLlmConnection,
+  rotateLlmConnection,
 } from "../db/llm-connections";
 import type { LlmConnectionRow } from "../db/schema";
 import { decryptSecret, encryptSecret } from "../secrets/crypto";
@@ -94,7 +93,7 @@ export async function saveOAuthConnections(
     isDefault: input.isDefault || existing?.isDefault === true,
   };
   return existing
-    ? updateLlmConnection(database, input.userId, existing.id, inputRow)
+    ? rotateLlmConnection(database, input.userId, existing.id, inputRow)
     : createLlmConnection(database, inputRow);
 }
 
@@ -164,18 +163,6 @@ export async function resolveLlmModelForRun(
   const connection = await getLlmConnectionForRun(database, userId, connectionId);
   if (!connection) throw new Error("run model connection is no longer available");
   return decryptModel(connection, config, modelId);
-}
-
-export async function resolveDefaultLlmModel(
-  database: Database,
-  config: Config,
-  userId: string,
-): Promise<ResolvedLlmModel> {
-  const connection = await getDefaultLlmConnection(database, userId);
-  if (!connection) {
-    throw new Error("connect a model provider in Settings before resuming this session");
-  }
-  return decryptModel(connection, config, connection.model);
 }
 
 export function modelIdFromSnapshot(snapshot: string): string {

@@ -230,6 +230,8 @@ describe("completion and teardown", () => {
       session.id,
       "Read the file created in the previous turn.",
       "follow-up-token",
+      null,
+      { model: session.model, modelConnectionId: session.modelConnectionId },
     );
     await tick(loop);
 
@@ -251,7 +253,17 @@ describe("completion and teardown", () => {
     await completeRun(database, run.id, "succeeded");
     await tick(firstLoop);
 
-    const followUp = await createSessionTurn(database, session.id, "Continue cold.", "token");
+    const followUp = await createSessionTurn(
+      database,
+      session.id,
+      "Continue cold.",
+      "token",
+      null,
+      {
+        model: session.model,
+        modelConnectionId: session.modelConnectionId,
+      },
+    );
     const missing = fakeProvider({ resumeMissing: true });
     await tick(reconciler(missing));
 

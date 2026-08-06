@@ -408,7 +408,7 @@ describe("model connections", () => {
     expect((await secureApp.request("/llm/connections")).status).toBe(401);
   });
 
-  it("deletes a referenced connection and switches a resumed session to the default", async () => {
+  it("lets a resumed session explicitly switch away from a deleted connection", async () => {
     const secureApp = createApp({
       config: testConfig({ APP_AUTH_REQUIRED: "true" }),
       database,
@@ -484,7 +484,11 @@ describe("model connections", () => {
     const followUp = await secureApp.request(`/sessions/${session.id}/turns`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: `pca_session=${cookie}` },
-      body: JSON.stringify({ prompt: "Use the replacement model" }),
+      body: JSON.stringify({
+        prompt: "Use the replacement model",
+        modelConnectionId: replacement.id,
+        modelId: "replacement-model",
+      }),
     });
     expect(followUp.status).toBe(201);
     const run = await json<RunDetail>(followUp);

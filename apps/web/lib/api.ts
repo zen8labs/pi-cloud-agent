@@ -4,6 +4,7 @@ import type {
   ConfigResponse,
   CreateLlmConnectionRequest,
   CreateRunRequest,
+  CreateSessionTurnRequest,
   LlmConnectionSummary,
   LlmConnectionsResponse,
   RunDetail,
@@ -117,10 +118,10 @@ export const api = {
   createSession: (body: CreateRunRequest): Promise<SessionSummary> =>
     request<SessionSummary>("/sessions", { method: "POST", body: JSON.stringify(body) }),
 
-  createSessionTurn: (id: string, prompt: string): Promise<RunDetail> =>
+  createSessionTurn: (id: string, body: CreateSessionTurnRequest): Promise<RunDetail> =>
     request<RunDetail>(`/sessions/${id}/turns`, {
       method: "POST",
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify(body),
     }),
 
   cancelRun: (id: string): Promise<{ status: string }> =>

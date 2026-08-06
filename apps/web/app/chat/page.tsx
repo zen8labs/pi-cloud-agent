@@ -10,6 +10,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { ChatComposer } from "@/components/ChatComposer";
+import { ModelSelect } from "@/components/ModelSelect";
 import {
   Select,
   SelectContent,
@@ -18,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
+import { defaultModelSelection, parseModelSelection } from "@/lib/model-selection";
 import { saveSessionTitle } from "@/lib/session-titles";
 
 export default function ChatPage() {
@@ -53,10 +55,7 @@ function NewSession() {
         setConfig(loadedConfig);
         setRepos(loadedRepos);
         setModelConnections(loadedConnections);
-        const defaultConnection = loadedConnections.find((entry) => entry.isDefault);
-        if (defaultConnection) {
-          setModelSelection(modelSelectionValue(defaultConnection.id, defaultConnection.model));
-        }
+        setModelSelection(defaultModelSelection(loadedConnections));
         setProfile((current) => current || loadedConfig.defaultProfile);
         const selected = loadedRepos[0];
         if (selected) {
@@ -235,16 +234,6 @@ type ComposerOptionsProps = {
 function ComposerOptions(props: ComposerOptionsProps) {
   const triggerClass =
     "h-7 min-w-0 max-w-36 shrink border-0 bg-transparent px-1.5 text-xs shadow-none dark:bg-transparent";
-  const selected = parseModelSelection(props.modelSelection);
-  const selectedModel = selected
-    ? props.modelConnections
-        .flatMap((connection) => connection.models.map((model) => ({ connection, model })))
-        .find(
-          (entry) =>
-            entry.connection.id === selected.connectionId &&
-            entry.model.id === selected.modelId,
-        )
-    : null;
   return (
     <>
       <FolderGit2Icon className="size-3.5 shrink-0 text-muted-foreground" />
@@ -309,36 +298,12 @@ function ComposerOptions(props: ComposerOptionsProps) {
           ))}
         </SelectContent>
       </Select>
-      <Select
+      <ModelSelect
+        connections={props.modelConnections}
         value={props.modelSelection}
-        onValueChange={(value) => props.onModelSelectionChange(value ?? "")}
-      >
-        <SelectTrigger aria-label="Model" className={triggerClass}>
-          <SelectValue placeholder="Model">{selectedModel?.model.id}</SelectValue>
-        </SelectTrigger>
-        <SelectContent>
-          {props.modelConnections.map((connection) =>
-            connection.models.map((model) => (
-              <SelectItem
-                key={modelSelectionValue(connection.id, model.id)}
-                value={modelSelectionValue(connection.id, model.id)}
-              >
-                {model.id}
-              </SelectItem>
-            )),
-          )}
-        </SelectContent>
-      </Select>
+        onChange={props.onModelSelectionChange}
+        className={triggerClass}
+      />
     </>
   );
-}
-
-function modelSelectionValue(connectionId: string, modelId: string): string {
-  return `${connectionId}::${modelId}`;
-}
-
-function parseModelSelection(value: string): { connectionId: string; modelId: string } | null {
-  const separator = value.indexOf("::");
-  if (separator < 1 || separator === value.length - 2) return null;
-  return { connectionId: value.slice(0, separator), modelId: value.slice(separator + 2) };
 }

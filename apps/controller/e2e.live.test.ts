@@ -127,6 +127,8 @@ describe("a real resumable session, end to end", () => {
           session.id,
           `Read ${proofFile}. Reply with its exact content and explain whether it was already present.`,
           randomBytes(32).toString("hex"),
+          session.userId,
+          { model: session.model, modelConnectionId: session.modelConnectionId },
         );
         const second = await waitForTerminal(followUp.id);
         expect(

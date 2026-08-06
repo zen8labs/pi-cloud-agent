@@ -16,6 +16,9 @@ import { saveOAuthConnections, toSummary } from "./connections";
 
 export type OAuthProvider = "chatgpt" | "claude";
 
+const FLOW_TIMEOUT_MS = 10 * 60_000;
+const TERMINAL_RETENTION_MS = 5 * 60_000;
+
 const PROVIDERS: Record<
   OAuthProvider,
   { piId: string; displayName: string; api: LlmApi; baseUrl: string }
@@ -49,7 +52,19 @@ interface OAuthFlow {
   events: OAuthFlowEvent[];
   subscribers: Set<(event: OAuthFlowEvent) => void>;
   pendingPrompt: ((value: string) => void) | null;
+  abortController: AbortController;
   terminal: boolean;
+}
+
+interface OAuthRuntime {
+  login(providerId: string, type: "oauth", interaction: AuthInteraction): Promise<Credential>;
+  getModels(providerId: string): ReturnType<ModelRuntime["getModels"]>;
+}
+
+interface OAuthFlowManagerOptions {
+  createRuntime?: () => Promise<OAuthRuntime>;
+  flowTimeoutMs?: number;
+  terminalRetentionMs?: number;
 }
 
 export class OAuthFlowManager {
@@ -58,9 +73,15 @@ export class OAuthFlowManager {
   constructor(
     private readonly database: Database,
     private readonly config: Config,
+    private readonly options: OAuthFlowManagerOptions = {},
   ) {}
 
   start(userId: string, provider: OAuthProvider): string {
+    for (const existing of this.flows.values()) {
+      if (existing.userId === userId && existing.provider === provider && !existing.terminal) {
+        existing.abortController.abort(new Error("OAuth sign-in superseded by a new attempt"));
+      }
+    }
     const flow: OAuthFlow = {
       id: randomUUID(),
       userId,
@@ -68,6 +89,7 @@ export class OAuthFlowManager {
       events: [],
       subscribers: new Set(),
       pendingPrompt: null,
+      abortController: new AbortController(),
       terminal: false,
     };
     this.flows.set(flow.id, flow);
@@ -104,14 +126,18 @@ export class OAuthFlowManager {
   }
 
   private async run(flow: OAuthFlow): Promise<void> {
+    const timeout = setTimeout(
+      () => flow.abortController.abort(new Error("OAuth sign-in expired")),
+      this.options.flowTimeoutMs ?? FLOW_TIMEOUT_MS,
+    );
     try {
       const provider = PROVIDERS[flow.provider];
-      const runtime = await ModelRuntime.create({
-        modelsPath: null,
-        credentials: new MemoryCredentialStore(),
-        allowModelNetwork: false,
-      });
+      const runtime = await this.createRuntime();
+      if (flow.abortController.signal.aborted) {
+        throw abortError(flow.abortController.signal);
+      }
       const interaction: AuthInteraction = {
+        signal: flow.abortController.signal,
         prompt: (prompt) => this.prompt(flow, prompt),
         notify: (event) => this.emit(flow, { type: "auth", event }),
       };
@@ -137,10 +163,23 @@ export class OAuthFlowManager {
         message: error instanceof Error ? error.message : String(error),
       });
     } finally {
+      clearTimeout(timeout);
       flow.terminal = true;
       flow.pendingPrompt = null;
-      setTimeout(() => this.flows.delete(flow.id), 5 * 60_000);
+      setTimeout(
+        () => this.flows.delete(flow.id),
+        this.options.terminalRetentionMs ?? TERMINAL_RETENTION_MS,
+      );
     }
+  }
+
+  private createRuntime(): Promise<OAuthRuntime> {
+    if (this.options.createRuntime) return this.options.createRuntime();
+    return ModelRuntime.create({
+      modelsPath: null,
+      credentials: new MemoryCredentialStore(),
+      allowModelNetwork: false,
+    });
   }
 
   private prompt(flow: OAuthFlow, prompt: AuthPrompt): Promise<string> {
@@ -155,6 +194,10 @@ export class OAuthFlowManager {
       return Promise.resolve("browser");
     }
     return new Promise((resolve, reject) => {
+      if (flow.abortController.signal.aborted) {
+        reject(abortError(flow.abortController.signal));
+        return;
+      }
       if (flow.pendingPrompt) {
         reject(new Error("OAuth provider requested overlapping prompts"));
         return;
@@ -162,9 +205,15 @@ export class OAuthFlowManager {
       flow.pendingPrompt = resolve;
       const { signal, ...publicPrompt } = prompt;
       this.emit(flow, { type: "prompt", prompt: publicPrompt });
-      signal?.addEventListener("abort", () => reject(new Error("OAuth prompt cancelled")), {
-        once: true,
-      });
+      const rejectOnAbort = (abortSignal: AbortSignal) => {
+        reject(abortError(abortSignal));
+      };
+      signal?.addEventListener("abort", () => rejectOnAbort(signal), { once: true });
+      flow.abortController.signal.addEventListener(
+        "abort",
+        () => rejectOnAbort(flow.abortController.signal),
+        { once: true },
+      );
     });
   }
 
@@ -173,6 +222,10 @@ export class OAuthFlowManager {
     if (flow.events.length > 50) flow.events.shift();
     for (const subscriber of flow.subscribers) subscriber(event);
   }
+}
+
+function abortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new Error("OAuth prompt cancelled");
 }
 
 class MemoryCredentialStore implements CredentialStore {

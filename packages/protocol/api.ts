@@ -30,6 +30,10 @@ export type CreateRunBody = z.output<typeof createRunRequestSchema>;
 
 export const createSessionTurnRequestSchema = z.object({
   prompt: z.string().trim().min(1),
+  /** User-owned model connection selected for this turn. */
+  modelConnectionId: z.string().uuid(),
+  /** Model selected from the connection's current catalog. */
+  modelId: z.string().min(1),
 });
 
 export type CreateSessionTurnRequest = z.infer<typeof createSessionTurnRequestSchema>;

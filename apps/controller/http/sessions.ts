@@ -6,7 +6,6 @@ import {
   type SessionSummary,
 } from "@pi-cloud-agent/protocol";
 import { Hono } from "hono";
-import { getLlmConnection } from "../db/llm-connections";
 import { getRun } from "../db/runs";
 import type { RunRow, SessionRow } from "../db/schema";
 import {
@@ -18,12 +17,7 @@ import {
   SessionBusyError,
   SessionNotFoundError,
 } from "../db/sessions";
-import {
-  modelIdFromSnapshot,
-  type ResolvedLlmModel,
-  resolveDefaultLlmModel,
-  resolveLlmModel,
-} from "../llm/connections";
+import type { resolveLlmModel } from "../llm/connections";
 import { requireAuthenticatedUser, userOwns } from "./auth";
 import type { AppEnv } from "./deps";
 import { readManualRouteRequest } from "./manual";
@@ -109,6 +103,8 @@ export function sessionRoutes(): Hono<AppEnv> {
       user.id,
       c.req.param("sessionId"),
       parsed.data.prompt,
+      parsed.data.modelConnectionId,
+      parsed.data.modelId,
     );
     if (!result.ok) return c.json({ error: result.error }, result.status);
     c.get("log").info("session turn queued", {
@@ -132,10 +128,18 @@ async function queueSessionTurn(
   userId: string,
   sessionId: string,
   prompt: string,
+  modelConnectionId: string,
+  modelId: string,
 ): Promise<SessionTurnResult> {
   const session = await getSession(database, sessionId, userId);
   if (!session) return { ok: false, error: "session not found", status: 404 };
-  const selected = await selectSessionModel(database, config, userId, session);
+  const selected = await resolveRequestedLlmModel(
+    database,
+    config,
+    userId,
+    modelConnectionId,
+    modelId,
+  );
   if (!selected.ok) return { ok: false, error: selected.error, status: 422 };
 
   try {
@@ -159,31 +163,6 @@ async function queueSessionTurn(
       return { ok: false, error: error.message, status: 409 };
     }
     throw error;
-  }
-}
-
-async function selectSessionModel(
-  database: Parameters<typeof getRun>[0],
-  config: Parameters<typeof resolveLlmModel>[1],
-  userId: string,
-  session: SessionRow,
-): Promise<{ ok: true; model: ResolvedLlmModel } | { ok: false; error: string }> {
-  try {
-    const connection = session.modelConnectionId
-      ? await getLlmConnection(database, userId, session.modelConnectionId)
-      : null;
-    const model = connection
-      ? await resolveLlmModel(
-          database,
-          config,
-          userId,
-          connection.id,
-          modelIdFromSnapshot(session.model),
-        )
-      : await resolveDefaultLlmModel(database, config, userId);
-    return { ok: true, model };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
