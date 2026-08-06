@@ -2,6 +2,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  type AgentSessionEvent,
   createAgentSession,
   DefaultResourceLoader,
   type ExtensionAPI,
@@ -115,129 +116,7 @@ export async function runAgentSession(
       mcp: Boolean(config.mcpConfig),
     });
 
-    let turnNumber = 0;
-    let turnStartedAt: string | null = null;
-    const unsubscribe = session.subscribe((event) => {
-      switch (event.type) {
-        case "agent_start":
-          reporter.log("agent.start");
-          break;
-        case "agent_end":
-          reporter.log("agent.end", {
-            willRetry: event.willRetry,
-            messageCount: event.messages.length,
-          });
-          break;
-        case "agent_settled":
-          reporter.log("agent.settled");
-          break;
-        case "turn_start":
-          turnNumber += 1;
-          turnStartedAt = new Date().toISOString();
-          reporter.log("agent.turn_start", { turnNumber, turnStartedAt });
-          break;
-        case "message_update": {
-          const update = event.assistantMessageEvent;
-          if (update.type === "text_delta") {
-            reporter.event({ type: "token", data: { content: update.delta } });
-          }
-          break;
-        }
-        case "message_start":
-          reporter.log("agent.message_start", summarizeMessage(event.message));
-          break;
-        case "message_end":
-          reporter.log("agent.message_end", summarizeMessage(event.message));
-          break;
-        case "tool_execution_start":
-          reporter.event({
-            type: "tool_call",
-            data: {
-              callId: event.toolCallId,
-              tool: event.toolName,
-              status: "running",
-              turnNumber,
-              args: event.args,
-            },
-          });
-          break;
-        case "tool_execution_end": {
-          reporter.event({
-            type: "tool_call",
-            data: {
-              callId: event.toolCallId,
-              tool: event.toolName,
-              status: event.isError ? "error" : "completed",
-              turnNumber,
-              output: textOf(event.result),
-            },
-          });
-          break;
-        }
-        case "tool_execution_update":
-          reporter.log("agent.tool_update", {
-            callId: event.toolCallId,
-            tool: event.toolName,
-            turnNumber,
-            args: event.args,
-            partialResult: event.partialResult,
-          });
-          break;
-        case "turn_end": {
-          const assistant = asAssistant(event.message);
-          reporter.log("agent.turn_end", {
-            turnNumber,
-            turnStartAt: turnStartedAt,
-            stopReason: assistant?.stopReason ?? null,
-            usage: assistant?.usage ?? null,
-            output: assistant?.content ?? null,
-          });
-          break;
-        }
-        case "auto_retry_start":
-          reporter.log("agent.retry", {
-            attempt: event.attempt,
-            maxAttempts: event.maxAttempts,
-            detail: event.errorMessage,
-          });
-          break;
-        case "auto_retry_end":
-          reporter.log("agent.retry_end", {
-            attempt: event.attempt,
-            success: event.success,
-            finalError: event.finalError,
-          });
-          break;
-        case "compaction_start":
-          reporter.log("agent.compaction_start", { reason: event.reason });
-          break;
-        case "compaction_end":
-          reporter.log("agent.compaction_end", {
-            reason: event.reason,
-            aborted: event.aborted,
-            willRetry: event.willRetry,
-            errorMessage: event.errorMessage,
-          });
-          break;
-        case "queue_update":
-          reporter.log("agent.queue_update", {
-            steeringCount: event.steering.length,
-            followUpCount: event.followUp.length,
-          });
-          break;
-        case "thinking_level_changed":
-          reporter.log("agent.thinking_level_changed", { level: event.level });
-          break;
-        case "bash_execution_update":
-          reporter.log("agent.bash_update", {
-            id: event.id,
-            delta: event.delta,
-          });
-          break;
-        default:
-          reporter.log("agent.event", { type: event.type, payload: event });
-      }
-    });
+    const unsubscribe = session.subscribe(createAgentEventHandler(reporter));
 
     try {
       await session.prompt(config.prompt);
@@ -267,6 +146,119 @@ export async function runAgentSession(
       await rm(authDirectory, { recursive: true, force: true });
     }
   }
+}
+
+export function createAgentEventHandler(
+  reporter: Reporter,
+): (event: AgentSessionEvent) => void {
+  let turnNumber = 0;
+  let turnStartedAt: string | null = null;
+  return (event) => {
+    switch (event.type) {
+      case "agent_start":
+        reporter.log("agent.start");
+        break;
+      case "agent_end":
+        reporter.log("agent.end", {
+          willRetry: event.willRetry,
+          messageCount: event.messages.length,
+        });
+        break;
+      case "agent_settled":
+        reporter.log("agent.settled");
+        break;
+      case "turn_start":
+        turnNumber += 1;
+        turnStartedAt = new Date().toISOString();
+        reporter.log("agent.turn_start", { turnNumber, turnStartedAt });
+        break;
+      case "message_update": {
+        const update = event.assistantMessageEvent;
+        if (update.type === "text_delta") {
+          reporter.event({ type: "token", data: { content: update.delta } });
+        }
+        break;
+      }
+      case "message_start":
+        reporter.log("agent.message_start", summarizeMessage(event.message));
+        break;
+      case "message_end":
+        reporter.log("agent.message_end", summarizeMessage(event.message));
+        break;
+      case "tool_execution_start":
+        reporter.event({
+          type: "tool_call",
+          data: {
+            callId: event.toolCallId,
+            tool: event.toolName,
+            status: "running",
+            turnNumber,
+            args: event.args,
+          },
+        });
+        break;
+      case "tool_execution_end":
+        reporter.event({
+          type: "tool_call",
+          data: {
+            callId: event.toolCallId,
+            tool: event.toolName,
+            status: event.isError ? "error" : "completed",
+            turnNumber,
+            output: textOf(event.result),
+          },
+        });
+        break;
+      case "turn_end": {
+        const assistant = asAssistant(event.message);
+        reporter.log("agent.turn_end", {
+          turnNumber,
+          turnStartAt: turnStartedAt,
+          stopReason: assistant?.stopReason ?? null,
+          usage: assistant?.usage ?? null,
+          output: assistant?.content ?? null,
+        });
+        break;
+      }
+      case "auto_retry_start":
+        reporter.log("agent.retry", {
+          attempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          detail: event.errorMessage,
+        });
+        break;
+      case "auto_retry_end":
+        reporter.log("agent.retry_end", {
+          attempt: event.attempt,
+          success: event.success,
+          finalError: event.finalError,
+        });
+        break;
+      case "compaction_start":
+        reporter.log("agent.compaction_start", { reason: event.reason });
+        break;
+      case "compaction_end":
+        reporter.log("agent.compaction_end", {
+          reason: event.reason,
+          aborted: event.aborted,
+          willRetry: event.willRetry,
+          errorMessage: event.errorMessage,
+        });
+        break;
+      case "queue_update":
+        reporter.log("agent.queue_update", {
+          steeringCount: event.steering.length,
+          followUpCount: event.followUp.length,
+        });
+        break;
+      case "thinking_level_changed":
+        reporter.log("agent.thinking_level_changed", { level: event.level });
+        break;
+      case "tool_execution_update":
+      case "bash_execution_update":
+        break;
+    }
+  };
 }
 
 /**

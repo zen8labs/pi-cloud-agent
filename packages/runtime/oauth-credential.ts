@@ -9,16 +9,23 @@ export async function persistRefreshedOAuthCredential(
   reporter: Reporter,
   authPath: string,
 ): Promise<void> {
-  const previous: unknown = JSON.parse(config.model.authJson);
-  const stored: unknown = JSON.parse(await readFile(authPath, "utf8"));
-  if (!stored || typeof stored !== "object") throw new Error("Pi OAuth credential is invalid");
-  const credential = (stored as Record<string, unknown>)[config.model.provider];
-  if (JSON.stringify(credential) === JSON.stringify(previous)) return;
-  const updated = await reporter.modelCredential({
-    previous: asOAuthCredential(previous),
-    credential: asOAuthCredential(credential),
-  });
-  if (!updated) reporter.log("agent.oauth_credential_superseded");
+  try {
+    const previous: unknown = JSON.parse(config.model.authJson);
+    const stored: unknown = JSON.parse(await readFile(authPath, "utf8"));
+    if (!stored || typeof stored !== "object")
+      throw new Error("Pi OAuth credential is invalid");
+    const credential = (stored as Record<string, unknown>)[config.model.provider];
+    if (JSON.stringify(credential) === JSON.stringify(previous)) return;
+    const updated = await reporter.modelCredential({
+      previous: asOAuthCredential(previous),
+      credential: asOAuthCredential(credential),
+    });
+    if (!updated) reporter.log("agent.oauth_credential_superseded");
+  } catch (error) {
+    reporter.log("runtime.oauth_credential_persist_failed", {
+      detail: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 function asOAuthCredential(value: unknown): OAuthCredential {
