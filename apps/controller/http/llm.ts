@@ -14,12 +14,7 @@ import {
   testLlmEndpoint,
   toSummary,
 } from "../llm/connections";
-import {
-  isOAuthProvider,
-  type OAuthFlowEvent,
-  type OAuthFlowManager,
-  oauthProviderNames,
-} from "../llm/oauth";
+import type { OAuthFlowEvent, OAuthFlowManager } from "../llm/oauth";
 import type { AppEnv } from "./deps";
 
 export function llmRoutes(oauth: OAuthFlowManager): Hono<AppEnv> {
@@ -34,14 +29,10 @@ export function llmRoutes(oauth: OAuthFlowManager): Hono<AppEnv> {
     return c.json(response);
   });
 
-  app.get("/oauth/providers", (c) => c.json({ providers: oauthProviderNames() }));
-
-  app.post("/connections/oauth/:provider/start", (c) => {
+  app.post("/connections/oauth/chatgpt/start", (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "authentication required" }, 401);
-    const provider = c.req.param("provider");
-    if (!isOAuthProvider(provider)) return c.json({ error: "unsupported OAuth provider" }, 422);
-    const flowId = oauth.start(user.id, provider);
+    const flowId = oauth.start(user.id);
     return c.json({ flowId, eventsUrl: `/llm/oauth/${flowId}/events` }, 201);
   });
 
@@ -140,12 +131,14 @@ export function llmRoutes(oauth: OAuthFlowManager): Hono<AppEnv> {
   app.post("/connections/:id/default", async (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "authentication required" }, 401);
+    const modelId = c.req.query("modelId");
     const updated = await setDefaultLlmConnection(
       c.get("database"),
       user.id,
       c.req.param("id"),
+      modelId,
     );
-    if (!updated) return c.json({ error: "model connection not found" }, 404);
+    if (!updated) return c.json({ error: "model connection or model not found" }, 404);
     return c.json({ ok: true });
   });
 

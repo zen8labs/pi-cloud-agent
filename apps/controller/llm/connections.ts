@@ -3,16 +3,16 @@ import type {
   LlmAuthType,
   LlmConnectionSummary,
   LlmModelOption,
+  ThinkingLevel,
 } from "@pi-cloud-agent/protocol";
 import type { Config } from "../config";
 import type { Database } from "../db/client";
 import {
   createLlmConnection,
-  getDefaultLlmConnection,
   getLlmConnection,
   getLlmConnectionForRun,
   listLlmConnections,
-  updateLlmConnection,
+  rotateLlmConnection,
 } from "../db/llm-connections";
 import type { LlmConnectionRow } from "../db/schema";
 import { decryptSecret, encryptSecret } from "../secrets/crypto";
@@ -46,6 +46,7 @@ export interface ResolvedLlmModel {
   maxTokens: number;
   apiKey: string;
   authJson: string | null;
+  thinkingLevels: ThinkingLevel[];
 }
 
 export class LlmModelSelectionError extends Error {
@@ -79,22 +80,23 @@ export async function saveOAuthConnections(
   const existing = (await listLlmConnections(database, input.userId)).find(
     (row) => row.authType === "oauth" && row.provider === input.provider,
   );
+  const preferredModel = models.find((model) => model.id === existing?.model) ?? firstModel;
   const inputRow = {
     userId: input.userId,
     displayName: input.displayName,
     provider: input.provider,
     api: input.api,
-    baseUrl: firstModel.baseUrl ?? input.baseUrl,
-    model: firstModel.id,
+    baseUrl: preferredModel.baseUrl ?? input.baseUrl,
+    model: preferredModel.id,
     models,
-    contextWindow: firstModel.contextWindow,
-    maxTokens: firstModel.maxTokens,
+    contextWindow: preferredModel.contextWindow,
+    maxTokens: preferredModel.maxTokens,
     authType: "oauth" as const,
     credential: encryptedCredential,
     isDefault: input.isDefault || existing?.isDefault === true,
   };
   return existing
-    ? updateLlmConnection(database, input.userId, existing.id, inputRow)
+    ? rotateLlmConnection(database, input.userId, existing.id, inputRow)
     : createLlmConnection(database, inputRow);
 }
 
@@ -121,6 +123,7 @@ export async function saveApiKeyConnection(
         id: input.model,
         contextWindow: input.contextWindow,
         maxTokens: input.maxTokens,
+        thinkingLevels: ["off"],
       },
     ],
     authType: "api_key",
@@ -164,18 +167,6 @@ export async function resolveLlmModelForRun(
   const connection = await getLlmConnectionForRun(database, userId, connectionId);
   if (!connection) throw new Error("run model connection is no longer available");
   return decryptModel(connection, config, modelId);
-}
-
-export async function resolveDefaultLlmModel(
-  database: Database,
-  config: Config,
-  userId: string,
-): Promise<ResolvedLlmModel> {
-  const connection = await getDefaultLlmConnection(database, userId);
-  if (!connection) {
-    throw new Error("connect a model provider in Settings before resuming this session");
-  }
-  return decryptModel(connection, config, connection.model);
 }
 
 export function modelIdFromSnapshot(snapshot: string): string {
@@ -245,6 +236,7 @@ function decryptModel(
     maxTokens: selected.maxTokens,
     apiKey: credential.type === "api_key" ? credential.key : credential.access,
     authJson: credential.type === "oauth" ? JSON.stringify(credential) : null,
+    thinkingLevels: row.authType === "api_key" ? ["off"] : (selected.thinkingLevels ?? ["off"]),
   };
 }
 
@@ -285,14 +277,14 @@ export function toSummary(row: LlmConnectionRow): LlmConnectionSummary {
     api: row.api,
     baseUrl: row.baseUrl,
     model: row.model,
-    models: row.models,
+    models: row.models.map((model) => ({
+      ...model,
+      thinkingLevels: row.authType === "api_key" ? ["off"] : (model.thinkingLevels ?? ["off"]),
+    })),
     contextWindow: row.contextWindow,
     maxTokens: row.maxTokens,
     isDefault: row.isDefault,
-    warning:
-      row.authType === "oauth" && row.provider === "anthropic"
-        ? "Claude subscription usage may be billed as extra usage."
-        : null,
+    warning: null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

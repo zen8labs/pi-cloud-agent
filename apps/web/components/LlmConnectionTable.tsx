@@ -1,7 +1,7 @@
 "use client";
 
 import type { LlmConnectionSummary } from "@pi-cloud-agent/protocol";
-import { ChevronDownIcon, StarIcon, Trash2Icon } from "lucide-react";
+import { ChevronDownIcon, Trash2Icon } from "lucide-react";
 import { Fragment, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -10,12 +10,10 @@ import { cn } from "@/lib/utils";
 export function LlmConnectionTable({
   connections,
   busyId,
-  onMakeDefault,
   onRemove,
 }: {
   connections: LlmConnectionSummary[];
   busyId: string | null;
-  onMakeDefault: (id: string) => void;
   onRemove: (id: string) => Promise<void>;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -44,7 +42,6 @@ export function LlmConnectionTable({
                   setExpandedId(expandedId === connection.id ? null : connection.id)
                 }
                 busy={busyId !== null}
-                onMakeDefault={() => onMakeDefault(connection.id)}
                 onRequestRemove={() => setRemoving(connection)}
               />
             ))}
@@ -77,14 +74,12 @@ function ConnectionRows({
   expanded,
   onToggleExpanded,
   busy,
-  onMakeDefault,
   onRequestRemove,
 }: {
   connection: LlmConnectionSummary;
   expanded: boolean;
   onToggleExpanded: () => void;
   busy: boolean;
-  onMakeDefault: () => void;
   onRequestRemove: () => void;
 }) {
   const singleModel = connection.models.length === 1;
@@ -94,12 +89,6 @@ function ConnectionRows({
         <td className="max-w-56 px-4 py-3">
           <div className="flex items-center gap-2">
             <span className="min-w-0 truncate font-medium">{connection.displayName}</span>
-            {connection.isDefault && (
-              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
-                <StarIcon className="size-3 fill-current" />
-                Default
-              </span>
-            )}
           </div>
           <p
             className="mt-0.5 truncate text-xs text-muted-foreground"
@@ -140,18 +129,6 @@ function ConnectionRows({
         </td>
         <td className="px-4 py-3">
           <div className="flex items-center justify-end gap-2 whitespace-nowrap">
-            {!connection.isDefault && (
-              <Button
-                type="button"
-                onClick={onMakeDefault}
-                disabled={busy}
-                variant="outline"
-                size="sm"
-              >
-                <StarIcon className="size-3.5" />
-                Set default
-              </Button>
-            )}
             <Button
               type="button"
               onClick={onRequestRemove}

@@ -112,7 +112,12 @@ describe("browser boundary", () => {
         Cookie: `pca_session=${cookie}`,
         Origin: "http://localhost:3000",
       },
-      body: JSON.stringify({ prompt: "peek" }),
+      body: JSON.stringify({
+        prompt: "peek",
+        modelConnectionId: "00000000-0000-4000-8000-000000000000",
+        modelId: "test-model",
+        thinkingLevel: "off",
+      }),
     });
     expect(foreignTurn.status).toBe(404);
   });
@@ -204,6 +209,7 @@ describe("browser boundary", () => {
         prompt: "use the selected model",
         modelConnectionId,
         modelId,
+        thinkingLevel: "off",
       });
 
     const staleRun = await secureApp.request("/runs", {

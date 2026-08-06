@@ -26,6 +26,7 @@ const config: RuntimeConfig = {
     baseUrl: "https://gateway.test/v1",
     contextWindow: 1000,
     maxTokens: 100,
+    thinkingLevel: "medium",
   },
   repo: {
     owner: "acme",

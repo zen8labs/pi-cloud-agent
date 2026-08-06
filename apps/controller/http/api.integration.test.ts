@@ -383,13 +383,13 @@ describe("model connections", () => {
         prompt: "use my model",
         modelConnectionId: connection.id,
         modelId: "gpt-test",
+        thinkingLevel: "off",
       }),
     });
     expect(queued.status).toBe(201);
     const run = await json<RunSummary>(queued);
     expect(run.model).toBe("litellm/gpt-test");
     expect(run.modelConnectionId).toBe(connection.id);
-
     const deletion = await secureApp.request(`/llm/connections/${connection.id}`, {
       method: "DELETE",
       headers: { Cookie: `pca_session=${cookie}`, Origin: "http://localhost:3000" },
@@ -408,7 +408,7 @@ describe("model connections", () => {
     expect((await secureApp.request("/llm/connections")).status).toBe(401);
   });
 
-  it("deletes a referenced connection and switches a resumed session to the default", async () => {
+  it("lets a resumed session explicitly switch away from a deleted connection", async () => {
     const secureApp = createApp({
       config: testConfig({ APP_AUTH_REQUIRED: "true" }),
       database,
@@ -455,6 +455,7 @@ describe("model connections", () => {
           profile: "general",
           modelConnectionId: original.id,
           modelId: "original-model",
+          thinkingLevel: "off",
         }),
       }),
     );
@@ -484,7 +485,12 @@ describe("model connections", () => {
     const followUp = await secureApp.request(`/sessions/${session.id}/turns`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: `pca_session=${cookie}` },
-      body: JSON.stringify({ prompt: "Use the replacement model" }),
+      body: JSON.stringify({
+        prompt: "Use the replacement model",
+        modelConnectionId: replacement.id,
+        modelId: "replacement-model",
+        thinkingLevel: "off",
+      }),
     });
     expect(followUp.status).toBe(201);
     const run = await json<RunDetail>(followUp);

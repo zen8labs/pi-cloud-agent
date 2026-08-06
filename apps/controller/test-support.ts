@@ -86,6 +86,7 @@ export function withTestModel(body: unknown, modelConnectionId: string): unknown
     ...(body as Record<string, unknown>),
     modelConnectionId: (body as Record<string, unknown>).modelConnectionId ?? modelConnectionId,
     modelId: (body as Record<string, unknown>).modelId ?? "test-model",
+    thinkingLevel: (body as Record<string, unknown>).thinkingLevel ?? "off",
   };
 }
 

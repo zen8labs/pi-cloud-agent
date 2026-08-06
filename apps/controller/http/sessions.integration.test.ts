@@ -46,7 +46,9 @@ function send(method: "POST" | "PUT", path: string, body: unknown, token?: strin
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(
-      path === "/sessions" ? withTestModel(body, testModelConnectionId) : body,
+      path === "/sessions" || path.endsWith("/turns")
+        ? withTestModel(body, testModelConnectionId)
+        : body,
     ),
   });
 }
@@ -113,6 +115,19 @@ describe("durable session HTTP contract", () => {
         .status,
     ).toBe(200);
     expect(await parkSession(database, firstRun!, null, null)).toBe(true);
+
+    expect(
+      (
+        await app.request(`/sessions/${session.id}/turns`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Cookie: `pca_session=${testCookie}`,
+          },
+          body: JSON.stringify({ prompt: "No implicit model" }),
+        })
+      ).status,
+    ).toBe(422);
 
     const response = await send("POST", `/sessions/${session.id}/turns`, {
       prompt: "Read the note from the previous turn",

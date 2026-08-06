@@ -79,18 +79,21 @@ function isPublicIpv6(address: string): boolean {
   const first = words[0] ?? 0;
   const second = words[1] ?? 0;
   const allZero = words.every((word) => word === 0);
+  const isLoopback = words.slice(0, 7).every((word) => word === 0) && words[7] === 1;
   const isMappedIpv4 = words.slice(0, 5).every((word) => word === 0) && words[5] === 0xffff;
+  const isCompatibleIpv4 = words.slice(0, 6).every((word) => word === 0);
   return !(
     allZero ||
+    isLoopback ||
     (first & 0xfe00) === 0xfc00 ||
     (first & 0xffc0) === 0xfe80 ||
     (first & 0xff00) === 0xff00 ||
     (first === 0x2001 && second >= 0xdb00 && second <= 0xdbff) ||
-    (isMappedIpv4 && isPrivateMappedIpv4(words))
+    ((isMappedIpv4 || isCompatibleIpv4) && isPrivateEmbeddedIpv4(words))
   );
 }
 
-function isPrivateMappedIpv4(words: number[]): boolean {
+function isPrivateEmbeddedIpv4(words: number[]): boolean {
   const [sixth, seventh] = [words[6], words[7]];
   if (sixth === undefined || seventh === undefined) return true;
   return !isPublicIpv4(`${sixth >> 8}.${sixth & 255}.${seventh >> 8}.${seventh & 255}`);

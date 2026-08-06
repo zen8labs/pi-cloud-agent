@@ -30,7 +30,7 @@ export async function createLlmConnection(
   return row;
 }
 
-export async function updateLlmConnection(
+export async function rotateLlmConnection(
   database: Database,
   userId: string,
   id: string,
@@ -38,13 +38,16 @@ export async function updateLlmConnection(
 ): Promise<LlmConnectionRow> {
   const [row] = await database.transaction(async (tx) => {
     await clearDefaultIfNeeded(tx, userId, input.isDefault);
+    if (!(await retireLlmConnection(tx, userId, id))) {
+      throw new Error("model connection to rotate was not found");
+    }
     return tx
-      .update(llmConnections)
-      .set({ ...input, updatedAt: new Date() })
-      .where(and(eq(llmConnections.id, id), eq(llmConnections.userId, userId)))
+      .insert(llmConnections)
+      .values({ ...input, userId })
       .returning();
   });
-  if (!row) throw new Error("model connection to update was not found");
+  if (!row) throw new Error("insert into llm_connections returned no row");
+  await purgeDeletedLlmConnections(database);
   return row;
 }
 
@@ -103,32 +106,15 @@ export async function listLlmConnections(
     .orderBy(desc(llmConnections.isDefault), desc(llmConnections.updatedAt));
 }
 
-export async function getDefaultLlmConnection(
-  database: Database,
-  userId: string,
-): Promise<LlmConnectionRow | null> {
-  const [row] = await database
-    .select()
-    .from(llmConnections)
-    .where(
-      and(
-        eq(llmConnections.userId, userId),
-        eq(llmConnections.isDefault, true),
-        isNull(llmConnections.deletedAt),
-      ),
-    )
-    .limit(1);
-  return row ?? null;
-}
-
 export async function setDefaultLlmConnection(
   database: Database,
   userId: string,
   id: string,
+  modelId?: string,
 ): Promise<boolean> {
   return database.transaction(async (tx) => {
     const [target] = await tx
-      .select({ id: llmConnections.id })
+      .select({ id: llmConnections.id, models: llmConnections.models })
       .from(llmConnections)
       .where(
         and(
@@ -140,13 +126,28 @@ export async function setDefaultLlmConnection(
       .limit(1);
     if (!target) return false;
 
+    const selectedModel = modelId
+      ? target.models.find((model) => model.id === modelId)
+      : undefined;
+    if (modelId && !selectedModel) return false;
+
     await tx
       .update(llmConnections)
       .set({ isDefault: false, updatedAt: new Date() })
       .where(eq(llmConnections.userId, userId));
     await tx
       .update(llmConnections)
-      .set({ isDefault: true, updatedAt: new Date() })
+      .set({
+        isDefault: true,
+        ...(selectedModel
+          ? {
+              model: selectedModel.id,
+              contextWindow: selectedModel.contextWindow,
+              maxTokens: selectedModel.maxTokens,
+            }
+          : {}),
+        updatedAt: new Date(),
+      })
       .where(and(eq(llmConnections.id, id), eq(llmConnections.userId, userId)));
     return true;
   });
@@ -157,7 +158,17 @@ export async function deleteLlmConnection(
   userId: string,
   id: string,
 ): Promise<boolean> {
-  const deleted = await database
+  const deleted = await retireLlmConnection(database, userId, id);
+  await purgeDeletedLlmConnections(database);
+  return deleted;
+}
+
+async function retireLlmConnection(
+  writer: Pick<Database, "update">,
+  userId: string,
+  id: string,
+): Promise<boolean> {
+  const retired = await writer
     .update(llmConnections)
     .set({ deletedAt: new Date(), isDefault: false, updatedAt: new Date() })
     .where(
@@ -168,8 +179,7 @@ export async function deleteLlmConnection(
       ),
     )
     .returning({ id: llmConnections.id });
-  await purgeDeletedLlmConnections(database);
-  return deleted.length > 0;
+  return retired.length > 0;
 }
 
 async function purgeDeletedLlmConnections(database: Database): Promise<void> {

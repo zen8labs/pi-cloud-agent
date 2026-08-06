@@ -1,10 +1,15 @@
 "use client";
 
-import type { RunDetail, SessionDetail } from "@pi-cloud-agent/protocol";
+import type {
+  LlmConnectionSummary,
+  RunDetail,
+  SessionDetail,
+  ThinkingLevel,
+} from "@pi-cloud-agent/protocol";
 import { ArrowLeftIcon, GitBranchIcon, SquareIcon, WaypointsIcon } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ActivityFeed } from "@/components/ActivityFeed";
 import {
   Conversation,
@@ -12,10 +17,19 @@ import {
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
 import { ChatComposer } from "@/components/ChatComposer";
+import { ModelSelect } from "@/components/ModelSelect";
 import { AzureDevOpsMarkIcon, GithubMarkIcon } from "@/components/ProviderIcons";
 import { StatusBadge } from "@/components/StatusBadge";
+import { ThinkingLevelSelect } from "@/components/ThinkingLevelSelect";
 import { api } from "@/lib/api";
 import { absoluteTime } from "@/lib/format";
+import {
+  defaultModelSelection,
+  parseModelSelection,
+  preferredModelSelection,
+  preferredThinkingLevel,
+  selectedModel,
+} from "@/lib/model-selection";
 import { resolveBranch, summarizeChanges } from "@/lib/session-meta";
 import { useSession } from "@/lib/useSession";
 
@@ -84,7 +98,11 @@ export default function SessionPage() {
                 <FollowUp
                   sessionId={session.id}
                   repo={session.repo}
-                  model={latest?.model ?? session.model}
+                  previousModel={latest?.model ?? session.model}
+                  previousModelConnectionId={
+                    latest?.modelConnectionId ?? session.modelConnectionId
+                  }
+                  previousThinkingLevel={latest?.thinkingLevel ?? "medium"}
                   active={active}
                   onQueued={refresh}
                 />
@@ -253,31 +271,84 @@ function ChangesLine({ added, removed }: { added: number; removed: number }) {
 function FollowUp({
   sessionId,
   repo,
-  model,
+  previousModel,
+  previousModelConnectionId,
+  previousThinkingLevel,
   active,
   onQueued,
 }: {
   sessionId: string;
   repo: string;
-  model: string;
+  previousModel: string;
+  previousModelConnectionId: string | null;
+  previousThinkingLevel: ThinkingLevel;
   active: boolean;
   onQueued: () => Promise<void>;
 }) {
   const [prompt, setPrompt] = useState("");
+  const [modelConnections, setModelConnections] = useState<LlmConnectionSummary[]>([]);
+  const [modelSelection, setModelSelection] = useState("");
+  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>("off");
+  const [modelsLoading, setModelsLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (active) return;
+    let alive = true;
+    setModelsLoading(true);
+    api
+      .listLlmConnections()
+      .then((connections) => {
+        if (!alive) return;
+        setModelConnections(connections);
+        const selection = preferredModelSelection(
+          connections,
+          previousModelConnectionId,
+          previousModel,
+        );
+        setModelSelection(selection);
+        setThinkingLevel(
+          preferredThinkingLevel(selectedModel(connections, selection), previousThinkingLevel),
+        );
+      })
+      .catch((cause) => {
+        if (alive) setError(cause instanceof Error ? cause.message : String(cause));
+      })
+      .finally(() => {
+        if (alive) setModelsLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [active, previousModel, previousModelConnectionId, previousThinkingLevel]);
+
+  const selected = parseModelSelection(modelSelection);
+  const canSubmit = !active && !submitting && Boolean(prompt.trim()) && Boolean(selected);
+
   const submit = async () => {
-    if (active || submitting || !prompt.trim()) return;
+    if (!canSubmit || !selected) return;
     setSubmitting(true);
     setError(null);
     try {
-      await api.createSessionTurn(sessionId, prompt.trim());
+      await api.createSessionTurn(sessionId, {
+        prompt: prompt.trim(),
+        modelConnectionId: selected.connectionId,
+        modelId: selected.modelId,
+        thinkingLevel,
+      });
       setPrompt("");
       await onQueued();
       setSubmitting(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+      const connections = await api.listLlmConnections().catch(() => null);
+      if (connections) {
+        setModelConnections(connections);
+        setModelSelection(defaultModelSelection(connections));
+        const selection = defaultModelSelection(connections);
+        setThinkingLevel(preferredThinkingLevel(selectedModel(connections, selection)));
+      }
       setSubmitting(false);
     }
   };
@@ -290,21 +361,48 @@ function FollowUp({
         onSubmit={submit}
         placeholder={active ? "Pi is still working…" : `Follow up on ${repo}…`}
         submitLabel="Send"
+        submitEnabled={canSubmit}
         submitting={submitting}
-        disabled={active}
+        disabled={active || modelsLoading || modelConnections.length === 0}
         compact
-        tools={<ModelHint model={model} />}
+        tools={
+          <div className="flex min-w-0 items-center text-muted-foreground">
+            <ModelSelect
+              connections={modelConnections}
+              value={modelSelection}
+              onChange={(value) => {
+                setModelSelection(value);
+                setThinkingLevel(
+                  preferredThinkingLevel(selectedModel(modelConnections, value), thinkingLevel),
+                );
+              }}
+              disabled={active || modelsLoading}
+              ariaLabel="Model for next turn"
+              placeholder={modelsLoading ? "Loading models…" : "Choose model"}
+              className="h-7 min-w-0 max-w-44 border-0 bg-transparent px-1.5 text-xs shadow-none dark:bg-transparent"
+            />
+            <ThinkingLevelSelect
+              levels={
+                selectedModel(modelConnections, modelSelection)?.thinkingLevels ?? ["off"]
+              }
+              value={thinkingLevel}
+              onChange={setThinkingLevel}
+              disabled={active || modelsLoading}
+              className="h-7 min-w-0 max-w-36 border-0 bg-transparent px-1.5 text-xs shadow-none dark:bg-transparent"
+            />
+          </div>
+        }
       />
-      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+      {modelConnections.length === 0 && !modelsLoading ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Add a model connection in{" "}
+          <Link href="/settings" className="underline underline-offset-2">
+            Settings
+          </Link>{" "}
+          before continuing.
+        </p>
+      ) : null}
+      {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
     </div>
-  );
-}
-
-function ModelHint({ model }: { model: string }) {
-  const short = model.includes("/") ? (model.split("/").at(-1) ?? model) : model;
-  return (
-    <span className="truncate px-1 text-[11px] text-muted-foreground" title={model}>
-      {short}
-    </span>
   );
 }

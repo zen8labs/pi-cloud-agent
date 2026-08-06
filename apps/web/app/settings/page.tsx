@@ -111,9 +111,9 @@ function SettingsContent() {
         </div>
 
         <div className="mb-8 mt-12">
-          <h2 className="text-xl font-medium tracking-[-0.02em]">Model connections</h2>
+          <h2 className="text-xl font-medium tracking-[-0.02em]">Models</h2>
           <p className="mt-2 text-sm text-muted-foreground">
-            Choose the model used by each task.
+            Choose your default model and manage provider connections.
           </p>
         </div>
 

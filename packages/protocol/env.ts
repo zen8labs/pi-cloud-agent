@@ -26,6 +26,7 @@ export const SANDBOX_ENV = {
   modelAuthJson: "LLM_AUTH_JSON",
   modelContextWindow: "LLM_CONTEXT_WINDOW",
   modelMaxTokens: "LLM_MAX_TOKENS",
+  modelThinkingLevel: "LLM_THINKING_LEVEL",
 
   repoProvider: "REPO_PROVIDER",
   repoHost: "REPO_HOST",

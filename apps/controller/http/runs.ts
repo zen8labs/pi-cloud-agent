@@ -45,6 +45,7 @@ export function runRoutes(): Hono<AppEnv> {
       user.id,
       body.modelConnectionId,
       body.modelId,
+      body.thinkingLevel,
     );
     if (!selected.ok) return c.json({ error: selected.error }, 422);
     const model = selected.model;
@@ -58,6 +59,7 @@ export function runRoutes(): Hono<AppEnv> {
       // Pinned at creation, so a run stays reproducible if configuration changes.
       model: `${model.provider}/${model.name}`,
       modelConnectionId: model.connectionId,
+      thinkingLevel: body.thinkingLevel,
       callbackToken: randomBytes(32).toString("hex"),
     });
 
@@ -205,6 +207,7 @@ function toSummary(run: RunRow): RunSummary {
     repo: run.repoFullName,
     model: run.model,
     modelConnectionId: run.modelConnectionId,
+    thinkingLevel: run.thinkingLevel,
     error: run.error,
     createdAt: run.createdAt.toISOString(),
     updatedAt: run.updatedAt.toISOString(),

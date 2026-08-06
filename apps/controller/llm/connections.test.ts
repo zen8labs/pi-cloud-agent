@@ -85,19 +85,32 @@ describe("testLlmEndpoint", () => {
     ).rejects.toThrow('model endpoint returned 404: {"error":"model not found"}');
   });
 
-  it("rejects private endpoint addresses before making a request", async () => {
+  it.each([
+    {
+      name: "IPv4 link-local",
+      baseUrl: "https://model.example/v1",
+      resolveHostname: async () => [{ address: "169.254.169.254", family: 4 }],
+    },
+    { name: "IPv6 loopback", baseUrl: "http://[::1]:8080" },
+    { name: "IPv4-compatible IPv6 loopback", baseUrl: "http://[::127.0.0.1]:8080" },
+    {
+      name: "hostname resolving to IPv6 loopback",
+      baseUrl: "https://model.example/v1",
+      resolveHostname: async () => [{ address: "::1", family: 6 }],
+    },
+  ])("rejects $name before making a request", async ({ baseUrl, resolveHostname }) => {
     const fetchMock = vi.fn<typeof fetch>();
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
       testLlmEndpoint(
         {
-          baseUrl: "https://model.example/v1",
+          baseUrl,
           apiKey: "secret",
           api: "openai-completions",
           model: "model-a",
         },
-        { resolveHostname: async () => [{ address: "169.254.169.254", family: 4 }] },
+        { resolveHostname },
       ),
     ).rejects.toThrow("public address");
     expect(fetchMock).not.toHaveBeenCalled();

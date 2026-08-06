@@ -3,6 +3,7 @@
 import type {
   ConfigResponse,
   LlmConnectionSummary,
+  ThinkingLevel,
   VcsRepository,
 } from "@pi-cloud-agent/protocol";
 import { FolderGit2Icon, GitBranchIcon, SlidersHorizontalIcon } from "lucide-react";
@@ -10,6 +11,8 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { ChatComposer } from "@/components/ChatComposer";
+import { ModelSelect } from "@/components/ModelSelect";
+import { ThinkingLevelSelect } from "@/components/ThinkingLevelSelect";
 import {
   Select,
   SelectContent,
@@ -18,6 +21,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
+import {
+  defaultModelSelection,
+  parseModelSelection,
+  preferredThinkingLevel,
+  selectedModel,
+} from "@/lib/model-selection";
 import { saveSessionTitle } from "@/lib/session-titles";
 
 export default function ChatPage() {
@@ -38,6 +47,7 @@ function NewSession() {
   const [provider, setProvider] = useState("github");
   const [profile, setProfile] = useState(params.get("profile") ?? "");
   const [modelSelection, setModelSelection] = useState("");
+  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>("off");
   const [prompt, setPrompt] = useState("");
   const [branches, setBranches] = useState<string[]>([]);
   const [branch, setBranch] = useState("");
@@ -53,10 +63,9 @@ function NewSession() {
         setConfig(loadedConfig);
         setRepos(loadedRepos);
         setModelConnections(loadedConnections);
-        const defaultConnection = loadedConnections.find((entry) => entry.isDefault);
-        if (defaultConnection) {
-          setModelSelection(modelSelectionValue(defaultConnection.id, defaultConnection.model));
-        }
+        const selection = defaultModelSelection(loadedConnections);
+        setModelSelection(selection);
+        setThinkingLevel(preferredThinkingLevel(selectedModel(loadedConnections, selection)));
         setProfile((current) => current || loadedConfig.defaultProfile);
         const selected = loadedRepos[0];
         if (selected) {
@@ -125,6 +134,7 @@ function NewSession() {
         branch: branch || null,
         modelConnectionId: selection.connectionId,
         modelId: selection.modelId,
+        thinkingLevel,
       });
       saveSessionTitle(session.id, prompt.trim());
       router.push(`/sessions/${session.id}`);
@@ -172,6 +182,8 @@ function NewSession() {
                 modelSelection={modelSelection}
                 modelConnections={modelConnections}
                 onModelSelectionChange={setModelSelection}
+                thinkingLevel={thinkingLevel}
+                onThinkingLevelChange={setThinkingLevel}
                 branch={branch}
                 branches={branches}
                 branchesLoading={branchesLoading}
@@ -226,6 +238,8 @@ type ComposerOptionsProps = {
   modelSelection: string;
   modelConnections: LlmConnectionSummary[];
   onModelSelectionChange: (value: string) => void;
+  thinkingLevel: ThinkingLevel;
+  onThinkingLevelChange: (value: ThinkingLevel) => void;
   branch: string;
   branches: string[];
   branchesLoading: boolean;
@@ -235,16 +249,7 @@ type ComposerOptionsProps = {
 function ComposerOptions(props: ComposerOptionsProps) {
   const triggerClass =
     "h-7 min-w-0 max-w-36 shrink border-0 bg-transparent px-1.5 text-xs shadow-none dark:bg-transparent";
-  const selected = parseModelSelection(props.modelSelection);
-  const selectedModel = selected
-    ? props.modelConnections
-        .flatMap((connection) => connection.models.map((model) => ({ connection, model })))
-        .find(
-          (entry) =>
-            entry.connection.id === selected.connectionId &&
-            entry.model.id === selected.modelId,
-        )
-    : null;
+  const model = selectedModel(props.modelConnections, props.modelSelection);
   return (
     <>
       <FolderGit2Icon className="size-3.5 shrink-0 text-muted-foreground" />
@@ -309,36 +314,26 @@ function ComposerOptions(props: ComposerOptionsProps) {
           ))}
         </SelectContent>
       </Select>
-      <Select
+      <ModelSelect
+        connections={props.modelConnections}
         value={props.modelSelection}
-        onValueChange={(value) => props.onModelSelectionChange(value ?? "")}
-      >
-        <SelectTrigger aria-label="Model" className={triggerClass}>
-          <SelectValue placeholder="Model">{selectedModel?.model.id}</SelectValue>
-        </SelectTrigger>
-        <SelectContent>
-          {props.modelConnections.map((connection) =>
-            connection.models.map((model) => (
-              <SelectItem
-                key={modelSelectionValue(connection.id, model.id)}
-                value={modelSelectionValue(connection.id, model.id)}
-              >
-                {model.id}
-              </SelectItem>
-            )),
-          )}
-        </SelectContent>
-      </Select>
+        onChange={(value) => {
+          props.onModelSelectionChange(value);
+          props.onThinkingLevelChange(
+            preferredThinkingLevel(
+              selectedModel(props.modelConnections, value),
+              props.thinkingLevel,
+            ),
+          );
+        }}
+        className={triggerClass}
+      />
+      <ThinkingLevelSelect
+        levels={model?.thinkingLevels ?? ["off"]}
+        value={props.thinkingLevel}
+        onChange={props.onThinkingLevelChange}
+        className={triggerClass}
+      />
     </>
   );
-}
-
-function modelSelectionValue(connectionId: string, modelId: string): string {
-  return `${connectionId}::${modelId}`;
-}
-
-function parseModelSelection(value: string): { connectionId: string; modelId: string } | null {
-  const separator = value.indexOf("::");
-  if (separator < 1 || separator === value.length - 2) return null;
-  return { connectionId: value.slice(0, separator), modelId: value.slice(separator + 2) };
 }
