@@ -77,7 +77,23 @@ function fakeProvider(
 
 const broker: CredentialBroker = {
   async mintForRun() {
-    return { secrets: {}, env: {} };
+    return {
+      model: {
+        connectionId: "00000000-0000-4000-8000-000000000099",
+        authType: "api_key",
+        provider: "test-provider",
+        name: "test-model",
+        api: "openai-completions",
+        baseUrl: "https://model.example.test/v1",
+        contextWindow: 16_384,
+        maxTokens: 2_048,
+        apiKey: "test-key",
+        authJson: null,
+        thinkingLevels: ["off", "medium"],
+      },
+      secrets: {},
+      env: {},
+    };
   },
 };
 
@@ -215,6 +231,8 @@ describe("completion and teardown", () => {
       session.id,
       "Read the file created in the previous turn.",
       "follow-up-token",
+      null,
+      { model: session.model, modelConnectionId: session.modelConnectionId },
     );
     await tick(loop);
 
@@ -236,7 +254,17 @@ describe("completion and teardown", () => {
     await completeRun(database, run.id, "succeeded");
     await tick(firstLoop);
 
-    const followUp = await createSessionTurn(database, session.id, "Continue cold.", "token");
+    const followUp = await createSessionTurn(
+      database,
+      session.id,
+      "Continue cold.",
+      "token",
+      null,
+      {
+        model: session.model,
+        modelConnectionId: session.modelConnectionId,
+      },
+    );
     const missing = fakeProvider({ resumeMissing: true });
     await tick(reconciler(missing));
 

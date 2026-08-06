@@ -10,6 +10,7 @@
 export * from "./api";
 export * from "./env";
 export * from "./events";
+export * from "./llm";
 export * from "./profile";
 export * from "./repo";
 export * from "./run";

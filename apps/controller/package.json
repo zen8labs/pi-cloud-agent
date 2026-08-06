@@ -13,6 +13,8 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@earendil-works/pi-ai": "catalog:",
+    "@earendil-works/pi-coding-agent": "catalog:",
     "@hono/node-server": "catalog:",
     "@pi-cloud-agent/profiles": "workspace:*",
     "@pi-cloud-agent/protocol": "workspace:*",

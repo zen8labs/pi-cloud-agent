@@ -21,7 +21,7 @@ export function SideNav() {
     let alive = true;
     const load = () =>
       api
-        .listSessions(40)
+        .listSessions(100)
         .then((items) => {
           if (alive) {
             setSessions(items);

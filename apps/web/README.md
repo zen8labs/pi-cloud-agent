@@ -27,6 +27,8 @@ Next.js App Router, React, Tailwind 4, Base UI, and local-source [AI Elements](h
 | `lib/useRun.ts` | the resumable `EventSource` subscription |
 | `lib/useSession.ts` | polls durable session metadata and combines every turn's event history |
 | `lib/format.ts` | time and status labels |
+| `lib/file-changes.ts` | pure write/edit +/− accounting shared by feed and aside |
+| `lib/session-meta.ts` | change totals and live branch from the event stream |
 | `lib/session-titles.ts` | local prompt-derived labels for sidebar history |
 
 ## Invariants

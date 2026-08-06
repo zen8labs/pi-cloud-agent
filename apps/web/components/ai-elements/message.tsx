@@ -1,6 +1,8 @@
 "use client";
 
 import { code } from "@streamdown/code";
+import { createMathPlugin } from "@streamdown/math";
+import { mermaid } from "@streamdown/mermaid";
 import { ExternalLinkIcon } from "lucide-react";
 import type { HTMLAttributes } from "react";
 import { memo, useEffect } from "react";
@@ -8,6 +10,9 @@ import { createPortal } from "react-dom";
 import { type LinkSafetyModalProps, Streamdown } from "streamdown";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import "katex/dist/katex.min.css";
+
+const math = createMathPlugin({ singleDollarTextMath: true });
 
 /** Streamdown's default modal renders inside <a>/<p>; portal it to avoid hydration errors. */
 function LinkSafetyModal({ url, isOpen, onClose, onConfirm }: LinkSafetyModalProps) {
@@ -124,7 +129,7 @@ export const MessageResponse = memo(
         className,
       )}
       linkSafety={linkSafety}
-      plugins={{ code }}
+      plugins={{ code, math, mermaid }}
       {...props}
     />
   ),

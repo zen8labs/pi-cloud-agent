@@ -50,6 +50,16 @@ Only one run may be active for a session. Creating a turn and claiming the
 session happen in one database transaction. A concurrent follow-up is rejected
 rather than racing two agents against one checkout.
 
+Every turn explicitly selects a model from the user's current connection
+catalog. The run snapshots that resolved selection, while the session keeps the
+latest selection only as display metadata and the default for clients that want
+to offer it. Changing models does not change the Pi checkpoint or workspace, so
+conversation and repository continuity remain intact. A removed model is never
+silently reused: the client refreshes the catalog and submits an available
+selection for the next turn.
+
+Thinking level follows the same per-turn rule. The composer keeps the latest run's level when the newly selected model supports it, otherwise it chooses that model's preferred available level (`medium` when present, then the first advertised level). This preserves the previous model and inference shape when possible while making capability changes explicit.
+
 The terminal run status and workspace suspension are separate durable facts.
 After a runtime reports completion, the session briefly remains busy while the
 reconciler suspends its workspace. A controller restart at any point simply

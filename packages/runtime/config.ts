@@ -4,6 +4,8 @@ import {
   redactUrlCredentials,
   SANDBOX_ENV,
   SANDBOX_PATHS,
+  THINKING_LEVELS,
+  type ThinkingLevel,
 } from "@pi-cloud-agent/protocol";
 
 /**
@@ -27,9 +29,13 @@ export interface RuntimeConfig {
   model: {
     provider: string;
     name: string;
+    api: string;
+    authType: "api_key" | "oauth";
+    authJson: string;
     baseUrl: string;
     contextWindow: number;
     maxTokens: number;
+    thinkingLevel: ThinkingLevel;
   };
 
   repo: {
@@ -56,9 +62,12 @@ function optional(name: string, fallback = ""): string {
   return process.env[name]?.trim() || fallback;
 }
 
-function numeric(name: string, fallback: number): number {
-  const parsed = Number(process.env[name]);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+function positiveInteger(name: string): number {
+  const parsed = Number(required(name));
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return parsed;
 }
 
 export function readConfig(): RuntimeConfig {
@@ -83,9 +92,13 @@ export function readConfig(): RuntimeConfig {
     model: {
       provider: modelRef.slice(0, separator),
       name: modelRef.slice(separator + 1),
+      api: required(SANDBOX_ENV.modelApi),
+      authType: readAuthType(),
+      authJson: optional(SANDBOX_ENV.modelAuthJson),
       baseUrl: required(SANDBOX_ENV.modelBaseUrl),
-      contextWindow: numeric(SANDBOX_ENV.modelContextWindow, 196_608),
-      maxTokens: numeric(SANDBOX_ENV.modelMaxTokens, 32_000),
+      contextWindow: positiveInteger(SANDBOX_ENV.modelContextWindow),
+      maxTokens: positiveInteger(SANDBOX_ENV.modelMaxTokens),
+      thinkingLevel: readThinkingLevel(),
     },
 
     repo: {
@@ -106,6 +119,21 @@ export function readConfig(): RuntimeConfig {
   };
 }
 
+function readThinkingLevel(): ThinkingLevel {
+  const value = required(SANDBOX_ENV.modelThinkingLevel);
+  const level = THINKING_LEVELS.find((candidate) => candidate === value);
+  if (!level) throw new Error(`${SANDBOX_ENV.modelThinkingLevel} is invalid`);
+  return level;
+}
+
+function readAuthType(): "api_key" | "oauth" {
+  const value = required(SANDBOX_ENV.modelAuthType);
+  if (value !== "api_key" && value !== "oauth") {
+    throw new Error(`${SANDBOX_ENV.modelAuthType} must be api_key or oauth`);
+  }
+  return value;
+}
+
 /**
  * Every secret value visible to this process.
  *
@@ -115,7 +143,7 @@ export function readConfig(): RuntimeConfig {
  * update this file. See docs/secrets.md.
  */
 function secretValues(): string[] {
-  const pattern = /(TOKEN|API_KEY|SECRET|PASSWORD)$/;
+  const pattern = /(TOKEN|API_KEY|SECRET|PASSWORD|AUTH_JSON)$/;
   const values: string[] = [];
   for (const [name, value] of Object.entries(process.env)) {
     if (!value) continue;

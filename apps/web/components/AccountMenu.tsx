@@ -66,7 +66,7 @@ export function AccountMenu({ compact = false, placement = "top" }: AccountMenuP
         <div
           role="menu"
           className={cn(
-            "absolute z-50 min-w-48 rounded-xl border border-border bg-popover p-1.5 text-popover-foreground shadow-lg shadow-black/10",
+            "absolute z-50 min-w-48 rounded-xl border border-border bg-popover p-1.5 text-popover-foreground",
             placement === "right"
               ? "bottom-0 left-full ml-2"
               : placement === "bottom"

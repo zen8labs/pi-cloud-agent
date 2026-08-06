@@ -20,12 +20,9 @@ Separated by what they need to run, so a fresh clone can always run something.
 |---|---|---|---|
 | `unit` | `pnpm test` | nothing | yes |
 | `integration` | `pnpm test:integration` | Postgres (`pnpm up`) | yes |
-| `e2e` | `pnpm test:e2e` | Postgres, Chromium | yes |
 | `live` | `pnpm test:live` | real sandbox provider + model credentials | **no** |
 
 `pnpm verify` runs unit and integration. Configuration is in `vitest.config.ts`. Local integration tests create and use `pi_cloud_agent_test`, separate from the development database, so a running controller cannot claim their rows.
-
-The `e2e` project is the browser layer: Playwright specs in `apps/web/e2e` against the real controller and dashboard (configuration in `apps/web/playwright.config.ts`). It assumes no forge or sandbox credentials — the run it creates cannot provision, so it asserts the failure is *surfaced*: the badge flips to failed and the reason renders. That exercises the whole loop (form, API, queue, reconciler, SSE, activity feed) short of a real sandbox. Locally it reuses running dev servers, and with real credentials the same run succeeds instead; both terminal states pass.
 
 Integration tests share one database and truncate between tests, so they run in a single fork, sequentially. Migrations are applied once by `apps/controller/test-global-setup.ts`. Doing it per file raced.
 
@@ -41,7 +38,6 @@ Integration tests share one database and truncate between tests, so they run in 
 | `apps/controller/db/sessions.integration.test.ts` | one active turn, ordered runs, checkpoint ownership, and workspace parking |
 | `apps/controller/reconcile/reconciler.integration.test.ts` | restart safety plus workspace suspend/resume and cold fallback |
 | `apps/controller/http/api.integration.test.ts` | the HTTP contract, including authenticated checkpoint callbacks and session turns |
-| `apps/web/e2e/smoke.spec.ts` | the whole loop renders: the list, the form, the session page, and a terminal state arrives with its reason |
 
 The refusal cases matter more than the happy paths.
 

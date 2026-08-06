@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   type RepoRef,
   TERMINAL_STATUSES,
+  type ThinkingLevel,
   type Trigger,
   type WorkspaceRef,
 } from "@pi-cloud-agent/protocol";
@@ -18,6 +19,8 @@ export interface CreateSessionInput {
   repo: RepoRef;
   trigger: Trigger;
   model: string;
+  thinkingLevel?: ThinkingLevel;
+  modelConnectionId?: string | null;
   callbackToken: string;
 }
 
@@ -53,6 +56,7 @@ export async function createSessionWithRun(
         repoFullName: input.repoFullName,
         repo: input.repo,
         model: input.model,
+        modelConnectionId: input.modelConnectionId ?? null,
         activeRunId: runId,
         latestRunId: runId,
       })
@@ -69,6 +73,8 @@ export async function createSessionWithRun(
         repoFullName: input.repoFullName,
         trigger: input.trigger,
         model: input.model,
+        modelConnectionId: input.modelConnectionId ?? null,
+        thinkingLevel: input.thinkingLevel ?? "medium",
         callbackToken: input.callbackToken,
       })
       .returning();
@@ -84,18 +90,18 @@ export async function createSessionTurn(
   sessionId: string,
   prompt: string,
   callbackToken: string,
-  userId: string | null = null,
+  userId: string | null,
+  modelSelection: {
+    model: string;
+    modelConnectionId: string | null;
+    thinkingLevel?: ThinkingLevel;
+  },
 ): Promise<RunRow> {
   const runId = randomUUID();
   const run = await database.transaction(async (tx) => {
     const [claimed] = await tx
       .update(sessions)
-      .set({
-        activeRunId: runId,
-        latestRunId: runId,
-        turnCount: sql`${sessions.turnCount} + 1`,
-        updatedAt: new Date(),
-      })
+      .set(sessionTurnUpdate(runId, modelSelection))
       .where(
         and(
           eq(sessions.id, sessionId),
@@ -128,7 +134,9 @@ export async function createSessionTurn(
         provider: claimed.provider,
         repoFullName: claimed.repoFullName,
         trigger,
-        model: claimed.model,
+        model: modelSelection.model,
+        modelConnectionId: modelSelection.modelConnectionId,
+        thinkingLevel: modelSelection.thinkingLevel ?? "medium",
         callbackToken,
       })
       .returning();
@@ -137,6 +145,20 @@ export async function createSessionTurn(
   });
   await notify(database, CHANNELS.runQueued, run.id);
   return run;
+}
+
+function sessionTurnUpdate(
+  runId: string,
+  modelSelection: { model: string; modelConnectionId: string | null },
+) {
+  return {
+    activeRunId: runId,
+    latestRunId: runId,
+    turnCount: sql`${sessions.turnCount} + 1`,
+    model: modelSelection.model,
+    modelConnectionId: modelSelection.modelConnectionId,
+    updatedAt: new Date(),
+  };
 }
 
 export async function getSession(

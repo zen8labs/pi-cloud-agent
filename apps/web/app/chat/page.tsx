@@ -1,11 +1,18 @@
 "use client";
 
-import type { ConfigResponse, VcsRepository } from "@pi-cloud-agent/protocol";
+import type {
+  ConfigResponse,
+  LlmConnectionSummary,
+  ThinkingLevel,
+  VcsRepository,
+} from "@pi-cloud-agent/protocol";
 import { FolderGit2Icon, GitBranchIcon, SlidersHorizontalIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { ChatComposer } from "@/components/ChatComposer";
+import { ModelSelect } from "@/components/ModelSelect";
+import { ThinkingLevelSelect } from "@/components/ThinkingLevelSelect";
 import {
   Select,
   SelectContent,
@@ -14,6 +21,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
+import {
+  defaultModelSelection,
+  parseModelSelection,
+  preferredThinkingLevel,
+  selectedModel,
+} from "@/lib/model-selection";
 import { saveSessionTitle } from "@/lib/session-titles";
 
 export default function ChatPage() {
@@ -29,9 +42,12 @@ function NewSession() {
   const params = useSearchParams();
   const [config, setConfig] = useState<ConfigResponse | null>(null);
   const [repos, setRepos] = useState<VcsRepository[]>([]);
+  const [modelConnections, setModelConnections] = useState<LlmConnectionSummary[]>([]);
   const [repo, setRepo] = useState(params.get("repo") ?? "");
   const [provider, setProvider] = useState("github");
   const [profile, setProfile] = useState(params.get("profile") ?? "");
+  const [modelSelection, setModelSelection] = useState("");
+  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>("off");
   const [prompt, setPrompt] = useState("");
   const [branches, setBranches] = useState<string[]>([]);
   const [branch, setBranch] = useState("");
@@ -41,11 +57,15 @@ function NewSession() {
 
   useEffect(() => {
     let alive = true;
-    Promise.all([api.getConfig(), api.listRepos()])
-      .then(([loadedConfig, loadedRepos]) => {
+    Promise.all([api.getConfig(), api.listRepos(), api.listLlmConnections()])
+      .then(([loadedConfig, loadedRepos, loadedConnections]) => {
         if (!alive) return;
         setConfig(loadedConfig);
         setRepos(loadedRepos);
+        setModelConnections(loadedConnections);
+        const selection = defaultModelSelection(loadedConnections);
+        setModelSelection(selection);
+        setThinkingLevel(preferredThinkingLevel(selectedModel(loadedConnections, selection)));
         setProfile((current) => current || loadedConfig.defaultProfile);
         const selected = loadedRepos[0];
         if (selected) {
@@ -91,7 +111,12 @@ function NewSession() {
     };
   }, [provider, repo]);
 
-  const canSubmit = Boolean(repo) && Boolean(profile) && Boolean(prompt.trim()) && !submitting;
+  const canSubmit =
+    Boolean(repo) &&
+    Boolean(profile) &&
+    Boolean(prompt.trim()) &&
+    !submitting &&
+    Boolean(modelSelection);
   const activeProfile = config?.profiles.find((entry) => entry.name === profile);
 
   const submit = async () => {
@@ -99,12 +124,17 @@ function NewSession() {
     setSubmitting(true);
     setError(null);
     try {
+      const selection = parseModelSelection(modelSelection);
+      if (!selection) throw new Error("choose a model before starting a task");
       const session = await api.createSession({
         repo,
         provider,
         profile,
         prompt: prompt.trim(),
         branch: branch || null,
+        modelConnectionId: selection.connectionId,
+        modelId: selection.modelId,
+        thinkingLevel,
       });
       saveSessionTitle(session.id, prompt.trim());
       router.push(`/sessions/${session.id}`);
@@ -116,7 +146,7 @@ function NewSession() {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <header className="flex h-12 shrink-0 items-center px-4">
+      <header className="app-header flex h-12 shrink-0 items-center px-4">
         <h1 className="text-[13px] font-medium">New task</h1>
       </header>
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-4 py-10 sm:px-8">
@@ -129,7 +159,6 @@ function NewSession() {
             onChange={setPrompt}
             onSubmit={submit}
             placeholder="Describe the task for Pi…"
-            model={config?.model}
             submitLabel="Start"
             submitEnabled={canSubmit}
             submitting={submitting}
@@ -150,6 +179,11 @@ function NewSession() {
                 profile={profile}
                 profiles={config?.profiles.map((entry) => entry.name) ?? []}
                 onProfileChange={setProfile}
+                modelSelection={modelSelection}
+                modelConnections={modelConnections}
+                onModelSelectionChange={setModelSelection}
+                thinkingLevel={thinkingLevel}
+                onThinkingLevelChange={setThinkingLevel}
                 branch={branch}
                 branches={branches}
                 branchesLoading={branchesLoading}
@@ -158,7 +192,15 @@ function NewSession() {
             }
           />
           <p className="mt-3 px-2 text-center text-xs text-muted-foreground">
-            {repos.length === 0 ? (
+            {modelConnections.length === 0 ? (
+              <>
+                Add a model connection in{" "}
+                <Link href="/settings" className="underline underline-offset-2">
+                  Settings
+                </Link>{" "}
+                before starting a task.
+              </>
+            ) : repos.length === 0 ? (
               <>
                 Connect a VCS identity in{" "}
                 <Link href="/settings" className="underline underline-offset-2">
@@ -193,6 +235,11 @@ type ComposerOptionsProps = {
   profile: string;
   profiles: string[];
   onProfileChange: (value: string) => void;
+  modelSelection: string;
+  modelConnections: LlmConnectionSummary[];
+  onModelSelectionChange: (value: string) => void;
+  thinkingLevel: ThinkingLevel;
+  onThinkingLevelChange: (value: ThinkingLevel) => void;
   branch: string;
   branches: string[];
   branchesLoading: boolean;
@@ -202,6 +249,7 @@ type ComposerOptionsProps = {
 function ComposerOptions(props: ComposerOptionsProps) {
   const triggerClass =
     "h-7 min-w-0 max-w-36 shrink border-0 bg-transparent px-1.5 text-xs shadow-none dark:bg-transparent";
+  const model = selectedModel(props.modelConnections, props.modelSelection);
   return (
     <>
       <FolderGit2Icon className="size-3.5 shrink-0 text-muted-foreground" />
@@ -233,22 +281,6 @@ function ComposerOptions(props: ComposerOptionsProps) {
           </SelectContent>
         </Select>
       )}
-      <SlidersHorizontalIcon className="ml-1 size-3.5 shrink-0 text-muted-foreground" />
-      <Select
-        value={props.profile}
-        onValueChange={(value) => props.onProfileChange(value ?? "")}
-      >
-        <SelectTrigger aria-label="Profile" className={triggerClass}>
-          <SelectValue placeholder="Profile" />
-        </SelectTrigger>
-        <SelectContent>
-          {props.profiles.map((name) => (
-            <SelectItem key={name} value={name}>
-              {name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
       <GitBranchIcon className="ml-1 size-3.5 shrink-0 text-muted-foreground" />
       <Select
         value={props.branch}
@@ -266,6 +298,42 @@ function ComposerOptions(props: ComposerOptionsProps) {
           ))}
         </SelectContent>
       </Select>
+      <SlidersHorizontalIcon className="ml-1 size-3.5 shrink-0 text-muted-foreground" />
+      <Select
+        value={props.profile}
+        onValueChange={(value) => props.onProfileChange(value ?? "")}
+      >
+        <SelectTrigger aria-label="Profile" className={triggerClass}>
+          <SelectValue placeholder="Profile" />
+        </SelectTrigger>
+        <SelectContent>
+          {props.profiles.map((name) => (
+            <SelectItem key={name} value={name}>
+              {name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <ModelSelect
+        connections={props.modelConnections}
+        value={props.modelSelection}
+        onChange={(value) => {
+          props.onModelSelectionChange(value);
+          props.onThinkingLevelChange(
+            preferredThinkingLevel(
+              selectedModel(props.modelConnections, value),
+              props.thinkingLevel,
+            ),
+          );
+        }}
+        className={triggerClass}
+      />
+      <ThinkingLevelSelect
+        levels={model?.thinkingLevels ?? ["off"]}
+        value={props.thinkingLevel}
+        onChange={props.onThinkingLevelChange}
+        className={triggerClass}
+      />
     </>
   );
 }
