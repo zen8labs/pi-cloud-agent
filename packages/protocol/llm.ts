@@ -53,7 +53,6 @@ export const createLlmConnectionSchema = z.object({
   apiKey: z.string().min(1).max(10_000),
   contextWindow: z.number().int().positive().max(10_000_000).default(196_608),
   maxTokens: z.number().int().positive().max(1_000_000).default(32_000),
-  thinkingLevels: z.array(thinkingLevelSchema).min(1).default(["off"]),
   isDefault: z.boolean().default(false),
 });
 

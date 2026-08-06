@@ -113,7 +113,6 @@ export async function saveApiKeyConnection(
     apiKey: string;
     contextWindow: number;
     maxTokens: number;
-    thinkingLevels?: ThinkingLevel[];
     isDefault: boolean;
   },
 ): Promise<LlmConnectionRow> {
@@ -124,7 +123,7 @@ export async function saveApiKeyConnection(
         id: input.model,
         contextWindow: input.contextWindow,
         maxTokens: input.maxTokens,
-        thinkingLevels: input.thinkingLevels ?? ["off"],
+        thinkingLevels: ["off"],
       },
     ],
     authType: "api_key",
@@ -237,7 +236,7 @@ function decryptModel(
     maxTokens: selected.maxTokens,
     apiKey: credential.type === "api_key" ? credential.key : credential.access,
     authJson: credential.type === "oauth" ? JSON.stringify(credential) : null,
-    thinkingLevels: selected.thinkingLevels ?? ["off"],
+    thinkingLevels: row.authType === "api_key" ? ["off"] : (selected.thinkingLevels ?? ["off"]),
   };
 }
 
@@ -280,7 +279,7 @@ export function toSummary(row: LlmConnectionRow): LlmConnectionSummary {
     model: row.model,
     models: row.models.map((model) => ({
       ...model,
-      thinkingLevels: model.thinkingLevels ?? ["off"],
+      thinkingLevels: row.authType === "api_key" ? ["off"] : (model.thinkingLevels ?? ["off"]),
     })),
     contextWindow: row.contextWindow,
     maxTokens: row.maxTokens,

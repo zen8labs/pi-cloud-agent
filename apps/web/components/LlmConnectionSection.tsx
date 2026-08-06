@@ -3,9 +3,7 @@
 import type {
   CreateLlmConnectionRequest,
   LlmConnectionSummary,
-  ThinkingLevel,
 } from "@pi-cloud-agent/protocol";
-import { THINKING_LEVELS } from "@pi-cloud-agent/protocol";
 import { PlusIcon, TestTube2Icon } from "lucide-react";
 import { useState } from "react";
 import {
@@ -70,7 +68,6 @@ export function LlmConnectionSection({
     apiKey: "",
     contextWindow: 196_608,
     maxTokens: 32_000,
-    thinkingLevels: ["off"],
     // The server decides whether the first saved connection becomes default.
     // Do not derive this from the initial props: Settings loads connections
     // asynchronously, so that value would become stale for the lifetime of the
@@ -96,18 +93,6 @@ export function LlmConnectionSection({
     if (!endpoint) return;
     setEndpointId(value);
     setForm((current) => ({ ...current, provider: endpoint.provider, api: endpoint.api }));
-  };
-
-  const toggleThinkingLevel = (level: ThinkingLevel) => {
-    setForm((current) => {
-      const levels = current.thinkingLevels ?? ["off"];
-      const thinkingLevels = levels.includes(level)
-        ? levels.filter((candidate) => candidate !== level)
-        : THINKING_LEVELS.filter(
-            (candidate) => levels.includes(candidate) || candidate === level,
-          );
-      return { ...current, thinkingLevels };
-    });
   };
 
   const save = async () => {
@@ -282,25 +267,6 @@ export function LlmConnectionSection({
                   ))}
                 </select>
               </label>
-              <fieldset className="grid gap-2 text-xs sm:col-span-2">
-                <legend className="mb-1">Supported thinking levels</legend>
-                <div className="flex flex-wrap gap-x-4 gap-y-2">
-                  {THINKING_LEVELS.map((level) => (
-                    <label key={level} className="flex items-center gap-1.5">
-                      <input
-                        type="checkbox"
-                        checked={(form.thinkingLevels ?? ["off"]).includes(level)}
-                        onChange={() => toggleThinkingLevel(level)}
-                      />
-                      {level}
-                    </label>
-                  ))}
-                </div>
-                <p className="text-muted-foreground">
-                  Declare what this endpoint accepts. Subscription models are discovered
-                  automatically.
-                </p>
-              </fieldset>
               <label className="grid gap-1.5 text-xs sm:col-span-2">
                 <span>
                   Base URL <RequiredMark />

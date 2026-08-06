@@ -14,7 +14,7 @@ Pi's native OAuth providers are exposed as subscription connection buttons for C
 
 Every task resolves a user-owned model connection. There is no deployment-wide model credential.
 
-Each model also advertises its available thinking levels. OAuth connections derive that list from Pi's provider catalog. Custom API-key endpoints declare it explicitly in Settings because the supported APIs do not expose a portable capability endpoint; they default to `off` until the user opts into additional levels. The controller rejects a level outside the selected model's catalog. The chosen level is stored on the run and passed to Pi, so historical runs remain explainable and resumed sessions may change model and thinking level independently.
+Each OAuth model also advertises its available thinking levels from Pi's provider catalog. Custom API-key endpoints expose only `off` because the supported APIs do not provide a portable way to discover or map thinking parameters; provider-specific adapters can add that capability later without asking users to guess. The controller rejects a level outside the selected model's catalog. The chosen level is stored on the run and passed to Pi, so historical runs remain explainable and resumed sessions may change model and thinking level independently.
 
 ## Sandbox handoff and future vault migration
 

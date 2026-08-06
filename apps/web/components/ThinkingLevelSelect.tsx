@@ -30,12 +30,12 @@ export function ThinkingLevelSelect({
       disabled={disabled || levels.length < 2}
     >
       <SelectTrigger aria-label="Thinking level" className={className}>
-        <SelectValue>{value === "off" ? "No thinking" : `${value} thinking`}</SelectValue>
+        <SelectValue>{value}</SelectValue>
       </SelectTrigger>
       <SelectContent align="start">
         {levels.map((level) => (
           <SelectItem key={level} value={level}>
-            {level === "off" ? "No thinking" : level}
+            {level}
           </SelectItem>
         ))}
       </SelectContent>

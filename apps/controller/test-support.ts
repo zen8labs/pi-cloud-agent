@@ -75,7 +75,6 @@ export async function seedTestUser(
     apiKey: "test-key",
     contextWindow: 16_384,
     maxTokens: 2_048,
-    thinkingLevels: ["off", "medium"],
     isDefault: true,
   });
   return { userId: user.id, cookie, modelConnectionId: connection.id };
@@ -87,7 +86,7 @@ export function withTestModel(body: unknown, modelConnectionId: string): unknown
     ...(body as Record<string, unknown>),
     modelConnectionId: (body as Record<string, unknown>).modelConnectionId ?? modelConnectionId,
     modelId: (body as Record<string, unknown>).modelId ?? "test-model",
-    thinkingLevel: (body as Record<string, unknown>).thinkingLevel ?? "medium",
+    thinkingLevel: (body as Record<string, unknown>).thinkingLevel ?? "off",
   };
 }
 
