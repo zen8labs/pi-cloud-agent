@@ -16,7 +16,7 @@ Every task resolves a user-owned model connection. There is no deployment-wide m
 
 ## Sandbox handoff and future vault migration
 
-Today the trusted controller's `CredentialBroker` decrypts the selected model credential and injects the minimum values into the sandbox environment. API-key connections receive `LLM_API_KEY`; Pi OAuth connections additionally receive `LLM_AUTH_TYPE=oauth` and `LLM_AUTH_JSON`. The runtime writes the OAuth credential into its Pi state directory so Pi can use its native provider and refresh behavior. This is a deliberate compatibility seam, not a claim that the sandbox is trusted: repository code and the agent can read any credential visible to their process.
+Today the trusted controller's `CredentialBroker` decrypts the selected model credential and injects the minimum values into the sandbox environment. API-key connections receive `LLM_API_KEY`; Pi OAuth connections additionally receive `LLM_AUTH_TYPE=oauth` and `LLM_AUTH_JSON`. The runtime writes the OAuth credential only to a run-scoped temporary Pi auth file and removes it when the process exits; it is not part of the parked session state. This is still not containment: repository code and the agent can read any credential visible to their process during the turn.
 
 When a vault is introduced, preserve the reconciler-facing `CredentialBroker` interface and replace the implementation behind it. The likely target is:
 

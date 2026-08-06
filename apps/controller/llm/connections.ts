@@ -16,6 +16,7 @@ import {
 } from "../db/llm-connections";
 import type { LlmConnectionRow } from "../db/schema";
 import { decryptSecret, encryptSecret } from "../secrets/crypto";
+import { assertSafeLlmEndpoint, type ResolveHostname } from "./endpoint-policy";
 
 const MODEL_TEST_TIMEOUT_MS = 10_000;
 
@@ -45,6 +46,13 @@ export interface ResolvedLlmModel {
   maxTokens: number;
   apiKey: string;
   authJson: string | null;
+}
+
+export class LlmModelSelectionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LlmModelSelectionError";
+  }
 }
 
 export async function saveOAuthConnections(
@@ -139,7 +147,9 @@ export async function resolveLlmModel(
 ): Promise<ResolvedLlmModel> {
   const connection = await getLlmConnection(database, userId, connectionId);
   if (!connection) {
-    throw new Error("connect a model provider in Settings before starting a task");
+    throw new LlmModelSelectionError(
+      "connect a model provider in Settings before starting a task",
+    );
   }
   return decryptModel(connection, config, modelId);
 }
@@ -176,15 +186,16 @@ export function modelIdFromSnapshot(snapshot: string): string {
   return snapshot.slice(separator + 1);
 }
 
-export async function testLlmEndpoint(input: {
-  baseUrl: string;
-  apiKey: string;
-  api: LlmApi;
-  model: string;
-}): Promise<void> {
-  const url = new URL(input.baseUrl);
-  if (url.username || url.password)
-    throw new Error("base URL must not contain embedded credentials");
+export async function testLlmEndpoint(
+  input: {
+    baseUrl: string;
+    apiKey: string;
+    api: LlmApi;
+    model: string;
+  },
+  options: { resolveHostname?: ResolveHostname } = {},
+): Promise<void> {
+  const url = await assertSafeLlmEndpoint(input.baseUrl, options.resolveHostname);
 
   const endpoint = endpointFor(input.api);
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -197,11 +208,12 @@ export async function testLlmEndpoint(input: {
 
   let response: Response;
   try {
-    response = await fetch(`${input.baseUrl.replace(/\/$/, "")}${endpoint}`, {
+    response = await fetch(`${url.toString().replace(/\/$/, "")}${endpoint}`, {
       method: "POST",
       headers,
       body: JSON.stringify(requestBody(input.api, input.model)),
       signal: AbortSignal.timeout(MODEL_TEST_TIMEOUT_MS),
+      redirect: "error",
     });
   } catch {
     throw new Error("could not reach the model endpoint");
@@ -220,7 +232,7 @@ function decryptModel(
   const credential = parseCredential(decryptSecret(row.credential, config.llm.encryptionKey));
   const selected = row.models.find((model) => model.id === modelId);
   if (!selected) {
-    throw new Error(`model ${modelId} is not available on this connection`);
+    throw new LlmModelSelectionError(`model ${modelId} is not available on this connection`);
   }
   return {
     connectionId: row.id,

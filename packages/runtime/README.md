@@ -26,7 +26,7 @@ It reaches exactly one thing: `CONTROL_PLANE_URL`, outbound only.
 - **Exactly one terminal status per process.** It is the only thing that completes a run. If it cannot be delivered, exit non-zero and let the controller's reconciler notice the silence. Never exit 0 having said nothing.
 - **Telemetry is best-effort and must never fail a run.** Losing a token event costs a line in the feed. `reporter.ts` swallows those failures on purpose.
 - **Everything outbound passes through the redactor.** This is the only side that knows every secret in play, so it is the side that scrubs. Do not add a second send path. Credentials must be named `*_TOKEN`, `*_API_KEY`, `*_SECRET`, or `*_PASSWORD` so `secretValues()` catches them without being told.
-- **Never write a credential to disk.** The git credential helper prints from the environment on demand, precisely so no token lands in `.git/config` where the agent could later read or commit it.
+- **Never write a credential to parked workspace state.** The git credential helper prints from the environment on demand, precisely so no token lands in `.git/config` where the agent could later read or commit it. Pi OAuth may use a run-scoped temporary auth file, which is removed before the session workspace can be suspended.
 - **No profile code here.** The controller composes the skill and the prompt into one finished `TASK_PROMPT`, so the image ships nothing about any vertical.
 - **This is the one package with a build step.** Crossing into a container image is where "just run the TypeScript" stops being simpler.
 

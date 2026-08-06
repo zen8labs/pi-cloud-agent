@@ -10,14 +10,16 @@ import { streamSSE } from "hono/streaming";
 import type { Database } from "../db/client";
 import { completeRun, createRun, getRun, listEvents, listRuns } from "../db/runs";
 import type { RunRow } from "../db/schema";
-import { resolveLlmModel } from "../llm/connections";
-import { userOwns } from "./auth";
+import { requireAuthenticatedUser, userOwns } from "./auth";
 import type { AppEnv } from "./deps";
 import { readManualRouteRequest } from "./manual";
+import { resolveRequestedLlmModel } from "./model-selection";
 
 /** The operator API: start runs, read them, watch them, stop them. */
 export function runRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
+
+  app.use("*", requireAuthenticatedUser);
 
   app.get("/", async (c) => {
     const limit = Math.min(Number(c.req.query("limit") ?? 100) || 100, 200);
@@ -37,13 +39,15 @@ export function runRoutes(): Hono<AppEnv> {
     const resolved = await readManualRouteRequest(c);
     if (!resolved.ok) return c.json(resolved.error, 422);
     const { body, request: manual } = resolved;
-    const model = await resolveLlmModel(
+    const selected = await resolveRequestedLlmModel(
       c.get("database"),
       config,
       user.id,
       body.modelConnectionId,
       body.modelId,
     );
+    if (!selected.ok) return c.json({ error: selected.error }, 422);
+    const model = selected.model;
 
     const run = await createRun(c.get("database"), {
       userId: user.id,
