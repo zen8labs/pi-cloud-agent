@@ -2,9 +2,11 @@ import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { cors } from "hono/cors";
 import { getAppUserForSession } from "../db/auth";
+import { OAuthFlowManager } from "../llm/oauth";
 import { authRoutes } from "./auth";
 import type { AppEnv, Deps } from "./deps";
 import { internalRoutes } from "./internal";
+import { llmRoutes } from "./llm";
 import { metaRoutes } from "./meta";
 import { pluginRoutes } from "./plugins";
 import { runRoutes } from "./runs";
@@ -88,6 +90,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   app.route("/sessions", sessionRoutes());
   app.route("/plugins", pluginRoutes());
   app.route("/internal", internalRoutes());
+  app.route("/llm", llmRoutes(new OAuthFlowManager(deps.database, deps.config)));
   app.route("/vcs", vcsRoutes());
   app.route("/", metaRoutes());
 

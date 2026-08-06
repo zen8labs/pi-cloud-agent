@@ -1,10 +1,15 @@
 "use client";
 
-import type { ConfigResponse, RunDetail, SessionDetail } from "@pi-cloud-agent/protocol";
-import { ArrowLeftIcon, ExternalLinkIcon, PanelRightIcon, SquareIcon } from "lucide-react";
+import type {
+  LlmConnectionSummary,
+  RunDetail,
+  SessionDetail,
+  ThinkingLevel,
+} from "@pi-cloud-agent/protocol";
+import { ArrowLeftIcon, GitBranchIcon, SquareIcon, WaypointsIcon } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ActivityFeed } from "@/components/ActivityFeed";
 import {
   Conversation,
@@ -12,35 +17,34 @@ import {
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
 import { ChatComposer } from "@/components/ChatComposer";
+import { ModelSelect } from "@/components/ModelSelect";
+import { AzureDevOpsMarkIcon, GithubMarkIcon } from "@/components/ProviderIcons";
 import { StatusBadge } from "@/components/StatusBadge";
-import { API_BASE, api } from "@/lib/api";
+import { ThinkingLevelSelect } from "@/components/ThinkingLevelSelect";
+import { api } from "@/lib/api";
 import { absoluteTime } from "@/lib/format";
+import {
+  defaultModelSelection,
+  parseModelSelection,
+  preferredModelSelection,
+  preferredThinkingLevel,
+  selectedModel,
+} from "@/lib/model-selection";
+import { resolveBranch, summarizeChanges } from "@/lib/session-meta";
 import { useSession } from "@/lib/useSession";
 
 export default function SessionPage() {
   const { id } = useParams<{ id: string }>();
   const { session, turns, error, refresh } = useSession(id);
   const [cancelling, setCancelling] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(true);
   const latest = turns.at(-1)?.run ?? null;
   const active = session ? session.status !== "idle" : false;
-
-  useEffect(() => {
-    try {
-      setDetailsOpen(localStorage.getItem("pca-details-open") !== "0");
-    } catch {
-      // Storage unavailable: keep the panel visible.
-    }
-  }, []);
-  const toggleDetails = () =>
-    setDetailsOpen((current) => {
-      try {
-        localStorage.setItem("pca-details-open", current ? "0" : "1");
-      } catch {
-        // Persisting is best-effort.
-      }
-      return !current;
-    });
+  const allEvents = useMemo(() => turns.flatMap((turn) => turn.events), [turns]);
+  const changes = useMemo(() => summarizeChanges(allEvents), [allEvents]);
+  const branch = useMemo(
+    () => resolveBranch(latest?.branch ?? null, allEvents),
+    [allEvents, latest?.branch],
+  );
 
   const cancel = async () => {
     if (!latest) return;
@@ -55,17 +59,14 @@ export default function SessionPage() {
   };
 
   return (
-    <div className="flex h-full min-h-0 bg-background">
-      <div className="flex min-w-0 flex-1 flex-col">
-        <SessionHeader
-          session={session}
-          run={latest}
-          active={active}
-          cancelling={cancelling}
-          onCancel={cancel}
-          detailsOpen={detailsOpen}
-          onToggleDetails={toggleDetails}
-        />
+    <div className="flex h-full min-h-0 flex-col bg-background">
+      <SessionHeader
+        session={session}
+        active={active}
+        cancelling={cancelling}
+        onCancel={cancel}
+      />
+      <div className="flex min-h-0 min-w-0 flex-1">
         <section className="flex min-h-0 min-w-0 flex-1 flex-col">
           {error && !session ? (
             <div className="grid flex-1 place-items-center px-6">
@@ -92,11 +93,16 @@ export default function SessionPage() {
             </Conversation>
           )}
           {session && (
-            <div className="bg-background/95 px-4 pb-5 pt-2 backdrop-blur sm:px-6">
+            <div className="bg-background px-4 pb-5 pt-2 sm:px-6">
               <div className="mx-auto max-w-3xl">
                 <FollowUp
                   sessionId={session.id}
                   repo={session.repo}
+                  previousModel={latest?.model ?? session.model}
+                  previousModelConnectionId={
+                    latest?.modelConnectionId ?? session.modelConnectionId
+                  }
+                  previousThinkingLevel={latest?.thinkingLevel ?? "medium"}
                   active={active}
                   onQueued={refresh}
                 />
@@ -104,31 +110,25 @@ export default function SessionPage() {
             </div>
           )}
         </section>
+        <SessionMeta session={session} run={latest} branch={branch} changes={changes} />
       </div>
-      {detailsOpen && <SessionAside session={session} run={latest} />}
     </div>
   );
 }
 
 function SessionHeader({
   session,
-  run,
   active,
   cancelling,
   onCancel,
-  detailsOpen,
-  onToggleDetails,
 }: {
   session: SessionDetail | null;
-  run: RunDetail | null;
   active: boolean;
   cancelling: boolean;
   onCancel: () => void;
-  detailsOpen: boolean;
-  onToggleDetails: () => void;
 }) {
   return (
-    <header className="flex h-12 shrink-0 items-center gap-2.5 px-3 sm:px-4">
+    <header className="app-header flex h-12 shrink-0 items-center gap-2.5 px-3 sm:px-4">
       <Link
         href="/"
         aria-label="Back to sessions"
@@ -138,12 +138,9 @@ function SessionHeader({
       </Link>
       <div className="min-w-0 flex-1">
         <h1 className="truncate text-[13px] font-medium">{session?.title ?? "Session"}</h1>
-        {session && run && (
-          <p className="mt-px truncate text-[11px] text-muted-foreground">
-            {session.repo} · turn {run.turnNumber ?? 1} ·{" "}
-            <span className="font-mono">{session.id.slice(0, 8)}</span>
-          </p>
-        )}
+        {session?.repo ? (
+          <p className="mt-px truncate text-[11px] text-muted-foreground">{session.repo}</p>
+        ) : null}
       </div>
       {active && (
         <button
@@ -155,83 +152,118 @@ function SessionHeader({
           <SquareIcon className="size-2.5" /> {cancelling ? "Stopping…" : "Cancel"}
         </button>
       )}
-      {run && <StatusBadge status={run.status} />}
-      <button
-        type="button"
-        onClick={onToggleDetails}
-        aria-label={detailsOpen ? "Hide details" : "Show details"}
-        className="hidden size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground xl:grid"
-      >
-        <PanelRightIcon className="size-4" />
-      </button>
     </header>
   );
 }
 
-function SessionAside({
+/**
+ * Environment strip inside the chat window (not a page-level sidebar).
+ * Auto-hides below xl so a future dedicated right rail can own that slot.
+ */
+function SessionMeta({
   session,
   run,
+  branch,
+  changes,
 }: {
   session: SessionDetail | null;
   run: RunDetail | null;
+  branch: string | null;
+  changes: { files: { path: string }[]; added: number; removed: number };
 }) {
+  const repo = run?.repo ?? session?.repo ?? null;
+  const provider = run?.provider ?? session?.provider ?? null;
+  const profile = run?.profile ?? session?.profile ?? null;
+
   return (
-    <aside className="hidden w-72 shrink-0 overflow-y-auto border-l border-border xl:block">
-      <div className="flex h-12 items-center border-b border-border px-4">
-        <h2 className="text-[13px] font-medium">Details</h2>
-      </div>
-      <dl className="divide-y divide-border/60 px-4">
-        <Detail label="Status">{run ? <StatusBadge status={run.status} /> : "—"}</Detail>
-        <Detail label="Profile">
-          <span className="font-mono">{run?.profile ?? "—"}</span>
-        </Detail>
-        <Detail label="Model">
-          <span className="font-mono break-all">{run?.model ?? "—"}</span>
-        </Detail>
-        <Detail label="Repository">
-          <span className="font-mono break-all">{run?.repo ?? "—"}</span>
-        </Detail>
-        <Detail label="Sandbox">{run?.provider ?? "—"}</Detail>
-        <Detail label="Workspace">
-          {session?.workspaceAvailable ? "Preserved" : "Cold next turn"}
-        </Detail>
-        <Detail label="Created">{run ? absoluteTime(run.createdAt) : "—"}</Detail>
-      </dl>
-      {run && (
-        <AsideLink href={`${API_BASE}/runs/${run.id}/stream`}>Raw event stream</AsideLink>
-      )}
-      {run?.error && (
-        <div className="border-t border-border px-4 py-4">
-          <h3 className="text-xs font-medium text-destructive">Error</h3>
-          <pre className="mt-2 whitespace-pre-wrap break-words rounded-md bg-destructive/10 p-3 font-mono text-[11px] leading-5 text-destructive">
+    <div className="hidden w-60 shrink-0 overflow-y-auto px-4 pb-5 pt-4 xl:block">
+      <div className="flex flex-col gap-3 text-xs">
+        {run ? <StatusBadge status={run.status} /> : null}
+
+        {repo ? <RepoLine repo={repo} provider={provider} /> : null}
+
+        {branch ? (
+          <p className="flex min-w-0 items-center gap-1.5 text-foreground">
+            <span className="text-muted-foreground">On</span>
+            <GitBranchIcon className="size-3 shrink-0 text-muted-foreground" />
+            <span className="truncate font-mono">{branch}</span>
+          </p>
+        ) : null}
+
+        <ChangesLine added={changes.added} removed={changes.removed} />
+
+        {profile ? <ProfileLine profile={profile} /> : null}
+
+        {run ? <p className="text-muted-foreground">{absoluteTime(run.createdAt)}</p> : null}
+
+        {run?.error ? (
+          <pre className="mt-1 whitespace-pre-wrap break-words rounded-md bg-destructive/10 p-3 font-mono text-[11px] leading-5 text-destructive">
             {run.error}
           </pre>
-        </div>
-      )}
-    </aside>
-  );
-}
-
-function Detail({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-baseline justify-between gap-4 py-2.5">
-      <dt className="shrink-0 text-xs text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 text-right text-xs text-foreground">{children}</dd>
+        ) : null}
+      </div>
     </div>
   );
 }
 
-function AsideLink({ href, children }: { href: string; children: React.ReactNode }) {
+function RepoLine({ repo, provider }: { repo: string; provider: string | null }) {
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      className="flex items-center justify-between border-t border-border px-4 py-3 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+    <p className="flex min-w-0 items-center gap-1.5 text-foreground">
+      <ForgeIcon provider={provider} />
+      <span className="truncate font-mono">{repo}</span>
+    </p>
+  );
+}
+
+function ForgeIcon({ provider }: { provider: string | null }) {
+  const name = (provider ?? "").toLowerCase();
+  if (name === "azure-devops" || name === "azure_devops" || name === "ado") {
+    return (
+      <span title="Azure DevOps" className="inline-flex shrink-0 text-muted-foreground">
+        <AzureDevOpsMarkIcon className="size-3.5" />
+      </span>
+    );
+  }
+  return (
+    <span title="GitHub" className="inline-flex shrink-0 text-muted-foreground">
+      <GithubMarkIcon className="size-3.5" />
+    </span>
+  );
+}
+
+/** Title-case the profile slug and label it so "general" reads as an agent profile. */
+function ProfileLine({ profile }: { profile: string }) {
+  const label = profile
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+  return (
+    <p
+      className="flex min-w-0 items-center gap-1.5 text-muted-foreground"
+      title={`Agent profile: ${profile}`}
     >
-      {children}
-      <ExternalLinkIcon className="size-3" />
-    </a>
+      <WaypointsIcon className="size-3 shrink-0" />
+      <span className="truncate">
+        Profile · <span className="text-foreground">{label}</span>
+      </span>
+    </p>
+  );
+}
+
+function ChangesLine({ added, removed }: { added: number; removed: number }) {
+  if (added === 0 && removed === 0) {
+    return <p className="text-muted-foreground">No edits yet</p>;
+  }
+  return (
+    <p className="font-mono tabular-nums text-foreground">
+      <span className="text-muted-foreground">± Changes </span>
+      {added > 0 ? (
+        <span className="text-emerald-600 dark:text-emerald-400">+{added}</span>
+      ) : null}
+      {added > 0 && removed > 0 ? <span> </span> : null}
+      {removed > 0 ? <span className="text-red-600 dark:text-red-400">-{removed}</span> : null}
+    </p>
   );
 }
 
@@ -239,36 +271,84 @@ function AsideLink({ href, children }: { href: string; children: React.ReactNode
 function FollowUp({
   sessionId,
   repo,
+  previousModel,
+  previousModelConnectionId,
+  previousThinkingLevel,
   active,
   onQueued,
 }: {
   sessionId: string;
   repo: string;
+  previousModel: string;
+  previousModelConnectionId: string | null;
+  previousThinkingLevel: ThinkingLevel;
   active: boolean;
   onQueued: () => Promise<void>;
 }) {
   const [prompt, setPrompt] = useState("");
-  const [config, setConfig] = useState<ConfigResponse | null>(null);
+  const [modelConnections, setModelConnections] = useState<LlmConnectionSummary[]>([]);
+  const [modelSelection, setModelSelection] = useState("");
+  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>("off");
+  const [modelsLoading, setModelsLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
+    if (active) return;
+    let alive = true;
+    setModelsLoading(true);
     api
-      .getConfig()
-      .then(setConfig)
-      .catch(() => setConfig(null));
-  }, []);
+      .listLlmConnections()
+      .then((connections) => {
+        if (!alive) return;
+        setModelConnections(connections);
+        const selection = preferredModelSelection(
+          connections,
+          previousModelConnectionId,
+          previousModel,
+        );
+        setModelSelection(selection);
+        setThinkingLevel(
+          preferredThinkingLevel(selectedModel(connections, selection), previousThinkingLevel),
+        );
+      })
+      .catch((cause) => {
+        if (alive) setError(cause instanceof Error ? cause.message : String(cause));
+      })
+      .finally(() => {
+        if (alive) setModelsLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [active, previousModel, previousModelConnectionId, previousThinkingLevel]);
+
+  const selected = parseModelSelection(modelSelection);
+  const canSubmit = !active && !submitting && Boolean(prompt.trim()) && Boolean(selected);
 
   const submit = async () => {
-    if (active || submitting || !prompt.trim()) return;
+    if (!canSubmit || !selected) return;
     setSubmitting(true);
     setError(null);
     try {
-      await api.createSessionTurn(sessionId, prompt.trim());
+      await api.createSessionTurn(sessionId, {
+        prompt: prompt.trim(),
+        modelConnectionId: selected.connectionId,
+        modelId: selected.modelId,
+        thinkingLevel,
+      });
       setPrompt("");
       await onQueued();
       setSubmitting(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+      const connections = await api.listLlmConnections().catch(() => null);
+      if (connections) {
+        setModelConnections(connections);
+        setModelSelection(defaultModelSelection(connections));
+        const selection = defaultModelSelection(connections);
+        setThinkingLevel(preferredThinkingLevel(selectedModel(connections, selection)));
+      }
       setSubmitting(false);
     }
   };
@@ -280,13 +360,49 @@ function FollowUp({
         onChange={setPrompt}
         onSubmit={submit}
         placeholder={active ? "Pi is still working…" : `Follow up on ${repo}…`}
-        model={config?.model}
         submitLabel="Send"
+        submitEnabled={canSubmit}
         submitting={submitting}
-        disabled={active}
+        disabled={active || modelsLoading || modelConnections.length === 0}
         compact
+        tools={
+          <div className="flex min-w-0 items-center text-muted-foreground">
+            <ModelSelect
+              connections={modelConnections}
+              value={modelSelection}
+              onChange={(value) => {
+                setModelSelection(value);
+                setThinkingLevel(
+                  preferredThinkingLevel(selectedModel(modelConnections, value), thinkingLevel),
+                );
+              }}
+              disabled={active || modelsLoading}
+              ariaLabel="Model for next turn"
+              placeholder={modelsLoading ? "Loading models…" : "Choose model"}
+              className="h-7 min-w-0 max-w-44 border-0 bg-transparent px-1.5 text-xs shadow-none dark:bg-transparent"
+            />
+            <ThinkingLevelSelect
+              levels={
+                selectedModel(modelConnections, modelSelection)?.thinkingLevels ?? ["off"]
+              }
+              value={thinkingLevel}
+              onChange={setThinkingLevel}
+              disabled={active || modelsLoading}
+              className="h-7 min-w-0 max-w-36 border-0 bg-transparent px-1.5 text-xs shadow-none dark:bg-transparent"
+            />
+          </div>
+        }
       />
-      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+      {modelConnections.length === 0 && !modelsLoading ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Add a model connection in{" "}
+          <Link href="/settings" className="underline underline-offset-2">
+            Settings
+          </Link>{" "}
+          before continuing.
+        </p>
+      ) : null}
+      {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
     </div>
   );
 }

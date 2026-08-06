@@ -23,8 +23,14 @@ describe("durable sessions", () => {
     await parkSession(database, run, null, null);
 
     const results = await Promise.allSettled([
-      createSessionTurn(database, session.id, "First follow-up", "token-a"),
-      createSessionTurn(database, session.id, "Racing follow-up", "token-b"),
+      createSessionTurn(database, session.id, "First follow-up", "token-a", null, {
+        model: session.model,
+        modelConnectionId: session.modelConnectionId,
+      }),
+      createSessionTurn(database, session.id, "Racing follow-up", "token-b", null, {
+        model: session.model,
+        modelConnectionId: session.modelConnectionId,
+      }),
     ]);
 
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
@@ -57,6 +63,8 @@ describe("durable sessions", () => {
       session.id,
       "Inspect the same checkout",
       "token",
+      null,
+      { model: session.model, modelConnectionId: session.modelConnectionId },
     );
 
     expect(second.turnNumber).toBe(2);

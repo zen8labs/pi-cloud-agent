@@ -15,7 +15,10 @@ export function vcsRoutes(): Hono<AppEnv> {
 
   app.get("/connections", async (c) => {
     const user = c.get("user");
-    if (!user) return c.json({ error: "authentication required" }, 401);
+    if (!user) {
+      if (!c.get("config").auth.requireUser) return c.json({ connections: [] });
+      return c.json({ error: "authentication required" }, 401);
+    }
     return c.json(await listConnectionSummaries(c.get("database"), c.get("config"), user.id));
   });
 

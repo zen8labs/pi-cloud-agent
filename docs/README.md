@@ -18,6 +18,7 @@ None of these require touching the controller.
 |---|---|
 | [resumability.md](resumability.md) | run state, the queue, the reconciler. Read before touching any of them |
 | [secrets.md](secrets.md) | credentials, tokens, and anything that gets logged |
+| [model-connections.md](model-connections.md) | per-user model endpoints, Pi OAuth, and the vault migration seam |
 | [testing.md](testing.md) | what deserves a test, and the three test projects |
 | [operations.md](operations.md) | running it, debugging a run by symptom, live validation |
 

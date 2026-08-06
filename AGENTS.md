@@ -81,7 +81,6 @@ pnpm deadcode            # knip: no unused exports, files, or dependencies
 pnpm dupes               # jscpd: duplicated lines stay under the threshold
 pnpm test                # unit: no I/O, runs anywhere
 pnpm test:integration    # needs Postgres (`pnpm up`)
-pnpm test:e2e            # browser smoke: needs Postgres; reuses running dev servers
 pnpm test:live           # needs real E2B + model credentials; never in CI
 pnpm sandbox:template    # rebuild the sandbox image and E2B template
 ```

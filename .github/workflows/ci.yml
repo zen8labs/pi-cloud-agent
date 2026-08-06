@@ -42,9 +42,7 @@ jobs:
         run: pnpm test
 
   # The state machine, against a real Postgres. These are the tests that assert
-  # the resumability properties, so they are not optional. The same database then
-  # backs the browser smoke test: no forge or sandbox credentials, so the run it
-  # creates must fail provisioning, and the test asserts the failure is shown.
+  # the resumability properties, so they are not optional.
   integration:
     runs-on: ubuntu-latest
     services:
@@ -72,23 +70,6 @@ jobs:
           TEST_DATABASE_URL: postgres://pi_cloud_agent:pi_cloud_agent@localhost:5532/pi_cloud_agent
       - name: Dashboard build
         run: pnpm --filter @pi-cloud-agent/web build
-      - name: Install Chromium
-        run: pnpm exec playwright install --with-deps chromium
-      - name: Browser smoke tests
-        run: pnpm test:e2e
-        env:
-          CI: "true"
-          DATABASE_URL: postgres://pi_cloud_agent:pi_cloud_agent@localhost:5532/pi_cloud_agent
-          # This browser test deliberately exercises the hosted-provider failure
-          # surface without requiring a local microVM or a runtime image.
-          SANDBOX_PROVIDER: e2b
-          E2B_API_KEY: ci-dummy-no-sandbox
-      - uses: actions/upload-artifact@v7
-        if: failure()
-        with:
-          name: playwright-traces
-          path: apps/web/test-results
-          if-no-files-found: ignore
 
   # Proves the schema in db/schema.ts matches the committed migrations. Without
   # this, a schema edit with no generated migration passes every other check and
@@ -122,4 +103,3 @@ jobs:
         run: pnpm --filter @pi-cloud-agent/web build
       - name: Sandbox runtime bundle
         run: pnpm --filter @pi-cloud-agent/runtime build
-

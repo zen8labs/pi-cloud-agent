@@ -3,12 +3,13 @@ import type { Trigger } from "@pi-cloud-agent/protocol";
 import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach } from "vitest";
 import { type Config, configFrom } from "./config";
+import { createWebSession, upsertAppUser } from "./db/auth";
 import { closeDatabase, createDatabase, type Database } from "./db/client";
-
 import { createRun } from "./db/runs";
 import type { RunRow, SessionRow } from "./db/schema";
 import { createSessionWithRun } from "./db/sessions";
 import { createApp } from "./http/app";
+import { saveApiKeyConnection } from "./llm/connections";
 import { createLogger, type Logger } from "./logger";
 
 /**
@@ -25,7 +26,7 @@ export const TEST_DATABASE_URL =
   "postgres://pi_cloud_agent:pi_cloud_agent@localhost:5532/pi_cloud_agent_test";
 
 /** Connect to the already-migrated test database. See test-global-setup.ts. */
-function setupTestDatabase(): Database {
+export function setupTestDatabase(): Database {
   return createDatabase(TEST_DATABASE_URL);
 }
 
@@ -59,9 +60,9 @@ export function bindTestApp(
   });
 }
 
-async function resetTables(database: Database): Promise<void> {
+export async function resetTables(database: Database): Promise<void> {
   await database.execute(
-    sql`truncate table plugin_audit_log, plugin_oauth_tokens, plugin_oauth_clients, plugin_user_variables, plugin_user_state, plugin_settings, plugin_versions, plugins, web_sessions, oauth_states, vcs_connections, run_events, runs, sessions, app_users cascade`,
+    sql`truncate table plugin_audit_log, plugin_oauth_tokens, plugin_oauth_clients, plugin_user_variables, plugin_user_state, plugin_settings, plugin_versions, plugins, llm_connections, web_sessions, oauth_states, vcs_connections, run_events, runs, sessions, app_users cascade`,
   );
 }
 
@@ -69,13 +70,11 @@ export function testConfig(overrides: Record<string, string> = {}): Config {
   return configFrom({
     DATABASE_URL: TEST_DATABASE_URL,
     CONTROL_PLANE_URL: "http://localhost:8080",
-    AGENT_MODEL: "aigateway/test-model",
-    AIGATEWAY_BASE_URL: "https://gateway.test/v1",
-    AIGATEWAY_API_KEY: "test-model-key-0123456789",
     WEB_URL: "http://localhost:3000",
     APP_AUTH_REQUIRED: "false",
     APP_SESSION_SECRET: "test-session-secret-012345678901234567890123",
     VCS_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    LLM_ENCRYPTION_KEY: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
     GITHUB_APP_CLIENT_ID: "github-test-client",
     GITHUB_APP_CLIENT_SECRET: "github-test-secret",
     GITHUB_APP_REDIRECT_URI: "http://localhost:8080/auth/github/callback",
@@ -86,6 +85,41 @@ export function testConfig(overrides: Record<string, string> = {}): Config {
     LOG_LEVEL: "error",
     ...overrides,
   });
+}
+
+export async function seedTestUser(
+  database: Database,
+  config: Config,
+): Promise<{ userId: string; cookie: string; modelConnectionId: string }> {
+  const user = await upsertAppUser(database, {
+    githubUserId: "default-test-user",
+    login: "default-test-user",
+    displayName: "Default Test User",
+  });
+  const cookie = await createWebSession(database, user.id, config.auth.sessionSecret);
+  const connection = await saveApiKeyConnection(database, config, {
+    userId: user.id,
+    displayName: "Default test model",
+    provider: "test-provider",
+    api: "openai-completions",
+    baseUrl: "https://model.example.test/v1",
+    model: "test-model",
+    apiKey: "test-key",
+    contextWindow: 16_384,
+    maxTokens: 2_048,
+    isDefault: true,
+  });
+  return { userId: user.id, cookie, modelConnectionId: connection.id };
+}
+
+export function withTestModel(body: unknown, modelConnectionId: string): unknown {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return body;
+  return {
+    ...(body as Record<string, unknown>),
+    modelConnectionId: (body as Record<string, unknown>).modelConnectionId ?? modelConnectionId,
+    modelId: (body as Record<string, unknown>).modelId ?? "test-model",
+    thinkingLevel: (body as Record<string, unknown>).thinkingLevel ?? "off",
+  };
 }
 
 /**
@@ -118,15 +152,16 @@ export function manualTrigger(overrides: Partial<Trigger["repo"]> = {}): Trigger
 
 export async function seedRun(
   database: Database,
-  overrides: { profile?: string; trigger?: Trigger } = {},
+  overrides: { profile?: string; trigger?: Trigger; userId?: string } = {},
 ): Promise<RunRow> {
   const trigger = overrides.trigger ?? manualTrigger();
   return createRun(database, {
+    userId: overrides.userId,
     profile: overrides.profile ?? "general",
     provider: trigger.repo.provider,
     repoFullName: `${trigger.repo.owner}/${trigger.repo.name}`,
     trigger,
-    model: "aigateway/test-model",
+    model: "test-provider/test-model",
     callbackToken: randomBytes(16).toString("hex"),
   });
 }
@@ -144,7 +179,7 @@ export async function seedSession(
     repoFullName: `${trigger.repo.owner}/${trigger.repo.name}`,
     repo: trigger.repo,
     trigger,
-    model: "aigateway/test-model",
+    model: "test-provider/test-model",
     callbackToken: randomBytes(16).toString("hex"),
   });
 }

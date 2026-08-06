@@ -1,6 +1,16 @@
-import type { RepoRef, RunEventType, RunStatus, Trigger } from "@pi-cloud-agent/protocol";
+import type {
+  LlmApi,
+  LlmAuthType,
+  LlmModelOption,
+  RepoRef,
+  RunEventType,
+  RunStatus,
+  ThinkingLevel,
+  Trigger,
+} from "@pi-cloud-agent/protocol";
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   index,
   integer,
   jsonb,
@@ -74,6 +84,34 @@ export const oauthStates = pgTable(
   (table) => [index("oauth_states_expiry_idx").on(table.expiresAt)],
 );
 
+export const llmConnections = pgTable(
+  "llm_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => appUsers.id, { onDelete: "cascade" }),
+    displayName: text("display_name").notNull(),
+    provider: text("provider").notNull(),
+    authType: text("auth_type").notNull().$type<LlmAuthType>(),
+    api: text("api").notNull().$type<LlmApi>(),
+    baseUrl: text("base_url").notNull(),
+    model: text("model").notNull(),
+    models: jsonb("models").notNull().$type<LlmModelOption[]>(),
+    contextWindow: integer("context_window").notNull(),
+    maxTokens: integer("max_tokens").notNull(),
+    /** Encrypted JSON; never returned by the HTTP API. */
+    credential: text("credential").notNull(),
+    isDefault: boolean("is_default").notNull().default(false),
+    deletedAt: timestamptz("deleted_at"),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("llm_connections_user_updated_idx").on(table.userId, table.updatedAt.desc()),
+  ],
+);
+
 export const sessions = pgTable(
   "sessions",
   {
@@ -85,6 +123,9 @@ export const sessions = pgTable(
     repoFullName: text("repo_full_name").notNull(),
     repo: jsonb("repo").notNull().$type<RepoRef>(),
     model: text("model").notNull(),
+    modelConnectionId: uuid("model_connection_id").references(() => llmConnections.id, {
+      onDelete: "restrict",
+    }),
 
     /** Exactly one run may own a session workspace at a time. */
     activeRunId: uuid("active_run_id"),
@@ -137,6 +178,10 @@ export const runs = pgTable(
 
     /** Resolved at creation so a run is reproducible even if config changes. */
     model: text("model").notNull(),
+    thinkingLevel: text("thinking_level").notNull().default("medium").$type<ThinkingLevel>(),
+    modelConnectionId: uuid("model_connection_id").references(() => llmConnections.id, {
+      onDelete: "restrict",
+    }),
 
     /**
      * Plugins attached at provision: `{ name, version, components }[]`.
@@ -357,6 +402,7 @@ export type RunRow = typeof runs.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
 export type RunEventRow = typeof runEvents.$inferSelect;
 export type VcsConnectionRow = typeof vcsConnections.$inferSelect;
+export type LlmConnectionRow = typeof llmConnections.$inferSelect;
 export type OAuthStateRow = typeof oauthStates.$inferSelect;
 export type AppUserRow = typeof appUsers.$inferSelect;
 export type WebSessionRow = typeof webSessions.$inferSelect;

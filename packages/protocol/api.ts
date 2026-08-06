@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { RunEvent } from "./events";
+import { type ThinkingLevel, thinkingLevelSchema } from "./llm";
 import type { VcsRepository } from "./repo";
 import type { RunStatus } from "./run";
 
@@ -19,6 +20,11 @@ export const createRunRequestSchema = z.object({
   provider: z.string().default("github"),
   /** Branch to clone. Omitted means "ask the provider for the default". */
   branch: z.string().nullish(),
+  /** User-owned model connection. Required for every task. */
+  modelConnectionId: z.string().uuid(),
+  /** Model selected from the connection's available model catalog. */
+  modelId: z.string().min(1),
+  thinkingLevel: thinkingLevelSchema,
 });
 
 export type CreateRunRequest = z.input<typeof createRunRequestSchema>;
@@ -26,6 +32,11 @@ export type CreateRunBody = z.output<typeof createRunRequestSchema>;
 
 export const createSessionTurnRequestSchema = z.object({
   prompt: z.string().trim().min(1),
+  /** User-owned model connection selected for this turn. */
+  modelConnectionId: z.string().uuid(),
+  /** Model selected from the connection's current catalog. */
+  modelId: z.string().min(1),
+  thinkingLevel: thinkingLevelSchema,
 });
 
 export type CreateSessionTurnRequest = z.infer<typeof createSessionTurnRequestSchema>;
@@ -44,6 +55,8 @@ export interface RunSummary {
   repo: string;
   /** Resolved when the run was created, so it stays accurate if config changes. */
   model: string;
+  modelConnectionId: string | null;
+  thinkingLevel: ThinkingLevel;
   error: string | null;
   createdAt: string;
   updatedAt: string;
@@ -54,6 +67,8 @@ export interface RunSummary {
 export interface RunDetail extends RunSummary {
   /** The request the agent was given, when the trigger carried one. */
   prompt: string | null;
+  /** Branch the run cloned (or the repo default when none was pinned). */
+  branch: string | null;
   headSha: string | null;
   /** Set once a sandbox exists; cleared conceptually when it is reclaimed. */
   sandboxStoppedAt: string | null;
@@ -77,6 +92,7 @@ export interface SessionSummary {
   provider: string;
   repo: string;
   model: string;
+  modelConnectionId: string | null;
   activeRunId: string | null;
   latestRunId: string;
   workspaceAvailable: boolean;
@@ -99,8 +115,6 @@ export interface ProfileInfo {
 }
 
 export interface ConfigResponse {
-  /** The single configured model id, e.g. "openai/gpt-5.6-sol". */
-  model: string;
   profiles: ProfileInfo[];
   defaultProfile: string;
 }

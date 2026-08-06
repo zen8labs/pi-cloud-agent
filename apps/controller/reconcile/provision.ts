@@ -66,6 +66,8 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
       userId: run.userId,
       provider: run.provider,
       repoFullName: run.repoFullName,
+      modelConnectionId: run.modelConnectionId,
+      modelSnapshot: run.model,
     });
 
     const wallClockSeconds = Math.min(
@@ -76,7 +78,7 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
     const session = await getSessionForRun(database, run);
     const workspaceResumed = Boolean(session?.sandboxId);
     const env = {
-      ...buildEnv(run, task, config, workspaceResumed, resolved.skillText),
+      ...buildEnv(run, task, config, workspaceResumed, resolved.skillText, credentials.model),
       ...credentials.env,
     };
     const secrets: Record<string, Secret> = {
@@ -207,6 +209,7 @@ function buildEnv(
   config: Config,
   workspaceResumed: boolean,
   skillText: string | undefined,
+  model: import("../llm/connections").ResolvedLlmModel,
 ): Record<string, string> {
   const { repo } = task;
   return {
@@ -218,10 +221,13 @@ function buildEnv(
     [SANDBOX_ENV.profile]: task.profile,
     [SANDBOX_ENV.taskPrompt]: buildTaskPrompt(skillText, task.prompt, run.turnNumber),
 
-    [SANDBOX_ENV.model]: run.model,
-    [SANDBOX_ENV.modelBaseUrl]: config.model.baseUrl,
-    [SANDBOX_ENV.modelContextWindow]: String(config.model.contextWindow),
-    [SANDBOX_ENV.modelMaxTokens]: String(config.model.maxTokens),
+    [SANDBOX_ENV.model]: `${model.provider}/${model.name}`,
+    [SANDBOX_ENV.modelApi]: model.api,
+    [SANDBOX_ENV.modelAuthType]: model.authType,
+    [SANDBOX_ENV.modelBaseUrl]: model.baseUrl,
+    [SANDBOX_ENV.modelContextWindow]: String(model.contextWindow),
+    [SANDBOX_ENV.modelMaxTokens]: String(model.maxTokens),
+    [SANDBOX_ENV.modelThinkingLevel]: run.thinkingLevel,
 
     [SANDBOX_ENV.repoProvider]: repo.provider,
     [SANDBOX_ENV.repoHost]: repo.host,

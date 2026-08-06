@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { type Context, Hono, type Next } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { createWebSession, deleteWebSession } from "../db/auth";
 import type { AppUserRow } from "../db/schema";
@@ -12,6 +12,14 @@ type SameSite = "Lax" | "None";
 
 export function userOwns(user: AppUserRow | null, ownerId: string | null): boolean {
   return user ? user.id === ownerId : ownerId === null;
+}
+
+export async function requireAuthenticatedUser(c: Context<AppEnv>, next: Next): Promise<void> {
+  if (!c.get("user")) {
+    c.res = c.json({ error: "authentication required" }, 401);
+    return;
+  }
+  await next();
 }
 
 export function authRoutes(): Hono<AppEnv> {

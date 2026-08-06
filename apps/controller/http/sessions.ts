@@ -17,14 +17,18 @@ import {
   SessionBusyError,
   SessionNotFoundError,
 } from "../db/sessions";
-import { userOwns } from "./auth";
+import type { resolveLlmModel } from "../llm/connections";
+import { requireAuthenticatedUser, userOwns } from "./auth";
 import type { AppEnv } from "./deps";
 import { readManualRouteRequest } from "./manual";
+import { resolveRequestedLlmModel } from "./model-selection";
 import { toDetail } from "./runs";
 
 /** Durable chat sessions. Each user turn creates one ordinary run. */
 export function sessionRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
+
+  app.use("*", requireAuthenticatedUser);
 
   app.get("/", async (c) => {
     const limit = Math.min(Number(c.req.query("limit") ?? 100) || 100, 200);
@@ -36,20 +40,34 @@ export function sessionRoutes(): Hono<AppEnv> {
   });
 
   app.post("/", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "authentication required" }, 401);
     const config = c.get("config");
     const resolved = await readManualRouteRequest(c);
     if (!resolved.ok) return c.json(resolved.error, 422);
     const { body, request: manual } = resolved;
+    const selected = await resolveRequestedLlmModel(
+      c.get("database"),
+      config,
+      user.id,
+      body.modelConnectionId,
+      body.modelId,
+      body.thinkingLevel,
+    );
+    if (!selected.ok) return c.json({ error: selected.error }, 422);
+    const model = selected.model;
 
     const created = await createSessionWithRun(c.get("database"), {
-      userId: c.get("user")?.id ?? null,
+      userId: user.id,
       title: titleFrom(body.prompt, body.repo),
       profile: manual.profile,
       provider: body.provider,
       repoFullName: body.repo,
       repo: manual.repo,
       trigger: manual.trigger,
-      model: config.model.id,
+      model: `${model.provider}/${model.name}`,
+      modelConnectionId: model.connectionId,
+      thinkingLevel: body.thinkingLevel,
       callbackToken: randomBytes(32).toString("hex"),
     });
     c.get("log").info("session queued", {
@@ -75,32 +93,83 @@ export function sessionRoutes(): Hono<AppEnv> {
   });
 
   app.post("/:sessionId/turns", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "authentication required" }, 401);
     const parsed = createSessionTurnRequestSchema.safeParse(
       await c.req.json().catch(() => null),
     );
     if (!parsed.success) return c.json({ error: "invalid request" }, 422);
-    try {
-      const run = await createSessionTurn(
-        c.get("database"),
-        c.req.param("sessionId"),
-        parsed.data.prompt,
-        randomBytes(32).toString("hex"),
-        c.get("user")?.id ?? null,
-      );
-      c.get("log").info("session turn queued", {
-        sessionId: run.sessionId,
-        runId: run.id,
-        turnNumber: run.turnNumber,
-      });
-      return c.json(toDetail(run), 201);
-    } catch (error) {
-      if (error instanceof SessionNotFoundError) return c.json({ error: error.message }, 404);
-      if (error instanceof SessionBusyError) return c.json({ error: error.message }, 409);
-      throw error;
-    }
+    const result = await queueSessionTurn(
+      c.get("database"),
+      c.get("config"),
+      user.id,
+      c.req.param("sessionId"),
+      parsed.data.prompt,
+      parsed.data.modelConnectionId,
+      parsed.data.modelId,
+      parsed.data.thinkingLevel,
+    );
+    if (!result.ok) return c.json({ error: result.error }, result.status);
+    c.get("log").info("session turn queued", {
+      sessionId: result.run.sessionId,
+      runId: result.run.id,
+      turnNumber: result.run.turnNumber,
+    });
+    return c.json(toDetail(result.run), 201);
   });
 
   return app;
+}
+
+type SessionTurnResult =
+  | { ok: true; run: RunRow }
+  | { ok: false; error: string; status: 404 | 409 | 422 };
+
+async function queueSessionTurn(
+  database: Parameters<typeof getRun>[0],
+  config: Parameters<typeof resolveLlmModel>[1],
+  userId: string,
+  sessionId: string,
+  prompt: string,
+  modelConnectionId: string,
+  modelId: string,
+  thinkingLevel: import("@pi-cloud-agent/protocol").ThinkingLevel,
+): Promise<SessionTurnResult> {
+  const session = await getSession(database, sessionId, userId);
+  if (!session) return { ok: false, error: "session not found", status: 404 };
+  const selected = await resolveRequestedLlmModel(
+    database,
+    config,
+    userId,
+    modelConnectionId,
+    modelId,
+    thinkingLevel,
+  );
+  if (!selected.ok) return { ok: false, error: selected.error, status: 422 };
+
+  try {
+    const run = await createSessionTurn(
+      database,
+      sessionId,
+      prompt,
+      randomBytes(32).toString("hex"),
+      userId,
+      {
+        model: `${selected.model.provider}/${selected.model.name}`,
+        modelConnectionId: selected.model.connectionId,
+        thinkingLevel,
+      },
+    );
+    return { ok: true, run };
+  } catch (error) {
+    if (error instanceof SessionNotFoundError) {
+      return { ok: false, error: error.message, status: 404 };
+    }
+    if (error instanceof SessionBusyError) {
+      return { ok: false, error: error.message, status: 409 };
+    }
+    throw error;
+  }
 }
 
 async function toSessionSummary(
@@ -116,6 +185,7 @@ async function toSessionSummary(
     provider: session.provider,
     repo: session.repoFullName,
     model: session.model,
+    modelConnectionId: session.modelConnectionId,
     activeRunId: session.activeRunId,
     latestRunId: session.latestRunId,
     workspaceAvailable: Boolean(session.sandboxId),

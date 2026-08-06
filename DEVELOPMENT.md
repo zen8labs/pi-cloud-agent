@@ -4,7 +4,7 @@
 
 ### Prerequisites
 
-Install Node.js 22.19 or newer, pnpm 11.1.3, and Docker Desktop. The default sandbox provider is local microSandbox, so Docker and Apple Silicon or Linux KVM are required. You also need a [GitHub App](#github-app-setup) and an OpenAI-compatible model gateway.
+Install Node.js 22.19 or newer, pnpm 11.1.3, and Docker Desktop. The default sandbox provider is local microSandbox, so Docker and Apple Silicon or Linux KVM are required. You also need a [GitHub App](#github-app-setup). Model connections are added from **Settings** after signing in.
 
 ### 1. Configure credentials
 
@@ -17,17 +17,15 @@ cp .env.example .env
 Fill these values in `.env`:
 
 ```dotenv
-AIGATEWAY_BASE_URL=https://<your-openai-compatible-gateway>/v1
-AIGATEWAY_API_KEY=<your-model-api-key>
-
 APP_SESSION_SECRET=<at-least-32-random-characters>
 VCS_ENCRYPTION_KEY=<64-hex-characters>
+LLM_ENCRYPTION_KEY=<different-64-hex-characters>
 
 GITHUB_APP_CLIENT_ID=<github-app-client-id>
 GITHUB_APP_CLIENT_SECRET=<github-app-client-secret>
 ```
 
-For direct OpenAI API access, use `AGENT_MODEL=openai/gpt-5.6-sol`, `AIGATEWAY_BASE_URL=https://api.openai.com/v1`, and an OpenAI API key. The `openai/` prefix selects the provider in this application; only `gpt-5.6-sol` is sent as the model name to OpenAI.
+After signing in, add an API-key or subscription connection in **Settings**. The endpoint type selection derives the provider and API format; users do not enter a provider ID.
 
 Keep the default local sandbox values unless you are intentionally using E2B.
 
@@ -110,7 +108,7 @@ Run the normal checks with:
 make verify
 ```
 
-Useful narrower checks are `pnpm lint`, `pnpm test`, `pnpm test:integration`, `pnpm test:e2e`, and `pnpm docs:check`. A real sandbox/model run uses credentials and may incur cost:
+Useful narrower checks are `pnpm lint`, `pnpm test`, `pnpm test:integration`, and `pnpm docs:check`. A real sandbox/model run uses credentials and may incur cost:
 
 ```bash
 LIVE_TEST_REPO=owner/repository pnpm test:live

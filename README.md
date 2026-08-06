@@ -35,7 +35,7 @@ The execution unit is a **run**: an event starts it, it ends, and its log is imm
 
 ## Development
 
-Copy `.env.example` to `.env`, add the GitHub App and model credentials, run `make setup`, then `make dev`. [DEVELOPMENT.md](DEVELOPMENT.md) has the short quick start and optional provider configuration.
+Copy `.env.example` to `.env`, add the GitHub App settings, run `make setup`, then `make dev`. Sign in and add a model connection from **Settings**. [DEVELOPMENT.md](DEVELOPMENT.md) has the short quick start and optional provider setup.
 
 ## Why it is this small
 
@@ -45,7 +45,7 @@ The interesting decisions are subtractions:
 - **No event bus, no Redis.** Postgres already stores every event; `LISTEN/NOTIFY` is a wake-up hint and polling is the correctness baseline.
 - **No publishing step.** The agent posts its own review. No output parser, no findings table, and therefore no way for the controller to disagree with what the agent actually did.
 - **A lifecycle-shaped sandbox contract.** `create`, `resume`, `suspend`, `deleteWorkspace`, and `stop`. The sandbox remains outbound-only; persistence is a provider concern, not an agent server. → [docs/adding-a-sandbox-provider.md](docs/adding-a-sandbox-provider.md)
-- **One model.** One configured model means one credential, so there is no provider matrix to leak the wrong key into a sandbox.
+- **User-owned model connections.** The controller resolves the selected connection for each run, while the sandbox receives only the model configuration and credential needed for that run. → [docs/model-connections.md](docs/model-connections.md)
 
 ## Layout
 

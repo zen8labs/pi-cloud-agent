@@ -1,28 +1,37 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @source "../node_modules/streamdown/dist/*.js";
+@source "../node_modules/@streamdown/math/dist/*.js";
+@source "../node_modules/@streamdown/mermaid/dist/*.js";
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+  Codex-inspired surfaces: the workspace stays calm and open while the
+  navigation, composer, and selected controls carry just enough contrast to
+  establish hierarchy without relying on heavy shadows.
+*/
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.21 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.21 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.21 0 0);
-  --primary: oklch(0.21 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.962 0 0);
-  --secondary-foreground: oklch(0.21 0 0);
-  --muted: oklch(0.962 0 0);
-  --muted-foreground: oklch(0.51 0 0);
-  --accent: oklch(0.948 0 0);
-  --accent-foreground: oklch(0.21 0 0);
-  --destructive: oklch(0.56 0.2 27);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.885 0 0);
-  --ring: oklch(0.71 0 0);
+  --background: #ffffff;
+  --foreground: #2f2f2f;
+  --card: #ffffff;
+  --card-foreground: #2f2f2f;
+  --popover: #ffffff;
+  --popover-foreground: #2f2f2f;
+  --primary: #2f2f2f;
+  --primary-foreground: #fafafa;
+  --secondary: #f1f1f2;
+  --secondary-foreground: #2f2f2f;
+  --muted: #f7f7f8;
+  --muted-foreground: #737373;
+  --accent: #e9e9eb;
+  --accent-foreground: #2f2f2f;
+  --destructive: #dc2626;
+  --border: #e5e5e7;
+  --input: #d9d9dc;
+  --ring: #a3a3a3;
+  --sidebar: #f7f7f8;
+  --composer: #f7f7f8;
   --radius: 0.5rem;
   --color-link: #2563eb;
   --brand: #ff9b26;
@@ -36,24 +45,26 @@
 
 [data-theme="dark"],
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.93 0 0);
-  --card: oklch(0.17 0 0);
-  --card-foreground: oklch(0.93 0 0);
-  --popover: oklch(0.19 0 0);
-  --popover-foreground: oklch(0.93 0 0);
-  --primary: oklch(0.93 0 0);
-  --primary-foreground: oklch(0.21 0 0);
-  --secondary: oklch(0.21 0 0);
-  --secondary-foreground: oklch(0.93 0 0);
-  --muted: oklch(0.21 0 0);
-  --muted-foreground: oklch(0.66 0 0);
-  --accent: oklch(0.225 0 0);
-  --accent-foreground: oklch(0.93 0 0);
-  --destructive: oklch(0.64 0.21 25);
-  --border: oklch(0.25 0 0);
-  --input: oklch(0.27 0 0);
-  --ring: oklch(0.5 0 0);
+  --background: #212121;
+  --foreground: #ececec;
+  --card: #212121;
+  --card-foreground: #ececec;
+  --popover: #303030;
+  --popover-foreground: #ececec;
+  --primary: #ececec;
+  --primary-foreground: #242424;
+  --secondary: #333333;
+  --secondary-foreground: #ececec;
+  --muted: #2b2b2b;
+  --muted-foreground: #a1a1a1;
+  --accent: #3b3b3b;
+  --accent-foreground: #ececec;
+  --destructive: #f87171;
+  --border: #383838;
+  --input: #454545;
+  --ring: #6b6b6b;
+  --sidebar: #2b2c2d;
+  --composer: #303030;
   --color-link: #65a8ff;
   --status-queued: #fbbf24;
   --status-provisioning: #38bdf8;
@@ -84,6 +95,8 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-composer: var(--composer);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -123,25 +136,24 @@
 @media (prefers-reduced-motion: reduce) {
   .sign-in-rise, .iso-float { animation: none; }
 }
-.app-shell { display: grid; min-height: 100dvh; grid-template-columns: 252px minmax(0, 1fr); }
+.app-shell { display: grid; height: 100dvh; grid-template-columns: 252px minmax(0, 1fr); overflow: hidden; }
 .app-shell.nav-collapsed { grid-template-columns: 46px minmax(0, 1fr); }
-.nav-rail { display: flex; flex-direction: column; align-items: center; border-right: 1px solid var(--border); background: oklch(0.974 0 0); padding: 10px 0; }
-.dark .nav-rail { background: oklch(0.165 0 0); }
+.nav-rail { display: flex; min-height: 0; height: 100%; flex-direction: column; align-items: center; border-right: 1px solid var(--border); background: var(--sidebar); padding: 10px 0; }
 .rail-link { display: grid; width: 2rem; height: 2rem; place-items: center; border-radius: 0.5rem; color: var(--muted-foreground); transition: color 120ms, background 120ms; }
 .rail-link:hover { background: var(--accent); color: var(--foreground); }
-.app-main { min-width: 0; height: 100dvh; overflow: hidden; background: var(--background); }
-.side-nav { display: flex; min-height: 0; flex-direction: column; border-right: 1px solid var(--border); background: oklch(0.974 0 0); }
-.dark .side-nav { background: oklch(0.165 0 0); }
+.app-main { min-width: 0; min-height: 0; height: 100%; overflow: hidden; background: var(--background); }
+.side-nav { display: flex; min-height: 0; height: 100%; flex-direction: column; overflow: hidden; border-right: 1px solid var(--border); background: var(--sidebar); }
 .mobile-nav { display: none; }
-.nav-label { padding: 0 0.5rem 0.375rem; font-size: 0.6875rem; font-weight: 500; color: color-mix(in oklab, var(--muted-foreground) 72%, transparent); }
+.nav-label { padding: 0 0.5rem 0.375rem; font-size: 0.6875rem; font-weight: 500; color: color-mix(in oklab, var(--muted-foreground) 80%, transparent); }
 .side-nav-link { display: flex; align-items: center; gap: 0.5rem; height: 2rem; border-radius: 0.5rem; padding-inline: 0.5rem; color: var(--muted-foreground); font-size: 0.8125rem; transition: color 120ms, background 120ms; }
 .side-nav-link:hover { background: var(--accent); color: var(--foreground); }
 .side-nav-link.is-active { background: var(--accent); color: var(--foreground); font-weight: 500; }
 .account-menu-item { display: flex; width: 100%; align-items: center; gap: 0.5rem; border-radius: 0.5rem; padding: 0.5rem 0.625rem; color: var(--muted-foreground); font-size: 0.75rem; transition: color 120ms, background 120ms; }
 .account-menu-item:hover { background: var(--accent); color: var(--foreground); }
-.history-link { display: flex; min-width: 0; align-items: center; gap: 0.5rem; height: 1.875rem; border-radius: 0.5rem; padding-inline: 0.5rem; color: color-mix(in oklab, var(--foreground) 76%, transparent); font-size: 0.8125rem; line-height: 1.25rem; transition: background 120ms, color 120ms; }
+.history-link { display: flex; min-width: 0; align-items: center; gap: 0.5rem; height: 1.875rem; border-radius: 0.5rem; padding-inline: 0.5rem; color: color-mix(in oklab, var(--foreground) 78%, transparent); font-size: 0.8125rem; line-height: 1.25rem; transition: background 120ms, color 120ms; }
 .history-link:hover { background: var(--accent); color: var(--foreground); }
 .history-link.is-active { background: var(--accent); color: var(--foreground); }
+.app-header { background: var(--background); }
 .activity-line > summary::-webkit-details-marker { display: none; }
 .page-scroll { height: 100%; overflow-y: auto; }
 .page-wrap { width: 100%; max-width: 1120px; margin-inline: auto; padding: 2rem clamp(1.25rem, 4vw, 3rem) 4rem; }
@@ -152,10 +164,10 @@
 ::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: color-mix(in oklab, var(--muted-foreground) 45%, transparent); background-clip: padding-box; }
 
 @media (max-width: 760px) {
-  .app-shell, .app-shell.nav-collapsed { display: block; padding-top: 48px; }
+  .app-shell, .app-shell.nav-collapsed { display: block; height: 100dvh; padding-top: 48px; }
   .app-main { height: calc(100dvh - 48px); }
   .side-nav, .nav-rail { display: none; }
-  .mobile-nav { position: fixed; inset: 0 0 auto; z-index: 50; display: flex; height: 48px; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); background: color-mix(in oklab, var(--background) 92%, transparent); padding-inline: 0.75rem; backdrop-filter: blur(16px); }
+  .mobile-nav { position: fixed; inset: 0 0 auto; z-index: 50; display: flex; height: 48px; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); background: var(--sidebar); padding-inline: 0.75rem; }
   .mobile-nav-link { display: grid; width: 2rem; height: 2rem; place-items: center; border-radius: 0.5rem; color: var(--muted-foreground); }
   .mobile-nav-link-active { background: var(--accent); color: var(--foreground); }
   .page-wrap { padding: 1.5rem 1rem 3rem; }
