@@ -156,12 +156,12 @@ export function LlmConnectionSection({
     }
   };
 
-  const connectSubscription = async (provider: "chatgpt" | "claude") => {
-    setBusy(`oauth:${provider}`);
+  const connectSubscription = async () => {
+    setBusy("oauth:chatgpt");
     setError(null);
     const authWindow = window.open("about:blank", "pi-cloud-agent-oauth");
     try {
-      const flow = await api.startLlmOAuth(provider);
+      const flow = await api.startLlmOAuth();
       const pendingEvents: Promise<void>[] = [];
       await api.streamLlmOAuth(flow.eventsUrl, (event) => {
         pendingEvents.push(
@@ -207,27 +207,17 @@ export function LlmConnectionSection({
       <section className="rounded-xl border border-border bg-card p-4">
         <h3 className="text-sm font-medium">Add a model</h3>
         <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-          Authenticate to use your ChatGPT/Claude subscriptions or define a custom model
-          endpoint
+          Connect your AI subscription or define a custom model endpoint
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
           <Button
             type="button"
-            onClick={() => void connectSubscription("chatgpt")}
+            onClick={() => void connectSubscription()}
             disabled={busy !== null}
             variant="outline"
             size="sm"
           >
-            {busy === "oauth:chatgpt" ? "Connecting…" : "Connect ChatGPT plan"}
-          </Button>
-          <Button
-            type="button"
-            onClick={() => void connectSubscription("claude")}
-            disabled={busy !== null}
-            variant="outline"
-            size="sm"
-          >
-            {busy === "oauth:claude" ? "Connecting…" : "Connect Claude plan"}
+            {busy === "oauth:chatgpt" ? "Connecting…" : "Connect Codex"}
           </Button>
         </div>
         <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground">

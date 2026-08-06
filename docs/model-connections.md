@@ -10,7 +10,7 @@ Deleting a connection removes it from the active Settings list immediately. Runs
 
 API-key connections support OpenAI-compatible Chat Completions, OpenAI Responses, and Anthropic Messages endpoints. LiteLLM works when its proxy exposes one of the supported OpenAI-compatible APIs. The Test action sends one minimal request using the selected API format, endpoint, model, and credential: `POST /chat/completions`, `POST /responses`, or `POST /messages` with a one-token budget. It is a real provider request and may count as usage; a non-2xx response is shown to the user instead of being reported as success.
 
-Pi's native OAuth providers are exposed as subscription connection buttons for ChatGPT Codex and Claude. Pi owns the provider login and token refresh. The browser receives only short-lived OAuth-flow events; the controller stores the resulting credential encrypted. A Claude Pro/Max login must not be described as Anthropic API quota: Anthropic's subscription and Console API billing are separate, and third-party harness usage can have provider-specific policy or billing implications.
+Pi's native ChatGPT OAuth provider is exposed as a ChatGPT Codex subscription connection button. Pi owns the provider login and token refresh. The browser receives only short-lived OAuth-flow events; the controller stores the resulting credential encrypted.
 
 Every task resolves a user-owned model connection. There is no deployment-wide model credential.
 

@@ -284,10 +284,7 @@ export function toSummary(row: LlmConnectionRow): LlmConnectionSummary {
     contextWindow: row.contextWindow,
     maxTokens: row.maxTokens,
     isDefault: row.isDefault,
-    warning:
-      row.authType === "oauth" && row.provider === "anthropic"
-        ? "Claude subscription usage may be billed as extra usage."
-        : null,
+    warning: null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

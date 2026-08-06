@@ -177,10 +177,8 @@ export const api = {
       method: "DELETE",
     }),
 
-  startLlmOAuth: (
-    provider: "chatgpt" | "claude",
-  ): Promise<{ flowId: string; eventsUrl: string }> =>
-    request<{ flowId: string; eventsUrl: string }>(`/llm/connections/oauth/${provider}/start`, {
+  startLlmOAuth: (): Promise<{ flowId: string; eventsUrl: string }> =>
+    request<{ flowId: string; eventsUrl: string }>("/llm/connections/oauth/chatgpt/start", {
       method: "POST",
     }),
 

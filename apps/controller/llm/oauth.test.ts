@@ -45,7 +45,7 @@ describe("OAuth sign-in flow lifetime", () => {
       flowTimeoutMs: 100,
       terminalRetentionMs: 0,
     });
-    const flowId = manager.start("user-1", "chatgpt");
+    const flowId = manager.start("user-1");
     const events: OAuthFlowEvent[] = [];
     manager.subscribe(flowId, "user-1", (event) => events.push(event));
 
@@ -63,10 +63,10 @@ describe("OAuth sign-in flow lifetime", () => {
     const manager = new OAuthFlowManager(UNUSED_DATABASE, UNUSED_CONFIG, {
       createRuntime: async () => pendingRuntime(aborted),
     });
-    const firstFlowId = manager.start("user-1", "chatgpt");
+    const firstFlowId = manager.start("user-1");
     await settle();
 
-    manager.start("user-1", "chatgpt");
+    manager.start("user-1");
     await settle();
 
     expect(aborted).toHaveBeenCalledOnce();

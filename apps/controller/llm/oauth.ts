@@ -9,34 +9,21 @@ import type {
 } from "@earendil-works/pi-ai";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import type { LlmApi, LlmConnectionSummary } from "@pi-cloud-agent/protocol";
+import type { LlmConnectionSummary } from "@pi-cloud-agent/protocol";
 import type { Config } from "../config";
 import type { Database } from "../db/client";
 import { listLlmConnections } from "../db/llm-connections";
 import { saveOAuthConnections, toSummary } from "./connections";
 
-export type OAuthProvider = "chatgpt" | "claude";
-
 const FLOW_TIMEOUT_MS = 10 * 60_000;
 const TERMINAL_RETENTION_MS = 5 * 60_000;
 
-const PROVIDERS: Record<
-  OAuthProvider,
-  { piId: string; displayName: string; api: LlmApi; baseUrl: string }
-> = {
-  chatgpt: {
-    piId: "openai-codex",
-    displayName: "ChatGPT plan (Codex)",
-    api: "openai-codex-responses",
-    baseUrl: "https://chatgpt.com/backend-api",
-  },
-  claude: {
-    piId: "anthropic",
-    displayName: "Claude plan",
-    api: "anthropic-messages",
-    baseUrl: "https://api.anthropic.com",
-  },
-};
+const PROVIDER = {
+  piId: "openai-codex",
+  displayName: "Codex",
+  api: "openai-codex-responses",
+  baseUrl: "https://chatgpt.com/backend-api",
+} as const;
 
 export type OAuthFlowEvent =
   | { type: "auth"; event: AuthEvent }
@@ -49,7 +36,6 @@ type OauthPrompt = Omit<AuthPrompt, "signal">;
 interface OAuthFlow {
   id: string;
   userId: string;
-  provider: OAuthProvider;
   events: OAuthFlowEvent[];
   subscribers: Set<(event: OAuthFlowEvent) => void>;
   pendingPrompt: ((value: string) => void) | null;
@@ -77,16 +63,15 @@ export class OAuthFlowManager {
     private readonly options: OAuthFlowManagerOptions = {},
   ) {}
 
-  start(userId: string, provider: OAuthProvider): string {
+  start(userId: string): string {
     for (const existing of this.flows.values()) {
-      if (existing.userId === userId && existing.provider === provider && !existing.terminal) {
+      if (existing.userId === userId && !existing.terminal) {
         existing.abortController.abort(new Error("OAuth sign-in superseded by a new attempt"));
       }
     }
     const flow: OAuthFlow = {
       id: randomUUID(),
       userId,
-      provider,
       events: [],
       subscribers: new Set(),
       pendingPrompt: null,
@@ -132,7 +117,6 @@ export class OAuthFlowManager {
       this.options.flowTimeoutMs ?? FLOW_TIMEOUT_MS,
     );
     try {
-      const provider = PROVIDERS[flow.provider];
       const runtime = await this.createRuntime();
       if (flow.abortController.signal.aborted) {
         throw abortError(flow.abortController.signal);
@@ -142,17 +126,17 @@ export class OAuthFlowManager {
         prompt: (prompt) => this.prompt(flow, prompt),
         notify: (event) => this.emit(flow, { type: "auth", event }),
       };
-      const credential = await runtime.login(provider.piId, "oauth", interaction);
-      const models = runtime.getModels(provider.piId);
+      const credential = await runtime.login(PROVIDER.piId, "oauth", interaction);
+      const models = runtime.getModels(PROVIDER.piId);
       if (models.length === 0)
-        throw new Error(`Pi did not provide models for ${provider.piId}`);
+        throw new Error(`Pi did not provide models for ${PROVIDER.piId}`);
       const connections = await listLlmConnections(this.database, flow.userId);
       const row = await saveOAuthConnections(this.database, this.config, {
         userId: flow.userId,
-        displayName: provider.displayName,
-        provider: provider.piId,
-        api: provider.api,
-        baseUrl: provider.baseUrl,
+        displayName: PROVIDER.displayName,
+        provider: PROVIDER.piId,
+        api: PROVIDER.api,
+        baseUrl: PROVIDER.baseUrl,
         models: models.map((model) => ({
           id: model.id,
           baseUrl: model.baseUrl,
@@ -190,11 +174,7 @@ export class OAuthFlowManager {
   }
 
   private prompt(flow: OAuthFlow, prompt: AuthPrompt): Promise<string> {
-    if (
-      flow.provider === "chatgpt" &&
-      prompt.type === "select" &&
-      prompt.options.some((option) => option.id === "browser")
-    ) {
+    if (prompt.type === "select" && prompt.options.some((option) => option.id === "browser")) {
       // Pi exposes browser/device-code selection for its CLI. The web button
       // already means browser login, so do not make the user answer a second
       // prompt while the pre-opened tab is still blank.
@@ -279,12 +259,4 @@ function asOAuthCredential(credential: Credential): {
     throw new Error("Pi returned a non-OAuth credential");
   }
   return credential;
-}
-
-export function isOAuthProvider(value: string): value is OAuthProvider {
-  return value in PROVIDERS;
-}
-
-export function oauthProviderNames(): OAuthProvider[] {
-  return Object.keys(PROVIDERS) as OAuthProvider[];
 }
