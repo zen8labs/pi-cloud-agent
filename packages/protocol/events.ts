@@ -28,6 +28,7 @@ export const runEventInputSchema = z.discriminatedUnion("type", [
       callId: z.string(),
       tool: z.string(),
       status: toolCallStatusSchema,
+      turnNumber: z.number().int().positive().optional(),
       args: z.unknown().optional(),
       output: z.string().optional(),
     }),

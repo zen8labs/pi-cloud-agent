@@ -81,11 +81,13 @@ export LANGFUSE_SECRET_KEY=sk-lf-...
 export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://cloud.langfuse.com/api/public/otel/v1/traces
 export OTEL_EXPORTER_OTLP_TRACES_HEADERS="Authorization=Basic $(printf '%s:%s' "$LANGFUSE_PUBLIC_KEY" "$LANGFUSE_SECRET_KEY" | base64),x-langfuse-ingestion-version=4"
 export OTEL_SERVICE_NAME=pi-cloud-agent
-export OTEL_CAPTURE_CONTENT=true
+export OTEL_EXPORT_DEBUG_EVENTS=false
 pnpm controller
 ```
 
-Run an agent normally. Its completed trace will appear in Langfuse. The exporter sets Langfuse's normalized input/output fields for runs, turns, and tools; old OTLP observations are immutable, so create a new run after changing the mapping or configuration. `OTEL_CAPTURE_CONTENT=false` is safer when prompts, generated text, tool arguments, or tool output should not leave the controller. For self-hosted or regional Langfuse, replace the hostname while keeping `/api/public/otel/v1/traces`. The exporter uses protobuf over HTTP; no Langfuse SDK is required in this repository.
+Run an agent normally. Its completed trace comprehensively contains the run, prompts, each model turn, thinking, generated text, tool calls, tool arguments, tool results, usage, timing, and status. Set `OTEL_EXPORT_DEBUG_EVENTS=true` temporarily to export the detailed Pi lifecycle event stream while diagnosing a runtime issue; it is false by default and those low-value events are not retained in Postgres otherwise. Old OTLP observations are immutable, so create a new run after changing the mapping or configuration. For self-hosted or regional Langfuse, replace the hostname while keeping `/api/public/otel/v1/traces`. The exporter uses protobuf over HTTP; no Langfuse SDK is required in this repository.
+
+The controller always exports trace content so production runs can be used as evaluation data. `OTEL_EXPORT_DEBUG_EVENTS` only controls low-value lifecycle noise; leave it false for normal traces and enable it temporarily when diagnosing the runtime event stream. Content can include repository source, prompts, personal data, or credentials accidentally printed by a tool, so configure access and retention controls on the selected OTLP destination.
 
 ## Reading the state directly
 

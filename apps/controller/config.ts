@@ -57,7 +57,7 @@ const schema = z.object({
     .default(""),
   OTEL_EXPORTER_OTLP_TRACES_HEADERS: z.string().default(""),
   OTEL_SERVICE_NAME: z.string().min(1).default("pi-cloud-agent"),
-  OTEL_CAPTURE_CONTENT: z.enum(["true", "false"]).default("false"),
+  OTEL_EXPORT_DEBUG_EVENTS: z.enum(["true", "false"]).default("false"),
 
   APP_SESSION_SECRET: z.string().default(""),
   APP_AUTH_REQUIRED: z.enum(["true", "false"]).default("true"),
@@ -93,7 +93,7 @@ export interface Config {
     tracesEndpoint: string;
     tracesHeaders: Record<string, string>;
     serviceName: string;
-    captureContent: boolean;
+    exportDebugEvents: boolean;
   };
   auth: {
     requireUser: boolean;
@@ -152,7 +152,7 @@ function build(env: Env): Config {
       tracesEndpoint: value.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
       tracesHeaders,
       serviceName: value.OTEL_SERVICE_NAME,
-      captureContent: value.OTEL_CAPTURE_CONTENT === "true",
+      exportDebugEvents: value.OTEL_EXPORT_DEBUG_EVENTS === "true",
     },
     auth: {
       requireUser,

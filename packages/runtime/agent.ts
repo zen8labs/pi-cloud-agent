@@ -92,6 +92,8 @@ export async function runAgentSession(
     cwd: config.repo.path,
   });
 
+  let turnNumber = 0;
+  let turnStartedAt: string | null = null;
   const unsubscribe = session.subscribe((event) => {
     switch (event.type) {
       case "agent_start":
@@ -107,21 +109,17 @@ export async function runAgentSession(
         reporter.log("agent.settled");
         break;
       case "turn_start":
-        reporter.log("agent.turn_start");
+        turnNumber += 1;
+        turnStartedAt = new Date().toISOString();
+        reporter.log("agent.turn_start", { turnNumber, turnStartedAt });
         break;
-      case "message_update":
-        if (event.assistantMessageEvent.type === "text_delta") {
-          reporter.event({
-            type: "token",
-            data: { content: event.assistantMessageEvent.delta },
-          });
-        } else if ("delta" in event.assistantMessageEvent) {
-          reporter.log("agent.message_update", {
-            updateType: event.assistantMessageEvent.type,
-            delta: event.assistantMessageEvent.delta,
-          });
+      case "message_update": {
+        const update = event.assistantMessageEvent;
+        if (update.type === "text_delta") {
+          reporter.event({ type: "token", data: { content: update.delta } });
         }
         break;
+      }
       case "message_start":
         reporter.log("agent.message_start", summarizeMessage(event.message));
         break;
@@ -135,6 +133,7 @@ export async function runAgentSession(
             callId: event.toolCallId,
             tool: event.toolName,
             status: "running",
+            turnNumber,
             args: event.args,
           },
         });
@@ -148,6 +147,7 @@ export async function runAgentSession(
             callId: event.toolCallId,
             tool: event.toolName,
             status: event.isError ? "error" : "completed",
+            turnNumber,
             output: textOf(event.result),
           },
         });
@@ -157,6 +157,7 @@ export async function runAgentSession(
         reporter.log("agent.tool_update", {
           callId: event.toolCallId,
           tool: event.toolName,
+          turnNumber,
           args: event.args,
           partialResult: event.partialResult,
         });
@@ -164,6 +165,8 @@ export async function runAgentSession(
       case "turn_end": {
         const assistant = asAssistant(event.message);
         reporter.log("agent.turn_end", {
+          turnNumber,
+          turnStartAt: turnStartedAt,
           stopReason: assistant?.stopReason ?? null,
           usage: assistant?.usage ?? null,
           output: assistant?.content ?? null,

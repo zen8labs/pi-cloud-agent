@@ -16,14 +16,13 @@ describe("observability configuration", () => {
       ...baseEnv,
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "https://collector.example/v1/traces",
       OTEL_EXPORTER_OTLP_TRACES_HEADERS: "Authorization=Bearer secret,x-project=agent",
-      OTEL_CAPTURE_CONTENT: "true",
     });
 
     expect(config.observability).toEqual({
       tracesEndpoint: "https://collector.example/v1/traces",
       tracesHeaders: { Authorization: "Bearer secret", "x-project": "agent" },
       serviceName: "pi-cloud-agent",
-      captureContent: true,
+      exportDebugEvents: false,
     });
   });
 

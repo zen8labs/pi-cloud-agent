@@ -1,16 +1,18 @@
 import { createServer } from "node:http";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createObservability } from "../observability";
+import { projectRun } from "../observability-projection";
 import {
   resetTables,
   seedRun,
+  seedSession,
   setupTestDatabase,
   silentLogger,
   testConfig,
 } from "../test-support";
 import { closeDatabase, type Database } from "./client";
 import { claimExport, ensurePendingExports, markExported, retryExport } from "./observability";
-import { appendEvent, completeRun } from "./runs";
+import { appendEvent, completeRun, listEvents } from "./runs";
 
 let database: Database;
 
@@ -80,7 +82,6 @@ describe("durable observability delivery", () => {
     const observability = createObservability({
       config: testConfig({
         OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `http://127.0.0.1:${address.port}/v1/traces`,
-        OTEL_CAPTURE_CONTENT: "true",
       }),
       database,
       log: silentLogger(),
@@ -92,18 +93,7 @@ describe("durable observability delivery", () => {
         event: "agent.session_start",
         model: run.model,
       });
-      await appendEvent(database, run.id, "tool_call", {
-        callId: "call-1",
-        tool: "shell",
-        status: "running",
-        args: { command: "echo hi" },
-      });
-      await appendEvent(database, run.id, "tool_call", {
-        callId: "call-1",
-        tool: "shell",
-        status: "completed",
-        output: "hi",
-      });
+      await appendShellToolEvents(run.id);
       await appendEvent(database, run.id, "token", { content: "agent result" });
       await appendEvent(database, run.id, "log", {
         event: "agent.turn_end",
@@ -130,4 +120,113 @@ describe("durable observability delivery", () => {
       });
     }
   });
+
+  it("keeps production traces concise and nests tools under their step", async () => {
+    const run = await seedRun(database);
+    await appendEvent(database, run.id, "log", {
+      event: "agent.message_start",
+      role: "assistant",
+    });
+    await appendEvent(database, run.id, "log", {
+      event: "agent.turn_end",
+      turnNumber: 1,
+      turnStartAt: new Date(Date.now() - 100).toISOString(),
+      output: [
+        { type: "thinking", thinking: "inspect the repository before answering" },
+        { type: "toolCall", name: "shell", arguments: { command: "echo hi" } },
+      ],
+      usage: { input: 4, output: 2, reasoning: 1, totalTokens: 7 },
+    });
+    await appendShellToolEvents(run.id);
+    const spans = projectRun(run, await listEvents(database, run.id, 0), testConfig());
+
+    expect(spans.map((span) => span.name)).toEqual([
+      "agent.turn",
+      "agent.tool.shell",
+      "agent.step",
+      "agent.run",
+    ]);
+    const step = spans.find((span) => span.name === "agent.step");
+    const turn = spans.find((span) => span.name === "agent.turn");
+    const tool = spans.find((span) => span.name === "agent.tool.shell");
+    expect(turn?.parentSpanContext?.spanId).toBe(step?.spanContext().spanId);
+    expect(tool?.parentSpanContext?.spanId).toBe(step?.spanContext().spanId);
+    expect(tool?.attributes["gen_ai.tool.call.arguments"]).toContain("echo hi");
+    expect(tool?.attributes["gen_ai.tool.call.result"]).toContain("hi");
+    expect(turn?.attributes["gen_ai.output.messages"]).toContain("toolCall");
+    expect(turn?.attributes["gen_ai.output.messages"]).toContain("inspect the repository");
+    expect(
+      spans.find((span) => span.name === "agent.run")?.attributes[
+        "langfuse.observation.output"
+      ],
+    ).toContain("inspect the repository");
+    expect(spans.some((span) => span.name.startsWith("agent.event."))).toBe(false);
+  });
+
+  it("propagates the application session to every observation", async () => {
+    const { run } = await seedSession(database);
+    await appendEvent(database, run.id, "log", {
+      event: "agent.turn_end",
+      turnNumber: 1,
+      output: [{ type: "thinking", thinking: "follow the session" }],
+    });
+    await appendEvent(database, run.id, "tool_call", {
+      callId: "session-tool",
+      tool: "shell",
+      status: "running",
+      turnNumber: 1,
+      args: { command: "true" },
+    });
+    await appendEvent(database, run.id, "tool_call", {
+      callId: "session-tool",
+      tool: "shell",
+      status: "completed",
+      turnNumber: 1,
+      output: "ok",
+    });
+    const spans = projectRun(run, await listEvents(database, run.id, 0), testConfig());
+    expect(spans.length).toBeGreaterThan(1);
+    expect(
+      spans.every(
+        (span) =>
+          span.attributes["session.id"] === run.sessionId &&
+          span.attributes["langfuse.session.id"] === run.sessionId,
+      ),
+    ).toBe(true);
+  });
+
+  it("captures complete model output for evaluation", async () => {
+    const run = await seedRun(database);
+    await appendEvent(database, run.id, "log", {
+      event: "agent.turn_end",
+      turnNumber: 1,
+      output: [
+        { type: "thinking", thinking: "important trajectory detail" },
+        { type: "text", text: "private final answer" },
+      ],
+    });
+    const spans = projectRun(run, await listEvents(database, run.id, 0), testConfig());
+    const turn = spans.find((span) => span.name === "agent.turn");
+    expect(turn?.attributes["langfuse.observation.output"]).toContain(
+      "important trajectory detail",
+    );
+    expect(turn?.attributes["langfuse.observation.output"]).toContain("private final answer");
+  });
 });
+
+async function appendShellToolEvents(runId: string): Promise<void> {
+  await appendEvent(database, runId, "tool_call", {
+    callId: "call-1",
+    tool: "shell",
+    status: "running",
+    turnNumber: 1,
+    args: { command: "echo hi" },
+  });
+  await appendEvent(database, runId, "tool_call", {
+    callId: "call-1",
+    tool: "shell",
+    status: "completed",
+    turnNumber: 1,
+    output: "hi",
+  });
+}
