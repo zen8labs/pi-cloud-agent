@@ -34,7 +34,7 @@ These are documented design gaps, not vulnerabilities. Reporting them is welcome
 
 - **The sandbox holds credentials next to untrusted code.** Each run's sandbox receives one model API key and, when connected, one provider access token in its environment, then runs code from a repository. Once that happens, both credentials are compromised in principle. Redaction is not containment. Moving to a credential broker and an auth-injecting egress proxy, so the sandbox never holds a token, is the intended next step.
 - **Provider permissions still need least-privilege review.** GitHub uses a GitHub App with Contents and Metadata permissions; Contents read/write permits repository mutation. Azure DevOps uses Microsoft Entra delegated permissions configured on the Entra app. Review both before operating against sensitive repositories.
-- **The controller requires application authentication by default.** GitHub App authorization creates the local user session and every dashboard resource is user-scoped. `APP_AUTH_REQUIRED=false` is a test/development escape hatch and must not be used on a public deployment. Sandbox callbacks verify a per-run bearer token, so they remain separately authenticated.
+- **The controller requires application authentication by default.** GitHub App authorization creates the local user session and every task, run, session, and model connection is user-scoped. `APP_AUTH_REQUIRED=false` permits only local read-only access to public metadata and repositories; task, run, session, and model-connection routes still require a session. Never expose either mode on a public deployment without real authentication. Sandbox callbacks verify a per-run bearer token, so they remain separately authenticated.
 
 ## In scope
 

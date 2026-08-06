@@ -136,7 +136,7 @@ function NewSession() {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      <header className="flex h-12 shrink-0 items-center px-4">
+      <header className="app-header flex h-12 shrink-0 items-center px-4">
         <h1 className="text-[13px] font-medium">New task</h1>
       </header>
       <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-4 py-10 sm:px-8">

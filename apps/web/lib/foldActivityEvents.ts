@@ -33,7 +33,7 @@ export type WorkBlock = {
   endedAt: string;
 };
 
-export type ChangesBlock = {
+type ChangesBlock = {
   key: string;
   kind: "changes";
   files: FileChangeStat[];

@@ -109,9 +109,11 @@ describe("starting runs", () => {
   });
 
   it("lists runs newest first", async () => {
-    await seedRun(database);
-    await seedRun(database);
-    const body = (await (await app.request("/runs")).json()) as RunListResponse;
+    await seedRun(database, { userId: testUserId });
+    await seedRun(database, { userId: testUserId });
+    const body = (await (
+      await app.request("/runs", { headers: { Cookie: `pca_session=${testCookie}` } })
+    ).json()) as RunListResponse;
     expect(body.runs).toHaveLength(2);
     expect(new Date(body.runs[0]!.createdAt).getTime()).toBeGreaterThanOrEqual(
       new Date(body.runs[1]!.createdAt).getTime(),
@@ -120,8 +122,9 @@ describe("starting runs", () => {
 
   it("answers 404 for a run that does not exist", async () => {
     const missing = "00000000-0000-0000-0000-000000000000";
-    expect((await app.request(`/runs/${missing}`)).status).toBe(404);
-    expect((await app.request(`/runs/${missing}/events`)).status).toBe(404);
+    const headers = { Cookie: `pca_session=${testCookie}` };
+    expect((await app.request(`/runs/${missing}`, { headers })).status).toBe(404);
+    expect((await app.request(`/runs/${missing}/events`, { headers })).status).toBe(404);
     expect((await post(`/runs/${missing}/cancel`, {})).status).toBe(404);
   });
 });
@@ -159,7 +162,7 @@ describe("sandbox callbacks", () => {
   });
 
   it("rejects an event shape it does not recognize", async () => {
-    const run = await seedRun(database);
+    const run = await seedRun(database, { userId: testUserId });
     const response = await post(
       `/internal/runs/${run.id}/events`,
       { type: "not_a_thing", data: {} },
@@ -169,7 +172,7 @@ describe("sandbox callbacks", () => {
   });
 
   it("strips credentials that a payload leaked in a URL", async () => {
-    const run = await seedRun(database);
+    const run = await seedRun(database, { userId: testUserId });
     await post(
       `/internal/runs/${run.id}/events`,
       {
@@ -183,14 +186,16 @@ describe("sandbox callbacks", () => {
     );
 
     const { events } = await json<RunEventsResponse>(
-      await app.request(`/runs/${run.id}/events`),
+      await app.request(`/runs/${run.id}/events`, {
+        headers: { Cookie: `pca_session=${testCookie}` },
+      }),
     );
     expect(JSON.stringify(events)).not.toContain("ghs_leak");
     expect(JSON.stringify(events)).toContain("***@github.com");
   });
 
   it("completes the run when the agent reports done", async () => {
-    const run = await seedRun(database);
+    const run = await seedRun(database, { userId: testUserId });
     const response = await post(
       `/internal/runs/${run.id}/status`,
       { status: "done" },
@@ -201,7 +206,7 @@ describe("sandbox callbacks", () => {
   });
 
   it("fails the run when the agent reports an error, keeping the reason", async () => {
-    const run = await seedRun(database);
+    const run = await seedRun(database, { userId: testUserId });
     await post(
       `/internal/runs/${run.id}/status`,
       { status: "error", detail: "clone failed" },
@@ -214,7 +219,9 @@ describe("sandbox callbacks", () => {
 
     // The reason is in the log too, so it survives even if the transition raced.
     const { events } = await json<RunEventsResponse>(
-      await app.request(`/runs/${run.id}/events`),
+      await app.request(`/runs/${run.id}/events`, {
+        headers: { Cookie: `pca_session=${testCookie}` },
+      }),
     );
     expect(events.at(-1)?.type).toBe("status");
   });
@@ -246,7 +253,7 @@ describe("cancelling", () => {
 
 describe("watching a run", () => {
   it("streams history then closes once the run is terminal", async () => {
-    const run = await seedRun(database);
+    const run = await seedRun(database, { userId: testUserId });
     for (const content of ["a", "b"]) {
       await post(
         `/internal/runs/${run.id}/events`,
@@ -260,7 +267,11 @@ describe("watching a run", () => {
       { Authorization: `Bearer ${run.callbackToken}` },
     );
 
-    const body = await (await app.request(`/runs/${run.id}/stream`)).text();
+    const body = await (
+      await app.request(`/runs/${run.id}/stream`, {
+        headers: { Cookie: `pca_session=${testCookie}` },
+      })
+    ).text();
     // Every data frame carries its sequence number: that is what makes a
     // reconnect resumable rather than duplicating or skipping events.
     expect(body).toContain("id: 1");
@@ -270,7 +281,7 @@ describe("watching a run", () => {
   });
 
   it("resumes from a cursor without replaying what the client already has", async () => {
-    const run = await seedRun(database);
+    const run = await seedRun(database, { userId: testUserId });
     for (const content of ["a", "b", "c"]) {
       await post(
         `/internal/runs/${run.id}/events`,
@@ -285,7 +296,9 @@ describe("watching a run", () => {
     );
 
     const resumed = await (
-      await app.request(`/runs/${run.id}/stream`, { headers: { "last-event-id": "2" } })
+      await app.request(`/runs/${run.id}/stream`, {
+        headers: { Cookie: `pca_session=${testCookie}`, "last-event-id": "2" },
+      })
     ).text();
     expect(resumed).not.toContain("id: 1");
     expect(resumed).not.toContain("id: 2");
@@ -293,8 +306,12 @@ describe("watching a run", () => {
   });
 
   it("exposes the request the agent was given", async () => {
-    const run = await seedRun(database);
-    const detail = (await (await app.request(`/runs/${run.id}`)).json()) as RunDetail;
+    const run = await seedRun(database, { userId: testUserId });
+    const detail = (await (
+      await app.request(`/runs/${run.id}`, {
+        headers: { Cookie: `pca_session=${testCookie}` },
+      })
+    ).json()) as RunDetail;
     expect(detail.prompt).toBe(manualTrigger().prompt);
   });
 });

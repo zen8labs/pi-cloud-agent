@@ -59,6 +59,8 @@ export interface RunSummary {
 export interface RunDetail extends RunSummary {
   /** The request the agent was given, when the trigger carried one. */
   prompt: string | null;
+  /** Branch the run cloned (or the repo default when none was pinned). */
+  branch: string | null;
   headSha: string | null;
   /** Set once a sandbox exists; cleared conceptually when it is reclaimed. */
   sandboxStoppedAt: string | null;

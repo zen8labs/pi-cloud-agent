@@ -108,7 +108,7 @@ Run the normal checks with:
 make verify
 ```
 
-Useful narrower checks are `pnpm lint`, `pnpm test`, `pnpm test:integration`, `pnpm test:e2e`, and `pnpm docs:check`. A real sandbox/model run uses credentials and may incur cost:
+Useful narrower checks are `pnpm lint`, `pnpm test`, `pnpm test:integration`, and `pnpm docs:check`. A real sandbox/model run uses credentials and may incur cost:
 
 ```bash
 LIVE_TEST_REPO=owner/repository pnpm test:live

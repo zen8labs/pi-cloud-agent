@@ -66,7 +66,11 @@ export function LlmConnectionSection({
     apiKey: "",
     contextWindow: 196_608,
     maxTokens: 32_000,
-    isDefault: connections.length === 0,
+    // The server decides whether the first saved connection becomes default.
+    // Do not derive this from the initial props: Settings loads connections
+    // asynchronously, so that value would become stale for the lifetime of the
+    // component and could replace an existing default on the next page load.
+    isDefault: false,
   });
 
   const update = <K extends keyof CreateLlmConnectionRequest>(

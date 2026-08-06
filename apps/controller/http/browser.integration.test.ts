@@ -6,6 +6,7 @@ import { closeDatabase, type Database } from "../db/client";
 import { completeRun, createRun } from "../db/runs";
 import { oauthStates } from "../db/schema";
 import { parkSession } from "../db/sessions";
+import { saveApiKeyConnection } from "../llm/connections";
 import {
   manualTrigger,
   resetTables,
@@ -140,6 +141,87 @@ describe("browser boundary", () => {
     expect(location.searchParams.get("connection")).toBe("connection_denied");
     expect(location.searchParams.get("message")).toBe(
       "Admin consent is required (access_denied)",
+    );
+  });
+
+  it("keeps anonymous mode read-only for user-scoped resources", async () => {
+    expect((await app.request("/runs")).status).toBe(401);
+    expect((await app.request("/sessions")).status).toBe(401);
+    expect((await app.request("/llm/connections")).status).toBe(401);
+    expect((await app.request("/config")).status).toBe(200);
+  });
+
+  it("returns a validation error when a selected model is stale or foreign", async () => {
+    const secureApp = createApp({
+      config: testConfig({ APP_AUTH_REQUIRED: "true" }),
+      database,
+      log: silentLogger(),
+    });
+    const user = await upsertAppUser(database, {
+      githubUserId: "stale-model-user",
+      login: "stale-model-user",
+      displayName: "Stale Model User",
+    });
+    const config = testConfig();
+    const cookie = await createWebSession(database, user.id, config.auth.sessionSecret);
+    const connection = await saveApiKeyConnection(database, config, {
+      userId: user.id,
+      displayName: "Stale model",
+      provider: "stale-provider",
+      api: "openai-completions",
+      baseUrl: "https://stale.example/v1",
+      model: "current-model",
+      apiKey: "stale-key",
+      contextWindow: 16_384,
+      maxTokens: 2_048,
+      isDefault: true,
+    });
+    const otherUser = await upsertAppUser(database, {
+      githubUserId: "other-model-user",
+      login: "other-model-user",
+      displayName: "Other Model User",
+    });
+    const foreign = await saveApiKeyConnection(database, config, {
+      userId: otherUser.id,
+      displayName: "Foreign model",
+      provider: "foreign-provider",
+      api: "openai-completions",
+      baseUrl: "https://foreign.example/v1",
+      model: "foreign-model",
+      apiKey: "foreign-key",
+      contextWindow: 16_384,
+      maxTokens: 2_048,
+      isDefault: true,
+    });
+    const headers = {
+      "Content-Type": "application/json",
+      Cookie: `pca_session=${cookie}`,
+      Origin: "http://localhost:3000",
+    };
+    const runBody = (modelConnectionId: string, modelId: string) =>
+      JSON.stringify({
+        repo: "acme/widgets",
+        prompt: "use the selected model",
+        modelConnectionId,
+        modelId,
+      });
+
+    const staleRun = await secureApp.request("/runs", {
+      method: "POST",
+      headers,
+      body: runBody(connection.id, "deleted-model"),
+    });
+    expect(staleRun.status).toBe(422);
+    expect((await json<{ error: string }>(staleRun)).error).toContain("not available");
+
+    const foreignSession = await secureApp.request("/sessions", {
+      method: "POST",
+      headers,
+      body: runBody(foreign.id, "foreign-model"),
+    });
+    expect(foreignSession.status).toBe(422);
+    expect((await json<{ error: string }>(foreignSession)).error).toContain(
+      "connect a model provider",
     );
   });
 });
