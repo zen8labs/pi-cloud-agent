@@ -210,10 +210,12 @@ function toSummary(run: RunRow): RunSummary {
 }
 
 export function toDetail(run: RunRow): RunDetail {
+  const { headBranch, defaultBranch, headSha } = run.trigger.repo;
   return {
     ...toSummary(run),
     prompt: run.trigger.prompt ?? null,
-    headSha: run.trigger.repo.headSha || null,
+    branch: headBranch || defaultBranch || null,
+    headSha: headSha || null,
     sandboxStoppedAt: run.sandboxStoppedAt?.toISOString() ?? null,
   };
 }
