@@ -15,11 +15,7 @@ import {
   type ReadableSpan,
   type SpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import {
-  interpretRunEvents,
-  type RunEvent,
-  type TimelineEvent,
-} from "@pi-cloud-agent/protocol";
+import type { RunEvent } from "@pi-cloud-agent/protocol";
 import type { Config } from "./config";
 import type { RunRow } from "./db/schema";
 import { outputAttributes } from "./observability-content";
@@ -31,8 +27,7 @@ interface StepProjection {
   span: Span;
   context: Context;
   openTools: number;
-  expectedToolCalls: number | null;
-  completedToolCalls: number;
+  awaitingTools: boolean;
 }
 
 interface ToolProjection {
@@ -44,6 +39,7 @@ interface ToolProjection {
 interface ProjectionState {
   steps: Map<number, StepProjection>;
   tools: Map<string, ToolProjection>;
+  lastTurnNumber: number;
   lastTurnOutput?: unknown;
 }
 
@@ -69,11 +65,12 @@ export function projectRun(run: RunRow, events: RunEvent[], config: Config): Rea
   const state: ProjectionState = {
     steps: new Map(),
     tools: new Map(),
+    lastTurnNumber: 0,
   };
   const output = new BoundedText();
   let tokenCount = 0;
 
-  for (const event of interpretRunEvents(events)) {
+  for (const event of events) {
     tokenCount = processEvent(
       event,
       new Date(event.at),
@@ -105,7 +102,7 @@ export function projectRun(run: RunRow, events: RunEvent[], config: Config): Rea
 }
 
 function processEvent(
-  event: TimelineEvent,
+  event: RunEvent,
   at: Date,
   tracer: Tracer,
   rootContext: Context,
@@ -116,7 +113,7 @@ function processEvent(
   shared: Attributes,
   config: Config,
 ): number {
-  if (event.kind === "status") {
+  if (event.type === "status") {
     const attributes = {
       ...shared,
       ...eventAttributes(event.data),
@@ -126,37 +123,34 @@ function processEvent(
     status.end(at);
     return tokenCount;
   }
-  if (event.kind === "token") {
-    if (event.content) output.append(event.content);
+  if (event.type === "token") {
+    const content = stringValue(event.data.content);
+    if (content) output.append(content);
     return tokenCount + 1;
   }
-  if (event.kind === "tool") {
+  if (event.type === "tool_call") {
     handleToolEvent(event, at, tracer, rootContext, state, shared);
     return tokenCount;
   }
-  if (event.kind === "turn") {
-    handleTurnEnd(event, at, tracer, rootContext, state, shared);
-    return tokenCount;
-  }
-  if (event.kind === "log") {
-    handleLogEvent(event, at, tracer, rootContext, root, shared, config);
+  if (event.type === "log") {
+    handleLogEvent(event, at, tracer, rootContext, root, state, shared, config);
   }
   return tokenCount;
 }
 
 function handleToolEvent(
-  event: Extract<TimelineEvent, { kind: "tool" }>,
+  event: RunEvent,
   at: Date,
   tracer: Tracer,
   rootContext: Context,
   state: ProjectionState,
   shared: Attributes,
 ): void {
-  const callId = event.callId || "unknown";
-  if (event.status === "running") {
-    const turnNumber = event.turnNumber;
+  const callId = stringValue(event.data.callId) ?? "unknown";
+  if (event.data.status === "running") {
+    const turnNumber = numberValue(event.data.turnNumber) ?? state.lastTurnNumber;
     const step = ensureStep(state, turnNumber, at, tracer, rootContext, shared);
-    const toolName = event.tool || "unknown";
+    const toolName = stringValue(event.data.tool) ?? "unknown";
     const attributes: Attributes = {
       ...shared,
       "agent.tool.name": toolName,
@@ -166,8 +160,8 @@ function handleToolEvent(
       "gen_ai.tool.call.id": callId,
       "gen_ai.tool.type": "extension",
     };
-    if (event.args !== undefined) {
-      const args = truncate(jsonValue(event.args));
+    if (event.data.args !== undefined) {
+      const args = truncate(jsonValue(event.data.args));
       attributes["agent.tool.args"] = args;
       attributes["gen_ai.tool.call.arguments"] = args;
       attributes["langfuse.observation.input"] = args;
@@ -186,7 +180,7 @@ function handleToolEvent(
   }
   const tool = state.tools.get(callId);
   if (!tool) return;
-  const result = stringValue(event.output);
+  const result = stringValue(event.data.output);
   if (result !== null) {
     const output = truncate(result);
     tool.span.setAttribute("agent.tool.output", output);
@@ -195,27 +189,31 @@ function handleToolEvent(
     tool.span.setAttribute("langfuse.observation.output", jsonValue(output));
   }
   tool.span.setStatus({
-    code: event.status === "error" ? SpanStatusCode.ERROR : SpanStatusCode.OK,
+    code: event.data.status === "error" ? SpanStatusCode.ERROR : SpanStatusCode.OK,
   });
   tool.span.end(at);
   tool.step.openTools = Math.max(0, tool.step.openTools - 1);
-  tool.step.completedToolCalls += 1;
   state.tools.delete(callId);
-  if (stepToolsComplete(tool.step)) {
+  if (tool.step.awaitingTools && tool.step.openTools === 0) {
     finishStep(state, tool.turnNumber, at);
   }
 }
 
 function handleLogEvent(
-  event: Extract<TimelineEvent, { kind: "log" }>,
+  event: RunEvent,
   at: Date,
   tracer: Tracer,
   rootContext: Context,
   root: Span,
+  state: ProjectionState,
   shared: Attributes,
   config: Config,
 ): void {
-  const name = event.name || "agent.log";
+  const name = stringValue(event.data.event) ?? "agent.log";
+  if (name === "agent.turn_end") {
+    handleTurnEnd(event.data, at, tracer, rootContext, state, shared);
+    return;
+  }
   const attributes = {
     ...shared,
     ...eventAttributes(event.data),
@@ -235,27 +233,28 @@ function handleLogEvent(
 }
 
 function handleTurnEnd(
-  event: Extract<TimelineEvent, { kind: "turn" }>,
+  data: Record<string, unknown>,
   at: Date,
   tracer: Tracer,
   rootContext: Context,
   state: ProjectionState,
   shared: Attributes,
 ): void {
-  const { turnNumber } = event;
-  const start = dateValue(event.startedAt) ?? at;
+  const turnNumber = numberValue(data.turnNumber) ?? state.lastTurnNumber + 1;
+  const start = dateValue(data.turnStartAt) ?? at;
   closeEarlierSteps(state, turnNumber, start);
   const step = ensureStep(state, turnNumber, start, tracer, rootContext, shared);
   const attributes = {
     ...shared,
-    ...generationAttributes(event.data),
+    ...generationAttributes(data),
   };
   const turn = tracer.startSpan("agent.turn", { startTime: start, attributes }, step.context);
   turn.setStatus({ code: SpanStatusCode.OK });
   turn.end(at);
-  if (event.output !== undefined) state.lastTurnOutput = event.output;
-  step.expectedToolCalls = event.expectedToolCalls;
-  if (stepToolsComplete(step)) finishStep(state, turnNumber, at);
+  if (data.output !== undefined) state.lastTurnOutput = data.output;
+  state.lastTurnNumber = Math.max(state.lastTurnNumber, turnNumber);
+  step.awaitingTools = containsToolCall(data.output);
+  if (!step.awaitingTools && step.openTools === 0) finishStep(state, turnNumber, at);
 }
 
 function ensureStep(
@@ -280,19 +279,10 @@ function ensureStep(
     span,
     context: trace.setSpan(rootContext, span),
     openTools: 0,
-    expectedToolCalls: null,
-    completedToolCalls: 0,
+    awaitingTools: false,
   };
   state.steps.set(turnNumber, step);
   return step;
-}
-
-function stepToolsComplete(step: StepProjection): boolean {
-  return (
-    step.expectedToolCalls !== null &&
-    step.completedToolCalls >= step.expectedToolCalls &&
-    step.openTools === 0
-  );
 }
 
 function closeEarlierSteps(state: ProjectionState, turnNumber: number, at: Date): void {
@@ -398,6 +388,14 @@ function attributeValue(value: unknown): AttributeValue | undefined {
     return value as AttributeValue;
   }
   return undefined;
+}
+
+function containsToolCall(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsToolCall);
+  if (!value || typeof value !== "object") return false;
+  const object = value as Record<string, unknown>;
+  if (object.type === "toolCall") return true;
+  return Array.isArray(object.tool_calls) && object.tool_calls.length > 0;
 }
 
 function dateValue(value: unknown): Date | undefined {

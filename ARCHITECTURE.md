@@ -95,8 +95,6 @@ One source of truth, two access patterns:
 
 Every data frame carries `id: <seq>`. A browser echoes the last one back as `Last-Event-ID` on reconnect, so resuming is exact rather than approximate, and history and live tail are the same code path. Status frames are derived from the run row and carry no id, which makes them safe to re-send.
 
-The protocol package interprets that journal into shared turn and tool semantics. The dashboard and trusted OTLP projection are adapters over the same interpretation, so turn ownership and tool grouping cannot drift between them.
-
 Telemetry (tokens, tool calls, logs) is best-effort and never load-bearing. The terminal status report is delivered with retries and is the *only* thing that completes a run. A run that emits a thousand tokens and never reports a status is a timeout, not a success. The trusted controller can replay the durable journal into vendor-neutral OTLP spans after completion; the `observability_exports` table makes delivery retryable across restarts.
 
 ## The contracts

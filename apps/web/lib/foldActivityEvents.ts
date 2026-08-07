@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  interpretRunEvents,
-  type RunEvent,
-  type RunStatus,
-  type TimelineEvent,
-} from "@pi-cloud-agent/protocol";
+import type { RunEvent, RunStatus } from "@pi-cloud-agent/protocol";
 import { type FileChangeStat, fileChangeStats } from "@/components/ToolArgsView";
 
 export type ToolLine = {
@@ -48,7 +43,7 @@ type ChangesBlock = {
 export type ActivityBlock = FlatBlock | WorkBlock | ChangesBlock;
 
 type FoldState = {
-  assistantStartIndexes: Map<number, number>;
+  assistantStartIndex: number | null;
 };
 
 export function foldEvents(events: RunEvent[], userPrompt: string | null): ActivityBlock[] {
@@ -56,8 +51,8 @@ export function foldEvents(events: RunEvent[], userPrompt: string | null): Activ
     ? [{ key: "prompt", kind: "user", text: userPrompt }]
     : [];
   const tools = new Map<string, ToolLine>();
-  const state: FoldState = { assistantStartIndexes: new Map() };
-  for (const event of interpretRunEvents(events)) foldEvent(flat, tools, state, event);
+  const state: FoldState = { assistantStartIndex: null };
+  for (const event of events) foldEvent(flat, tools, state, event);
   const visible = flat.filter(
     (block) => (block.kind !== "assistant" && block.kind !== "thinking") || block.text.trim(),
   );
@@ -148,58 +143,40 @@ function foldEvent(
   blocks: FlatBlock[],
   tools: Map<string, ToolLine>,
   state: FoldState,
-  event: TimelineEvent,
+  event: RunEvent,
 ): void {
-  switch (event.kind) {
+  switch (event.type) {
     case "token":
       foldToken(blocks, state, event);
       break;
-    case "tool":
+    case "tool_call":
       foldTool(blocks, tools, event);
       break;
     case "status":
       foldStatus(blocks, event);
       break;
-    case "turn":
-      foldTurnThinking(blocks, state, event);
-      break;
-    case "log":
-      foldLog(blocks, event);
-      break;
-    case "other":
-      foldOther(blocks, event);
-      break;
+    default:
+      foldLog(blocks, state, event);
   }
 }
 
-function foldToken(
-  blocks: FlatBlock[],
-  state: FoldState,
-  event: Extract<TimelineEvent, { kind: "token" }>,
-): void {
-  const { content, turnNumber } = event;
+function foldToken(blocks: FlatBlock[], state: FoldState, event: RunEvent): void {
+  const content = String(event.data?.content ?? "");
   const last = blocks.at(-1);
   if (!content) return;
-  if (last?.kind === "assistant" && state.assistantStartIndexes.has(turnNumber)) {
-    last.text += content;
-  } else {
-    if (!state.assistantStartIndexes.has(turnNumber)) {
-      state.assistantStartIndexes.set(turnNumber, blocks.length);
-    }
+  if (last?.kind === "assistant" && state.assistantStartIndex !== null) last.text += content;
+  else {
+    if (state.assistantStartIndex === null) state.assistantStartIndex = blocks.length;
     blocks.push({ key: `assistant-${event.seq}`, kind: "assistant", text: content });
   }
 }
 
-function foldTool(
-  blocks: FlatBlock[],
-  tools: Map<string, ToolLine>,
-  event: Extract<TimelineEvent, { kind: "tool" }>,
-): void {
-  const { callId } = event;
-  const output = toolOutput(event.output);
+function foldTool(blocks: FlatBlock[], tools: Map<string, ToolLine>, event: RunEvent): void {
+  const callId = String(event.data?.callId ?? "");
+  const output = toolOutput(event.data?.output);
   const existing = callId ? tools.get(callId) : undefined;
   if (existing) {
-    existing.status = event.status || existing.status;
+    existing.status = String(event.data?.status ?? existing.status);
     existing.at = event.at;
     if (output !== null) existing.output = output;
     return;
@@ -207,9 +184,9 @@ function foldTool(
   const block: ToolLine = {
     key: `tool-${callId || event.seq}`,
     kind: "tool",
-    tool: event.tool,
-    args: (event.args as Record<string, unknown>) ?? {},
-    status: event.status,
+    tool: String(event.data?.tool ?? "tool"),
+    args: (event.data?.args as Record<string, unknown>) ?? {},
+    status: String(event.data?.status ?? "running"),
     callId,
     output,
     at: event.at,
@@ -223,10 +200,7 @@ function toolOutput(value: unknown): string | null {
 }
 
 /** The stream reports "done"/"error"; the mirrored terminal event carries a RunStatus. */
-function foldStatus(
-  blocks: FlatBlock[],
-  event: Extract<TimelineEvent, { kind: "status" }>,
-): void {
+function foldStatus(blocks: FlatBlock[], event: RunEvent): void {
   const raw = String(event.data?.status ?? "");
   const status: RunStatus =
     raw === "done" ? "succeeded" : raw === "error" ? "failed" : (raw as RunStatus);
@@ -240,41 +214,53 @@ function foldStatus(
   });
 }
 
-function foldLog(blocks: FlatBlock[], event: Extract<TimelineEvent, { kind: "log" }>): void {
-  if (event.name.startsWith("agent.")) return;
-  const text = logText(event.data);
-  if (text) blocks.push({ key: `log-${event.seq}`, kind: "log", text, at: event.at });
-}
-
-function foldOther(
-  blocks: FlatBlock[],
-  event: Extract<TimelineEvent, { kind: "other" }>,
-): void {
-  const text = logText(event.data);
+function foldLog(blocks: FlatBlock[], state: FoldState, event: RunEvent): void {
+  const data = event.data ?? {};
+  const name = typeof data.event === "string" ? data.event : "";
+  if (name === "agent.turn_start") state.assistantStartIndex = null;
+  if (name === "agent.turn_end") {
+    foldTurnThinking(blocks, state, data.output, event);
+    return;
+  }
+  if (name.startsWith("agent.")) return;
+  const text = logText(data);
   if (text) blocks.push({ key: `log-${event.seq}`, kind: "log", text, at: event.at });
 }
 
 function foldTurnThinking(
   blocks: FlatBlock[],
   state: FoldState,
-  event: Extract<TimelineEvent, { kind: "turn" }>,
+  value: unknown,
+  event: RunEvent,
 ): void {
-  const assistantStartIndex = state.assistantStartIndexes.get(event.turnNumber);
-  state.assistantStartIndexes.delete(event.turnNumber);
-  if (!event.thinking) return;
+  const assistantStartIndex = state.assistantStartIndex;
+  state.assistantStartIndex = null;
+  if (!Array.isArray(value)) return;
+  const content = value
+    .flatMap((part) => {
+      if (!part || typeof part !== "object" || Array.isArray(part)) return [];
+      const record = part as Record<string, unknown>;
+      return record.type === "thinking" && typeof record.thinking === "string"
+        ? [record.thinking]
+        : [];
+    })
+    .join("");
+  if (!content) return;
 
   const block: FlatBlock = {
     key: `thinking-${event.seq}`,
     kind: "thinking",
-    text: event.thinking,
+    text: content,
     at: event.at,
   };
-  if (assistantStartIndex === undefined) blocks.push(block);
+  if (assistantStartIndex === null) blocks.push(block);
   else blocks.splice(assistantStartIndex, 0, block);
 }
 
 function logText(data: Record<string, unknown>): string {
   const named = data.event ?? data.message;
+  // Usage telemetry repeats after every step; the raw stream link keeps it.
+  if (named === "agent.turn_end") return "";
   if (!named)
     return Object.entries(data)
       .map(([key, value]) => `${key}=${format(value)}`)
