@@ -64,4 +64,46 @@ describe("foldEvents thinking", () => {
       text: "The user asked.",
     });
   });
+
+  it("keeps identical reasoning when it genuinely recurs in a later turn", () => {
+    const blocks = foldEvents(
+      [
+        log(1, "agent.turn_end", {
+          turnNumber: 1,
+          output: [{ type: "thinking", thinking: "Let me check the tests." }],
+        }),
+        log(2, "agent.turn_end", {
+          turnNumber: 2,
+          output: [{ type: "thinking", thinking: "Let me check the tests." }],
+        }),
+      ],
+      null,
+    );
+
+    expect(blocks).toHaveLength(2);
+    expect(blocks.map((block) => (block.kind === "thinking" ? block.text : null))).toEqual([
+      "Let me check the tests.",
+      "Let me check the tests.",
+    ]);
+  });
+
+  it("deduplicates a multi-part completed turn against its legacy delta block", () => {
+    const blocks = foldEvents(
+      [
+        log(1, "agent.message_update", { updateType: "thinking_delta", delta: "Check " }),
+        log(2, "agent.message_update", { updateType: "thinking_delta", delta: "tests." }),
+        log(3, "agent.turn_end", {
+          turnNumber: 1,
+          output: [
+            { type: "thinking", thinking: "Check " },
+            { type: "thinking", thinking: "tests." },
+          ],
+        }),
+      ],
+      null,
+    );
+
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({ kind: "thinking", text: "Check tests." });
+  });
 });

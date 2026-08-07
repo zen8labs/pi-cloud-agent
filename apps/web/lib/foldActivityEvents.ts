@@ -47,7 +47,8 @@ export function foldEvents(events: RunEvent[], userPrompt: string | null): Activ
     ? [{ key: "prompt", kind: "user", text: userPrompt }]
     : [];
   const tools = new Map<string, ToolLine>();
-  for (const event of events) foldEvent(flat, tools, event);
+  const finalizedThinking = new Set<string>();
+  for (const event of events) foldEvent(flat, tools, finalizedThinking, event);
   const visible = flat.filter(
     (block) => (block.kind !== "assistant" && block.kind !== "thinking") || block.text.trim(),
   );
@@ -134,7 +135,12 @@ function groupWork(blocks: FlatBlock[]): ActivityBlock[] {
   return grouped;
 }
 
-function foldEvent(blocks: FlatBlock[], tools: Map<string, ToolLine>, event: RunEvent): void {
+function foldEvent(
+  blocks: FlatBlock[],
+  tools: Map<string, ToolLine>,
+  finalizedThinking: Set<string>,
+  event: RunEvent,
+): void {
   switch (event.type) {
     case "token":
       foldToken(blocks, event);
@@ -146,7 +152,7 @@ function foldEvent(blocks: FlatBlock[], tools: Map<string, ToolLine>, event: Run
       foldStatus(blocks, event);
       break;
     default:
-      foldLog(blocks, event);
+      foldLog(blocks, finalizedThinking, event);
   }
 }
 
@@ -201,15 +207,15 @@ function foldStatus(blocks: FlatBlock[], event: RunEvent): void {
   });
 }
 
-function foldLog(blocks: FlatBlock[], event: RunEvent): void {
+function foldLog(blocks: FlatBlock[], finalizedThinking: Set<string>, event: RunEvent): void {
   const data = event.data ?? {};
   if (data.event === "agent.turn_end") {
-    foldTurnThinking(blocks, data.output, event);
+    foldTurnThinking(blocks, finalizedThinking, data.output, event);
     return;
   }
   const thinking = thinkingContent(data);
   if (thinking !== null) {
-    foldThinking(blocks, thinking, event);
+    foldThinking(blocks, finalizedThinking, thinking, event);
     return;
   }
   const text = logText(data);
@@ -217,17 +223,33 @@ function foldLog(blocks: FlatBlock[], event: RunEvent): void {
 }
 
 /** Current runs carry reasoning in the durable turn result instead of a debug log. */
-function foldTurnThinking(blocks: FlatBlock[], value: unknown, event: RunEvent): void {
+function foldTurnThinking(
+  blocks: FlatBlock[],
+  finalizedThinking: Set<string>,
+  value: unknown,
+  event: RunEvent,
+): void {
   if (!Array.isArray(value)) return;
-  for (const part of value) {
-    if (!part || typeof part !== "object" || Array.isArray(part)) continue;
-    const content = (part as Record<string, unknown>).thinking;
-    if ((part as Record<string, unknown>).type !== "thinking" || typeof content !== "string") {
-      continue;
-    }
-    if (blocks.some((block) => block.kind === "thinking" && block.text === content)) continue;
-    foldThinking(blocks, content, event);
+  const content = value
+    .flatMap((part) => {
+      if (!part || typeof part !== "object" || Array.isArray(part)) return [];
+      const record = part as Record<string, unknown>;
+      return record.type === "thinking" && typeof record.thinking === "string"
+        ? [record.thinking]
+        : [];
+    })
+    .join("");
+  if (!content) return;
+
+  const last = blocks.at(-1);
+  if (last?.kind === "thinking" && !finalizedThinking.has(last.key) && last.text === content) {
+    last.at = event.at;
+    finalizedThinking.add(last.key);
+    return;
   }
+  const key = `thinking-${event.seq}`;
+  blocks.push({ key, kind: "thinking", text: content, at: event.at });
+  finalizedThinking.add(key);
 }
 
 /** New runs emit one agent.thinking; older runs logged each thinking_delta. */
@@ -239,10 +261,15 @@ function thinkingContent(data: Record<string, unknown>): string | null {
   return null;
 }
 
-function foldThinking(blocks: FlatBlock[], content: string, event: RunEvent): void {
+function foldThinking(
+  blocks: FlatBlock[],
+  finalizedThinking: Set<string>,
+  content: string,
+  event: RunEvent,
+): void {
   if (!content) return;
   const last = blocks.at(-1);
-  if (last?.kind === "thinking") {
+  if (last?.kind === "thinking" && !finalizedThinking.has(last.key)) {
     last.text += content;
     last.at = event.at;
     return;
