@@ -33,6 +33,7 @@ interface StepProjection {
 interface ToolProjection {
   span: Span;
   step: StepProjection;
+  turnNumber: number;
 }
 
 interface ProjectionState {
@@ -146,9 +147,9 @@ function handleToolEvent(
   shared: Attributes,
 ): void {
   const callId = stringValue(event.data.callId) ?? "unknown";
-  const turnNumber = numberValue(event.data.turnNumber) ?? state.lastTurnNumber;
-  const step = ensureStep(state, turnNumber, at, tracer, rootContext, shared);
   if (event.data.status === "running") {
+    const turnNumber = numberValue(event.data.turnNumber) ?? state.lastTurnNumber;
+    const step = ensureStep(state, turnNumber, at, tracer, rootContext, shared);
     const toolName = stringValue(event.data.tool) ?? "unknown";
     const attributes: Attributes = {
       ...shared,
@@ -174,7 +175,7 @@ function handleToolEvent(
       step.context,
     );
     step.openTools += 1;
-    state.tools.set(callId, { span, step });
+    state.tools.set(callId, { span, step, turnNumber });
     return;
   }
   const tool = state.tools.get(callId);
@@ -193,7 +194,9 @@ function handleToolEvent(
   tool.span.end(at);
   tool.step.openTools = Math.max(0, tool.step.openTools - 1);
   state.tools.delete(callId);
-  if (tool.step.awaitingTools && tool.step.openTools === 0) finishStep(state, turnNumber, at);
+  if (tool.step.awaitingTools && tool.step.openTools === 0) {
+    finishStep(state, tool.turnNumber, at);
+  }
 }
 
 function handleLogEvent(

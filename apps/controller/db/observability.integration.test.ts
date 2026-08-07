@@ -1,6 +1,8 @@
 import { createServer } from "node:http";
+import type { RunEvent } from "@pi-cloud-agent/protocol";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Logger } from "../logger";
 import { createObservability } from "../observability";
 import { projectRun } from "../observability-projection";
 import {
@@ -210,6 +212,61 @@ describe("durable observability delivery", () => {
     expect(spans.some((span) => span.name.startsWith("agent.event."))).toBe(false);
   });
 
+  it("finishes the tool's own step when a legacy completion has no turn number", async () => {
+    const run = await seedRun(database);
+    const base = Date.UTC(2026, 0, 1);
+    const at = (seconds: number) => new Date(base + seconds * 1000).toISOString();
+    const events: RunEvent[] = [
+      {
+        seq: 1,
+        type: "tool_call",
+        data: { callId: "late-tool", tool: "shell", status: "running", turnNumber: 1 },
+        at: at(1),
+      },
+      {
+        seq: 2,
+        type: "log",
+        data: {
+          event: "agent.turn_end",
+          turnNumber: 1,
+          output: [{ type: "toolCall", name: "shell" }],
+        },
+        at: at(2),
+      },
+      {
+        seq: 3,
+        type: "log",
+        data: {
+          event: "agent.turn_end",
+          turnNumber: 2,
+          output: [{ type: "toolCall", name: "shell" }],
+        },
+        at: at(3),
+      },
+      {
+        seq: 4,
+        type: "tool_call",
+        data: { callId: "late-tool", tool: "shell", status: "completed", output: "ok" },
+        at: at(4),
+      },
+    ];
+    const spans = projectRun(
+      { ...run, createdAt: new Date(base), updatedAt: new Date(base + 5000) },
+      events,
+      testConfig(),
+    );
+    const steps = spans.filter((span) => span.name === "agent.step");
+    const endSeconds = (turnNumber: number) => {
+      const step = steps.find(
+        (span) => span.attributes["agent.step.turn_number"] === turnNumber,
+      );
+      return step?.endTime[0];
+    };
+
+    expect(endSeconds(1)).toBe(base / 1000 + 4);
+    expect(endSeconds(2)).toBe(base / 1000 + 5);
+  });
+
   it("propagates the application session to every observation", async () => {
     const { run } = await seedSession(database);
     await appendEvent(database, run.id, "log", {
@@ -258,6 +315,63 @@ describe("durable observability delivery", () => {
       "important trajectory detail",
     );
     expect(turn?.attributes["langfuse.observation.output"]).toContain("private final answer");
+  });
+
+  it("contains a periodic drain rejection when export recovery cannot reach the database", async () => {
+    let failWrites = false;
+    const server = createServer((_request, response) => {
+      failWrites = true;
+      response.statusCode = 500;
+      response.end();
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("server did not bind");
+
+    const flakyDatabase = new Proxy(database, {
+      get(target, property, receiver) {
+        if (property === "update" && failWrites) {
+          return () => {
+            throw new Error("database unavailable during export recovery");
+          };
+        }
+        const value: unknown = Reflect.get(target, property, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const log: Logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      child: () => log,
+    };
+    const observability = createObservability({
+      config: testConfig({
+        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `http://127.0.0.1:${address.port}/v1/traces`,
+      }),
+      database: flakyDatabase,
+      log,
+    });
+
+    try {
+      await observability.start();
+      const run = await seedRun(database);
+      await completeRun(database, run.id, "succeeded");
+      await new Promise((resolve) => setTimeout(resolve, 6000));
+      expect(log.warn).toHaveBeenCalledWith(
+        "OTLP trace export recovery failed",
+        expect.objectContaining({ error: "database unavailable during export recovery" }),
+      );
+    } finally {
+      await observability.stop().catch(() => undefined);
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
   });
 });
 

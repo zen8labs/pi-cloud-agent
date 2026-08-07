@@ -56,6 +56,14 @@ export function createObservability(options: {
     await activeDrain;
   }
 
+  async function drainSafely(): Promise<void> {
+    try {
+      await drain();
+    } catch (error) {
+      log.warn("OTLP trace drain failed", { error: errorMessage(error) });
+    }
+  }
+
   async function drainPending(otelExporter: OTLPTraceExporter): Promise<void> {
     let batch: ExportBatchItem[] = [];
     try {
@@ -68,10 +76,17 @@ export function createObservability(options: {
       );
       await Promise.all(batch.map((item) => markExported(database, item.row)));
     } catch (error) {
-      await Promise.all(
-        batch.map((item) => retryExport(database, item.row, errorMessage(error))),
-      );
-      log.warn("OTLP trace export failed", { error: errorMessage(error) });
+      const exportError = errorMessage(error);
+      try {
+        await Promise.all(batch.map((item) => retryExport(database, item.row, exportError)));
+      } catch (recoveryError) {
+        log.warn("OTLP trace export recovery failed", {
+          error: errorMessage(recoveryError),
+          exportError,
+        });
+        return;
+      }
+      log.warn("OTLP trace export failed", { error: exportError });
     }
   }
 
@@ -96,9 +111,9 @@ export function createObservability(options: {
     async start(): Promise<void> {
       if (!enabled || timer) return;
       stopped = false;
-      timer = setInterval(() => void drain(), EXPORT_INTERVAL_MS);
+      timer = setInterval(() => void drainSafely(), EXPORT_INTERVAL_MS);
       timer.unref();
-      await drain();
+      await drainSafely();
       log.info("OTLP trace export enabled", {
         endpoint: config.observability.tracesEndpoint,
         exportDebugEvents: config.observability.exportDebugEvents,
@@ -109,14 +124,14 @@ export function createObservability(options: {
       stopped = true;
       if (timer) clearInterval(timer);
       timer = null;
-      if (activeDrain) await activeDrain;
+      if (activeDrain) await activeDrain.catch(() => undefined);
       if (exporter) await exporter.shutdown();
     },
 
     enqueue(runId: string): void {
       if (!enabled) return;
       void enqueueExport(database, runId, destination)
-        .then(() => drain())
+        .then(() => drainSafely())
         .catch((error) =>
           log.warn("could not enqueue OTLP trace", { error: errorMessage(error) }),
         );
