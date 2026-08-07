@@ -61,23 +61,19 @@ describe("resolveEffectivePlugins", () => {
 });
 
 describe("composeSkillText", () => {
-  it("replaces the profile skill when plugins contribute skills", () => {
-    const text = composeSkillText(
-      [
-        {
-          ...effective("context7"),
-          skillTexts: ["plugin skill A"],
-        },
-      ],
-      "profile skill",
-    );
+  it("composes enabled plugin skills", () => {
+    const text = composeSkillText([
+      {
+        ...effective("context7"),
+        skillTexts: ["plugin skill A"],
+      },
+    ]);
     expect(text).toBe("plugin skill A");
-    expect(text).not.toContain("profile skill");
   });
 
-  it("falls back to the profile skill when no plugin skills", () => {
-    expect(composeSkillText([effective("mcp-only")], "profile skill")).toBe("profile skill");
-    expect(composeSkillText([], undefined)).toBeUndefined();
+  it("returns no skill when no plugin contributes one", () => {
+    expect(composeSkillText([effective("mcp-only")])).toBeUndefined();
+    expect(composeSkillText([])).toBeUndefined();
   });
 
   it("composePrompt prepends skill when present", () => {

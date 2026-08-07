@@ -1,4 +1,3 @@
-import { getProfile } from "@pi-cloud-agent/profiles";
 import {
   SANDBOX_ENV,
   SANDBOX_PATHS,
@@ -50,11 +49,11 @@ const MAX_ATTEMPTS = 3;
 
 export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<void> {
   const { config, database, broker, sandbox } = deps;
-  const log = deps.log.child({ runId: run.id, profile: run.profile, repo: run.repoFullName });
+  const log = deps.log.child({ runId: run.id, repo: run.repoFullName });
 
   try {
     const task = buildTask(run);
-    const resolved = await resolvePluginsForRun(database, config, run.userId, run.profile);
+    const resolved = await resolvePluginsForRun(database, config, run.userId);
     await setRunPlugins(database, run.id, resolved.attached);
     if (resolved.attached.length > 0) {
       await appendEvent(database, run.id, "plugins.attached", {
@@ -184,16 +183,10 @@ async function handleFailure(
   await completeRun(deps.database, run.id, "failed", message);
 }
 
-/**
- * Ask the owning profile what the agent should do.
- *
- * The controller never looks inside a profile's config — the profile validates
- * and interprets its own settings, and an empty object means "apply your
- * defaults".
- */
 function buildTask(run: RunRow): TaskSpec {
-  const profile = getProfile(run.profile);
-  return profile.buildTask(run.trigger, {});
+  const prompt = run.trigger.prompt?.trim();
+  if (!prompt) throw new Error("the request requires a prompt");
+  return { prompt, repo: run.trigger.repo };
 }
 
 /**
@@ -218,7 +211,6 @@ function buildEnv(
     [SANDBOX_ENV.sessionId]: run.sessionId ?? "",
     [SANDBOX_ENV.workspaceResumed]: String(workspaceResumed),
 
-    [SANDBOX_ENV.profile]: task.profile,
     [SANDBOX_ENV.taskPrompt]: buildTaskPrompt(skillText, task.prompt, run.turnNumber),
 
     [SANDBOX_ENV.model]: `${model.provider}/${model.name}`,

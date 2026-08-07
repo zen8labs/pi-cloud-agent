@@ -37,7 +37,7 @@ The vocabulary for reasoning about a cloud agent, mapped onto the tree. Note tha
 | **Secret broker**: credentials for one run | `apps/controller/secrets/broker.ts` |
 | **Actuation**: how work becomes an outcome | *no code.* The agent uses `git` and `gh` itself |
 | **Observability**: what happened | `run_events` + `/runs/:id/stream` + `apps/web` |
-| **Profiles**: the vertical | `packages/profiles` |
+| **Task behavior**: the user request and attached skills | `packages/protocol`, `packages/plugins` |
 
 Actuation having no implementation is the point, not an omission. A controller that posted the agent's findings would need to parse them, and then it could disagree with what the agent actually did.
 
@@ -48,7 +48,7 @@ trigger ──► runs row (queued)
               │
               │  reconciler tick: claim with `for update skip locked`
               ▼
-         provisioning ──► profile.buildTask(trigger)
+         provisioning ──► request → TaskSpec
               │           broker.mintForRun()
               │           sandbox.create()
               │           attachSandbox(id, deadline)   ← first durable write
@@ -102,11 +102,10 @@ All three live in `packages/protocol`, so an implementation package depends on t
 
 | Contract | Resolver | Implementations |
 |---|---|---|
-| `Profile` | `getProfile(name)` | `general` (`pr-review` kept dormant as a rebuild seed) |
 | `SandboxProvider` | `createSandboxProvider(name, env)` | `microsandbox` (default), `e2b` |
 | `VCSProvider` | `createVcsProvider(name, accessToken)` | `github`, `azure-devops` |
 
-`TaskSpec` is the pivot: a profile turns a normalized `Trigger` into the repository, the prompt, and an optional budget. Everything below that line is infrastructure; everything above it is a vertical.
+`TaskSpec` is the pivot: a user request is resolved into the repository, prompt, and optional budget. Enabled plugin skills are composed into the prompt at provisioning. Everything below that line is infrastructure.
 
 Each factory validates its own slice of the environment, which is why adding a provider requires no change to the controller's configuration schema.
 

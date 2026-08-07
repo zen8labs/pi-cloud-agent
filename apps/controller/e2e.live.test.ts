@@ -93,7 +93,6 @@ describe("a real resumable session, end to end", () => {
 
       const { session, run } = await createSessionWithRun(database, {
         title: "Live resumability proof",
-        profile: "general",
         provider: "github",
         repoFullName: REPO,
         repo: trigger.repo,

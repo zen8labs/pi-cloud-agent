@@ -17,7 +17,6 @@ Every package and app has one, and it is the local entry point: what that packag
 | Package | Read |
 |---|---|
 | the contracts | [packages/protocol/README.md](packages/protocol/README.md) |
-| verticals | [packages/profiles/README.md](packages/profiles/README.md) |
 | plugins | [packages/plugins/README.md](packages/plugins/README.md) |
 | compute backends | [packages/sandbox/README.md](packages/sandbox/README.md) |
 | forges | [packages/vcs/README.md](packages/vcs/README.md) |
@@ -31,7 +30,6 @@ Every package and app has one, and it is the local entry point: what that packag
 
 | If you are… | Read |
 |---|---|
-| adding or changing a profile (a vertical) | [docs/adding-a-profile.md](docs/adding-a-profile.md) |
 | adding or changing a plugin (skills / MCP) | [docs/adding-a-plugin.md](docs/adding-a-plugin.md) |
 | adding a sandbox backend (Docker, Modal, Daytona…) | [docs/adding-a-sandbox-provider.md](docs/adding-a-sandbox-provider.md) |
 | adding a forge (GitHub Enterprise, Gitea, Forgejo…) | [docs/adding-a-vcs-provider.md](docs/adding-a-vcs-provider.md) |
@@ -50,7 +48,6 @@ apps/
   web/            operator dashboard (Next.js)
 packages/
   protocol/       the contracts: types, schemas, and the three provider interfaces
-  profiles/       verticals: the registry ships general only (pr-review dormant on disk as a rebuild seed)
   plugins/        plugin package format + attach resolution (skills / MCP)
   sandbox/        SandboxProvider implementations (e2b)
   vcs/            VCSProvider implementations (github, azure-devops)
@@ -88,7 +85,6 @@ pnpm sandbox:template    # rebuild the sandbox image and E2B template
 One file:
 
 ```bash
-pnpm vitest run packages/profiles/profiles.test.ts
 pnpm vitest run --project integration apps/controller/db/runs.integration.test.ts
 ```
 
@@ -116,7 +112,7 @@ Ask before:
 
 - adding a new contract to `packages/protocol`, or widening an existing one
 - moving the trust boundary, including adding a dependency to `packages/runtime`
-- adding controller-side knowledge of a specific profile or provider
+- adding controller-side knowledge of a specific workflow or provider
 - adding a dependency, a provider, or a service (a queue, a cache, a broker)
 - introducing an agent server, a polling bridge, or controller-side parsing of agent output; Pi stays an implementation detail of the sandbox image
 - anything that trades flexibility for a one-time convenience
@@ -125,7 +121,7 @@ For reversible, local, within-contract work, just proceed.
 
 ## Design philosophy: think in primitives, not features
 
-The primitive is the product; workflows outlast technologies. Pi, sandbox providers, and model gateways are implementation details. `TaskSpec`, `Profile`, `SandboxProvider`, and `VCSProvider` are the product.
+The primitive is the product; workflows outlast technologies. Pi, sandbox providers, and model gateways are implementation details. `TaskSpec`, `SandboxProvider`, and `VCSProvider` are the product.
 
 - Start from the outcome, then find the smallest stable abstraction that enables it. Do not add a feature where a sharper primitive would do.
 - Treat every new feature as a liability. The default answer to "should we add this?" is "not yet, and probably not here."

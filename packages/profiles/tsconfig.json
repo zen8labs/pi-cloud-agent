@@ -1,5 +1,0 @@
-{
-  "extends": "@pi-cloud-agent/tsconfig/node.json",
-  "include": ["**/*.ts"],
-  "exclude": ["node_modules"]
-}

@@ -60,7 +60,6 @@ export function sessionRoutes(): Hono<AppEnv> {
     const created = await createSessionWithRun(c.get("database"), {
       userId: user.id,
       title: titleFrom(body.prompt, body.repo),
-      profile: manual.profile,
       provider: body.provider,
       repoFullName: body.repo,
       repo: manual.repo,
@@ -181,7 +180,6 @@ async function toSessionSummary(
     id: session.id,
     status: sessionStatus(activeRun),
     title: session.title,
-    profile: session.profile,
     provider: session.provider,
     repo: session.repoFullName,
     model: session.model,

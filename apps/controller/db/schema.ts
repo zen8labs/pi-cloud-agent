@@ -118,7 +118,6 @@ export const sessions = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id").references(() => appUsers.id, { onDelete: "set null" }),
     title: text("title").notNull(),
-    profile: text("profile").notNull(),
     provider: text("provider").notNull(),
     repoFullName: text("repo_full_name").notNull(),
     repo: jsonb("repo").notNull().$type<RepoRef>(),
@@ -161,19 +160,13 @@ export const runs = pgTable(
     sessionId: uuid("session_id").references(() => sessions.id, { onDelete: "cascade" }),
     turnNumber: integer("turn_number"),
 
-    /** Which profile owns this run's behavior. */
-    profile: text("profile").notNull(),
     status: text("status").notNull().default("queued").$type<RunStatus>(),
 
     /** Coordinates the trusted side needs: token minting, listing, filtering. */
     provider: text("provider").notNull(),
     repoFullName: text("repo_full_name").notNull(),
 
-    /**
-     * The normalized trigger, verbatim. Profile-specific detail (PR number, the
-     * user's prompt, the comment command) lives in here rather than as columns,
-     * so adding a profile never adds a column.
-     */
+    /** The normalized request/event, verbatim, for replay and diagnosis. */
     trigger: jsonb("trigger").notNull().$type<Trigger>(),
 
     /** Resolved at creation so a run is reproducible even if config changes. */

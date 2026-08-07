@@ -17,7 +17,6 @@
     "@earendil-works/pi-ai": "catalog:",
     "@earendil-works/pi-coding-agent": "catalog:",
     "@hono/node-server": "catalog:",
-    "@pi-cloud-agent/profiles": "workspace:*",
     "@pi-cloud-agent/protocol": "workspace:*",
     "@pi-cloud-agent/plugins": "workspace:*",
     "@pi-cloud-agent/sandbox": "workspace:*",

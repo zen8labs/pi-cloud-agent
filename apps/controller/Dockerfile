@@ -14,7 +14,6 @@ RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/controller/package.json apps/controller/
 COPY packages/protocol/package.json packages/protocol/
-COPY packages/profiles/package.json packages/profiles/
 COPY packages/sandbox/package.json packages/sandbox/
 COPY packages/vcs/package.json packages/vcs/
 COPY packages/tsconfig/package.json packages/tsconfig/

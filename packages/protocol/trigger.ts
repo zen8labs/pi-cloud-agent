@@ -6,8 +6,7 @@ import { repoRefSchema } from "./repo";
  *
  * Every entry point — the dashboard today, a future Slack or Linear adapter —
  * narrows to this shape before anything else runs. The controller
- * stores it verbatim on the run row, which is what makes a run replayable: the
- * trigger plus the profile fully determines the task.
+ * stores it verbatim on the run row, which is what makes a run replayable.
  */
 export const TRIGGER_KINDS = [
   /** A human asked for something directly (dashboard, API). */

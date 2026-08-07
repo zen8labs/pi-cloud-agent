@@ -10,7 +10,7 @@ The philosophy comes from [pi](https://mariozechner.at/posts/2025-11-30-pi-codin
 
 A *cloud agent* is an agent that runs headless. It's triggered by an event (a PR, a chat message, a schedule), works inside isolated compute, and actuates its own outcomes (posts comments, pushes commits). Background work needs no operator loop; a chat-triggered session may accept later turns without keeping the agent process alive between them.
 
-Today every vendor ships a monolithic cloud agent. We want the opposite: a **minimal, task-agnostic core** that anyone extends into their own vertical (PR review, complete-a-PR, deep research, spreadsheet work…) by dropping in a *profile*, not by rewriting the core. An OSS core, with an ecosystem of profiles on top.
+Today every vendor ships a monolithic cloud agent. We want the opposite: a **minimal, task-agnostic core** that accepts a user request and lets anyone extend agent behavior with skills and plugins, not by rewriting the core.
 
 ## What a cloud agent is, from first principles
 
@@ -22,8 +22,7 @@ Forget existing products for a moment. If you want a coding agent to do useful w
 - **Secret broker**: the agent needs credentials (to clone, to comment, to push), but it's running untrusted code. The current MVP hands a connected OAuth token into the sandbox as a known limitation; the planned broker must authorize operations without exposing a reusable token.
 - **Actuation**: the run has to change something in the outside world. A PR comment, a commit, a status. The agent does this itself with ordinary tools (`git`, `gh`), the same way a human would.
 - **Observability**: no human is watching the loop live, so the run has to be *recorded*, both streamed as it happens and stored for later. This is how you trust, debug, and improve the agent.
-- **Profiles**: a way to turn the generic core into a specific job (review this PR, triage this issue) without editing the core. This is the extension surface and the whole point of the project.
-- **Plugins**: installable bundles of skills and/or MCP servers that attach beside a profile for a user. The kernel stays three contracts; plugins are a named distribution primitive, not a workflow engine.
+- **Skills/plugins**: installable instructions and MCP capabilities that attach to a user request. The kernel stays infrastructure-only; plugins are a named distribution primitive, not a workflow engine.
 
 Everything we build should slot into one of these seven and stay out of the others.
 
@@ -47,4 +46,4 @@ The one place we are *not* minimal, because the cloud makes it real: **a credent
 
 If pi is right that a coding agent can be tiny and still excellent, a cloud agent can be too. Build the smallest correct core, make the extension surface delightful, and let an ecosystem grow the verticals.
 
-The bet pays off in two directions at once. Someone who wants a specific agent (their review standards, their model, their infrastructure) writes a profile instead of a backend. And someone who wants to *understand* how a background agent works can read the whole thing in an evening, which is also the only honest reason to trust it with a credential.
+The bet pays off in two directions at once. Someone who wants a specific agent (their review standards, their model, their infrastructure) writes a skill or plugin instead of a backend. And someone who wants to *understand* how a background agent works can read the whole thing in an evening, which is also the only honest reason to trust it with a credential.

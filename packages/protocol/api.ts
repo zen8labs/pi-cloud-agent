@@ -16,7 +16,6 @@ export const createRunRequestSchema = z.object({
   /** Provider-specific full repository name. */
   repo: z.string().min(3),
   prompt: z.string().min(1),
-  profile: z.string().default("general"),
   provider: z.string().default("github"),
   /** Branch to clone. Omitted means "ask the provider for the default". */
   branch: z.string().nullish(),
@@ -50,7 +49,6 @@ export type SessionCheckpoint = z.infer<typeof sessionCheckpointSchema>;
 export interface RunSummary {
   id: string;
   status: RunStatus;
-  profile: string;
   provider: string;
   repo: string;
   /** Resolved when the run was created, so it stays accurate if config changes. */
@@ -88,7 +86,6 @@ export interface SessionSummary {
   id: string;
   status: SessionStatus;
   title: string;
-  profile: string;
   provider: string;
   repo: string;
   model: string;
@@ -106,17 +103,6 @@ export interface SessionDetail extends SessionSummary {
 
 export interface SessionListResponse {
   sessions: SessionSummary[];
-}
-
-export interface ProfileInfo {
-  name: string;
-  description: string;
-  configJsonSchema: Record<string, unknown>;
-}
-
-export interface ConfigResponse {
-  profiles: ProfileInfo[];
-  defaultProfile: string;
 }
 
 export interface ReposResponse {
