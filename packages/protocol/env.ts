@@ -44,6 +44,8 @@ export const SANDBOX_ENV = {
   repoBaseSha: "REPO_BASE_SHA",
   repoHeadSha: "REPO_HEAD_SHA",
   repoHeadBranch: "REPO_HEAD_BRANCH",
+  /** Original session revision used for the cumulative Changes sidebar. */
+  sessionBaseSha: "SESSION_BASE_SHA",
 
   /** Git credentials, consumed by the checkout's credential helper. */
   scmToken: "SCM_TOKEN",

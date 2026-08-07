@@ -21,6 +21,7 @@ export interface RuntimeConfig {
   controlPlaneUrl: string;
   callbackToken: string;
   sessionId: string;
+  sessionBaseSha: string;
   workspaceResumed: boolean;
   debugEvents: boolean;
 
@@ -87,6 +88,7 @@ export function readConfig(): RuntimeConfig {
     controlPlaneUrl: required(SANDBOX_ENV.controlPlaneUrl).replace(/\/$/, ""),
     callbackToken: required(SANDBOX_ENV.callbackToken),
     sessionId: optional(SANDBOX_ENV.sessionId),
+    sessionBaseSha: optional(SANDBOX_ENV.sessionBaseSha),
     workspaceResumed: optional(SANDBOX_ENV.workspaceResumed) === "true",
     debugEvents: optional(SANDBOX_ENV.debugEvents) === "true",
 

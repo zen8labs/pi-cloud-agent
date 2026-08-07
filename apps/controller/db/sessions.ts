@@ -217,6 +217,28 @@ export async function saveSessionCheckpoint(
   return updated.length > 0;
 }
 
+/** Set the immutable original revision once the first turn reports its diff. */
+export async function saveSessionDiffBaseSha(
+  database: Database,
+  run: RunRow,
+  baseSha: string,
+): Promise<boolean> {
+  const sessionId = run.sessionId;
+  if (!sessionId) return false;
+  const updated = await database
+    .update(sessions)
+    .set({ diffBaseSha: baseSha, updatedAt: new Date() })
+    .where(
+      and(
+        eq(sessions.id, sessionId),
+        eq(sessions.activeRunId, run.id),
+        isNull(sessions.diffBaseSha),
+      ),
+    )
+    .returning({ id: sessions.id });
+  return updated.length > 0;
+}
+
 export async function parkSession(
   database: Database,
   run: RunRow,

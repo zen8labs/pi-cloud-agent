@@ -6,7 +6,8 @@ import type {
   SessionDetail,
   ThinkingLevel,
 } from "@pi-cloud-agent/protocol";
-import { ArrowLeftIcon, GitBranchIcon, SquareIcon } from "lucide-react";
+import { ArrowLeftIcon, GitBranchIcon, GitCompareArrowsIcon, SquareIcon } from "lucide-react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -33,10 +34,16 @@ import {
 import { resolveBranch, summarizeChanges } from "@/lib/session-meta";
 import { useSession } from "@/lib/useSession";
 
+const SessionDiffSidebar = dynamic(
+  () => import("@/components/SessionDiffSidebar").then((module) => module.SessionDiffSidebar),
+  { ssr: false },
+);
+
 export default function SessionPage() {
   const { id } = useParams<{ id: string }>();
   const { session, turns, error, refresh } = useSession(id);
   const [cancelling, setCancelling] = useState(false);
+  const [diffOpen, setDiffOpen] = useState(false);
   const latest = turns.at(-1)?.run ?? null;
   const active = session ? session.status !== "idle" : false;
   const allEvents = useMemo(() => turns.flatMap((turn) => turn.events), [turns]);
@@ -65,6 +72,8 @@ export default function SessionPage() {
         active={active}
         cancelling={cancelling}
         onCancel={cancel}
+        diffOpen={diffOpen}
+        onToggleDiff={() => setDiffOpen((current) => !current)}
       />
       <div className="flex min-h-0 min-w-0 flex-1">
         <section className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -110,7 +119,11 @@ export default function SessionPage() {
             </div>
           )}
         </section>
-        <SessionMeta session={session} run={latest} branch={branch} changes={changes} />
+        {diffOpen ? (
+          <SessionDiffSidebar turns={turns} onClose={() => setDiffOpen(false)} />
+        ) : (
+          <SessionMeta session={session} run={latest} branch={branch} changes={changes} />
+        )}
       </div>
     </div>
   );
@@ -121,11 +134,15 @@ function SessionHeader({
   active,
   cancelling,
   onCancel,
+  diffOpen,
+  onToggleDiff,
 }: {
   session: SessionDetail | null;
   active: boolean;
   cancelling: boolean;
   onCancel: () => void;
+  diffOpen: boolean;
+  onToggleDiff: () => void;
 }) {
   return (
     <header className="app-header flex h-12 shrink-0 items-center gap-2.5 px-3 sm:px-4">
@@ -152,6 +169,15 @@ function SessionHeader({
           <SquareIcon className="size-2.5" /> {cancelling ? "Stopping…" : "Cancel"}
         </button>
       )}
+      <button
+        type="button"
+        onClick={onToggleDiff}
+        aria-label={diffOpen ? "Hide changes" : "Show changes"}
+        aria-pressed={diffOpen}
+        className={`hidden size-7 place-items-center rounded-md transition-colors hover:bg-accent hover:text-foreground xl:grid ${diffOpen ? "bg-accent text-foreground" : "text-muted-foreground"}`}
+      >
+        <GitCompareArrowsIcon className="size-4" />
+      </button>
     </header>
   );
 }

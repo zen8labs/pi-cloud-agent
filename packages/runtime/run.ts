@@ -1,7 +1,13 @@
 import { runAgentSession } from "./agent";
 import { createRuntimeRedactor, readConfig } from "./config";
 import { createReporter } from "./reporter";
-import { configureGitCredentials, prepareCheckout, runSetupScript } from "./workspace";
+import {
+  configureGitCredentials,
+  gitDiff,
+  gitRevision,
+  prepareCheckout,
+  runSetupScript,
+} from "./workspace";
 
 const clean = createRuntimeRedactor();
 
@@ -32,8 +38,18 @@ async function main(): Promise<void> {
       stage = "repository setup";
       await runSetupScript(config, reporter);
     }
+    const baseSha = config.sessionBaseSha || (await gitRevision(config.repo.path));
     stage = "agent session";
     await runAgentSession(config, reporter);
+
+    stage = "capturing code changes";
+    try {
+      reporter.log("git.diff", { ...(await gitDiff(config.repo.path, baseSha)) });
+    } catch (error) {
+      reporter.log("git.diff_failed", {
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    }
 
     // Drain telemetry first so the feed is complete before the run closes.
     await reporter.flush();

@@ -21,7 +21,7 @@ interface CommandResult {
 function run(
   command: string,
   args: string[],
-  options: { cwd?: string; timeoutMs?: number } = {},
+  options: { cwd?: string; timeoutMs?: number; maxOutputChars?: number } = {},
 ): Promise<CommandResult> {
   return new Promise((resolve) => {
     const child = spawn(command, args, { cwd: options.cwd, env: process.env });
@@ -30,7 +30,8 @@ function run(
     let settled = false;
     const collect = (chunk: Buffer) => {
       output += chunk.toString();
-      if (output.length > MAX_OUTPUT_CHARS) output = output.slice(-MAX_OUTPUT_CHARS);
+      const maxOutputChars = options.maxOutputChars ?? MAX_OUTPUT_CHARS;
+      if (output.length > maxOutputChars) output = output.slice(-maxOutputChars);
     };
     child.stdout.on("data", collect);
     child.stderr.on("data", collect);
@@ -68,6 +69,98 @@ function run(
       }),
     );
   });
+}
+
+const DIFF_MAX_OUTPUT_CHARS = 2_000_000;
+
+/** Capture the revision at the start of a turn so committed edits are visible. */
+export async function gitRevision(path: string): Promise<string> {
+  const result = await run("git", ["rev-parse", "HEAD"], { cwd: path, timeoutMs: 30_000 });
+  if (result.code !== 0 || !result.output) {
+    throw new Error(`could not determine the checkout revision: ${result.output}`);
+  }
+  return result.output.trim();
+}
+
+export interface GitDiffSnapshot {
+  patch: string;
+  baseSha: string;
+  headSha: string;
+  files: number;
+  added: number;
+  removed: number;
+  truncated: boolean;
+}
+
+/**
+ * Capture tracked, staged, committed-during-turn, deleted, renamed, and
+ * untracked changes without modifying the checkout.
+ */
+export async function gitDiff(path: string, baseSha: string): Promise<GitDiffSnapshot> {
+  const headSha = await gitRevision(path);
+  const tracked = await run(
+    "git",
+    ["diff", "--no-ext-diff", "--binary", "--find-renames", baseSha, "--"],
+    { cwd: path, timeoutMs: 60_000, maxOutputChars: DIFF_MAX_OUTPUT_CHARS },
+  );
+  if (tracked.code !== 0)
+    throw new Error(`could not capture the checkout diff: ${tracked.output}`);
+
+  const untracked = await run("git", ["ls-files", "--others", "--exclude-standard", "-z"], {
+    cwd: path,
+    timeoutMs: 30_000,
+    maxOutputChars: 200_000,
+  });
+  if (untracked.code !== 0)
+    throw new Error(`could not list untracked files: ${untracked.output}`);
+
+  const chunks = [tracked.output];
+  for (const file of untracked.output.split("\0").filter(Boolean)) {
+    const fileDiff = await run(
+      "git",
+      ["diff", "--no-index", "--no-ext-diff", "--binary", "--", "/dev/null", file],
+      { cwd: path, timeoutMs: 60_000, maxOutputChars: DIFF_MAX_OUTPUT_CHARS },
+    );
+    // `git diff --no-index` returns 1 when files differ, which is the success
+    // case here. Any other non-zero result is a genuine capture failure.
+    if (fileDiff.code > 1) throw new Error(`could not capture ${file}: ${fileDiff.output}`);
+    chunks.push(fileDiff.output);
+  }
+
+  const limited = limitDiff(chunks.filter(Boolean).join("\n"));
+  return {
+    patch: limited.patch,
+    baseSha,
+    headSha,
+    files: countDiffFiles(limited.patch),
+    added: countDiffLines(limited.patch, "+"),
+    removed: countDiffLines(limited.patch, "-"),
+    truncated: limited.truncated,
+  };
+}
+
+function limitDiff(patch: string): { patch: string; truncated: boolean } {
+  if (patch.length <= DIFF_MAX_OUTPUT_CHARS) return { patch, truncated: false };
+  const chunks = patch.split(/(?=^diff --git )/m);
+  let output = "";
+  for (const chunk of chunks) {
+    if (output.length + chunk.length > DIFF_MAX_OUTPUT_CHARS) break;
+    output += chunk;
+  }
+  return {
+    patch: `${output.trimEnd()}\n\n[diff truncated by the runtime]\n`,
+    truncated: true,
+  };
+}
+
+function countDiffFiles(patch: string): number {
+  return patch.split("\ndiff --git ").length - (patch.startsWith("diff --git ") ? 0 : 1);
+}
+
+function countDiffLines(patch: string, prefix: "+" | "-"): number {
+  return patch
+    .split("\n")
+    .filter((line) => line.startsWith(prefix) && !line.startsWith(`${prefix}${prefix}`)).length;
 }
 
 /**
@@ -167,16 +260,24 @@ export async function prepareCheckout(
     }
   }
 
-  if (repo.baseSha) {
-    // Fetched but not checked out: the agent needs it to diff against the merge
-    // base, and a shallow clone would not otherwise have it.
-    await run("git", ["fetch", "--depth", String(CLONE_DEPTH), "origin", repo.baseSha], {
-      cwd: repo.path,
-    });
-  }
+  await fetchDiffRevisions(config);
 
   reporter.log("git.checkout_ready", { path: repo.path, headSha: repo.headSha || null });
   return "created";
+}
+
+async function fetchDiffRevisions(config: RuntimeConfig): Promise<void> {
+  const revisions = [config.repo.baseSha, config.sessionBaseSha].filter(
+    (revision, index, all): revision is string =>
+      Boolean(revision) && all.indexOf(revision) === index,
+  );
+  for (const revision of revisions) {
+    // Fetched but not checked out: a shallow clone would not otherwise have the
+    // revision needed for a cumulative diff.
+    await run("git", ["fetch", "--depth", String(CLONE_DEPTH), "origin", revision], {
+      cwd: config.repo.path,
+    });
+  }
 }
 
 async function reuseCheckout(path: string, reporter: Reporter): Promise<boolean> {

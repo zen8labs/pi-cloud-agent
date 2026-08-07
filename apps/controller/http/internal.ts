@@ -11,7 +11,11 @@ import { Hono } from "hono";
 import type { Database } from "../db/client";
 import { appendEvent, completeRun, getRunByCallbackToken } from "../db/runs";
 import type { RunRow } from "../db/schema";
-import { getSessionForRun, saveSessionCheckpoint } from "../db/sessions";
+import {
+  getSessionForRun,
+  saveSessionCheckpoint,
+  saveSessionDiffBaseSha,
+} from "../db/sessions";
 import { persistRefreshedOAuthCredential } from "../llm/connections";
 import type { Observability } from "../observability";
 import type { AppEnv } from "./deps";
@@ -43,6 +47,10 @@ export function internalRoutes(observability?: Observability): Hono<AppEnv> {
       isDebugAgentEvent(parsed.data.data.event)
     ) {
       return c.json({ stored: false });
+    }
+
+    if (parsed.data.type === "log" && parsed.data.data.event === "git.diff") {
+      await saveDiffBase(c.get("database"), run, parsed.data.data);
     }
 
     // Second line of defence. The runtime scrubs its own secrets before sending —
@@ -132,6 +140,17 @@ export function internalRoutes(observability?: Observability): Hono<AppEnv> {
   });
 
   return app;
+}
+
+async function saveDiffBase(
+  database: Database,
+  run: RunRow,
+  data: Record<string, unknown>,
+): Promise<void> {
+  const baseSha = data.baseSha;
+  if (typeof baseSha === "string" && baseSha.length > 0) {
+    await saveSessionDiffBaseSha(database, run, baseSha);
+  }
 }
 
 /** The run behind the callback token, or the 403 to return when there is none. */

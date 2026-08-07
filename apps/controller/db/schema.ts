@@ -134,6 +134,9 @@ export const sessions = pgTable(
     /** Pi's native JSONL session. Opaque to the controller. */
     agentCheckpoint: text("agent_checkpoint"),
 
+    /** Original checkout revision used for the cumulative session diff. */
+    diffBaseSha: text("diff_base_sha"),
+
     /** Provider-owned workspace retained while the session is idle. */
     sandboxProvider: text("sandbox_provider"),
     sandboxId: text("sandbox_id"),
