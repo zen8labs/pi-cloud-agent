@@ -116,9 +116,7 @@ export async function runAgentSession(
       mcp: Boolean(config.mcpConfig),
     });
 
-    const unsubscribe = session.subscribe(
-      createAgentEventHandler(reporter, config.debugEvents),
-    );
+    const unsubscribe = session.subscribe(createAgentEventHandler(reporter));
 
     try {
       await session.prompt(config.prompt);
@@ -152,12 +150,11 @@ export async function runAgentSession(
 
 export function createAgentEventHandler(
   reporter: Reporter,
-  debugEvents: boolean,
 ): (event: AgentSessionEvent) => void {
   let turnNumber = 0;
   let turnStartedAt: string | null = null;
   return (event) => {
-    reportDebugAgentEvent(event, reporter, debugEvents);
+    reportDebugAgentEvent(event, reporter);
     switch (event.type) {
       case "turn_start":
         turnNumber += 1;
@@ -238,12 +235,7 @@ export function createAgentEventHandler(
   };
 }
 
-function reportDebugAgentEvent(
-  event: AgentSessionEvent,
-  reporter: Reporter,
-  enabled: boolean,
-): void {
-  if (!enabled) return;
+function reportDebugAgentEvent(event: AgentSessionEvent, reporter: Reporter): void {
   switch (event.type) {
     case "agent_start":
       reporter.log(AGENT_DEBUG_EVENT.start);

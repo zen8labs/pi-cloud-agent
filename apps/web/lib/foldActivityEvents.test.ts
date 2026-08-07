@@ -56,12 +56,12 @@ describe("foldEvents thinking", () => {
       null,
     );
 
-    expect(blocks.map((block) => block.kind)).toEqual(["work", "thinking", "assistant"]);
-    expect(blocks[1]).toMatchObject({
+    expect(blocks.map((block) => block.kind)).toEqual(["thinking", "assistant"]);
+    expect(blocks[0]).toMatchObject({
       kind: "thinking",
       text: "First, inspect the evidence.",
     });
-    expect(blocks[2]).toMatchObject({ kind: "assistant", text: "Here is the answer." });
+    expect(blocks[1]).toMatchObject({ kind: "assistant", text: "Here is the answer." });
   });
 
   it("keeps identical reasoning when it genuinely recurs in a later turn", () => {
@@ -84,16 +84,28 @@ describe("foldEvents thinking", () => {
     );
 
     expect(blocks.map((block) => block.kind)).toEqual([
-      "work",
       "thinking",
       "assistant",
-      "work",
       "thinking",
       "assistant",
     ]);
     expect(
       blocks.filter((block) => block.kind === "thinking").map((block) => block.text),
     ).toEqual(["Let me check the tests.", "Let me check the tests."]);
+  });
+
+  it("does not render raw agent lifecycle logs", () => {
+    const blocks = foldEvents(
+      [
+        log(1, "agent.session_created", { sessionId: "session-1" }),
+        log(2, "agent.retry", { attempt: 1 }),
+        log(3, "agent.session_checkpointed", { bytes: 42 }),
+        log(4, "agent.session_complete", { sessionId: "session-1" }),
+      ],
+      null,
+    );
+
+    expect(blocks).toEqual([]);
   });
 
   it("joins multiple reasoning parts from one completed turn", () => {

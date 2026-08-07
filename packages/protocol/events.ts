@@ -49,6 +49,12 @@ export const AGENT_DEBUG_EVENT = {
   messageEnd: "agent.message_end",
   queueUpdate: "agent.queue_update",
   thinkingLevelChanged: "agent.thinking_level_changed",
+  turnStart: "agent.turn_start",
+  sessionCreated: "agent.session_created",
+  sessionRestored: "agent.session_restored",
+  sessionCheckpointed: "agent.session_checkpointed",
+  sessionComplete: "agent.session_complete",
+  oauthCredentialSuperseded: "agent.oauth_credential_superseded",
 } as const;
 
 const DEBUG_AGENT_EVENTS = new Set<string>(Object.values(AGENT_DEBUG_EVENT));

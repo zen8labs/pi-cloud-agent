@@ -15,7 +15,7 @@ function recordingReporter(): Reporter {
 
 it("does not enqueue high-frequency progress that the controller discards", () => {
   const reporter = recordingReporter();
-  const handle = createAgentEventHandler(reporter, false);
+  const handle = createAgentEventHandler(reporter);
 
   handle({
     type: "tool_execution_update",
@@ -32,7 +32,7 @@ it("does not enqueue high-frequency progress that the controller discards", () =
 
 it("does not serialize unknown harness event objects", () => {
   const reporter = recordingReporter();
-  const handle = createAgentEventHandler(reporter, false);
+  const handle = createAgentEventHandler(reporter);
   const event = { type: "future_event" } as unknown as AgentSessionEvent;
 
   handle(event);
@@ -41,19 +41,9 @@ it("does not serialize unknown harness event objects", () => {
   expect(reporter.log).not.toHaveBeenCalled();
 });
 
-it("does not emit debug lifecycle events when debug export is disabled", () => {
+it("relays debug lifecycle events through the reporter policy boundary", () => {
   const reporter = recordingReporter();
-  const handle = createAgentEventHandler(reporter, false);
-
-  handle({ type: "message_start", message: { role: "assistant" } } as AgentSessionEvent);
-  handle({ type: "message_end", message: { role: "assistant" } } as AgentSessionEvent);
-
-  expect(reporter.log).not.toHaveBeenCalled();
-});
-
-it("emits debug lifecycle events when debug export is enabled", () => {
-  const reporter = recordingReporter();
-  const handle = createAgentEventHandler(reporter, true);
+  const handle = createAgentEventHandler(reporter);
 
   handle({ type: "message_start", message: { role: "assistant" } } as AgentSessionEvent);
   handle({ type: "message_end", message: { role: "assistant" } } as AgentSessionEvent);

@@ -164,7 +164,7 @@ function foldToken(blocks: FlatBlock[], state: FoldState, event: RunEvent): void
   const content = String(event.data?.content ?? "");
   const last = blocks.at(-1);
   if (!content) return;
-  if (last?.kind === "assistant") last.text += content;
+  if (last?.kind === "assistant" && state.assistantStartIndex !== null) last.text += content;
   else {
     if (state.assistantStartIndex === null) state.assistantStartIndex = blocks.length;
     blocks.push({ key: `assistant-${event.seq}`, kind: "assistant", text: content });
@@ -216,11 +216,13 @@ function foldStatus(blocks: FlatBlock[], event: RunEvent): void {
 
 function foldLog(blocks: FlatBlock[], state: FoldState, event: RunEvent): void {
   const data = event.data ?? {};
-  if (data.event === "agent.turn_start") state.assistantStartIndex = null;
-  if (data.event === "agent.turn_end") {
+  const name = typeof data.event === "string" ? data.event : "";
+  if (name === "agent.turn_start") state.assistantStartIndex = null;
+  if (name === "agent.turn_end") {
     foldTurnThinking(blocks, state, data.output, event);
     return;
   }
+  if (name.startsWith("agent.")) return;
   const text = logText(data);
   if (text) blocks.push({ key: `log-${event.seq}`, kind: "log", text, at: event.at });
 }

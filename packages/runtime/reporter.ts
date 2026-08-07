@@ -1,7 +1,8 @@
-import type {
-  OAuthCredentialUpdate,
-  RunEventInput,
-  RunStatusReport,
+import {
+  isDebugAgentEvent,
+  type OAuthCredentialUpdate,
+  type RunEventInput,
+  type RunStatusReport,
 } from "@pi-cloud-agent/protocol";
 import type { RuntimeConfig } from "./config";
 import { createRuntimeRedactor } from "./config";
@@ -66,6 +67,7 @@ export function createReporter(config: RuntimeConfig): Reporter {
     },
 
     log(event: string, fields: Record<string, unknown> = {}): void {
+      if (!config.debugEvents && isDebugAgentEvent(event)) return;
       reporter.event({ type: "log", data: { event, ...fields } });
     },
 

@@ -94,6 +94,29 @@ describe("reporter", () => {
     ).toEqual(["a", "b", "c"]);
   });
 
+  it("does not enqueue debug lifecycle logs when debug export is disabled", async () => {
+    const reporter = createReporter(readConfig());
+    reporter.log("agent.session_created");
+    reporter.log("agent.turn_start");
+    reporter.log("agent.message_start");
+    reporter.log("agent.session_checkpointed");
+    reporter.log("agent.turn_end");
+    await reporter.flush();
+
+    expect(sent.map((entry) => (entry.body as { data: { event: string } }).data.event)).toEqual(
+      ["agent.turn_end"],
+    );
+  });
+
+  it("enqueues debug lifecycle logs when debug export is enabled", async () => {
+    vi.stubEnv(SANDBOX_ENV.debugEvents, "true");
+    const reporter = createReporter(readConfig());
+    reporter.log("agent.turn_start");
+    await reporter.flush();
+
+    expect(sent).toHaveLength(1);
+  });
+
   it("swallows a telemetry failure — losing a log line must not fail a run", async () => {
     const reporter = createReporter(readConfig());
     failNext = 1;
