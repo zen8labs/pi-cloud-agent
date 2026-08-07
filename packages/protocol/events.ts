@@ -40,6 +40,23 @@ export const runEventInputSchema = z.discriminatedUnion("type", [
 ]);
 
 export type RunEventInput = z.infer<typeof runEventInputSchema>;
+
+export const AGENT_DEBUG_EVENT = {
+  start: "agent.start",
+  end: "agent.end",
+  settled: "agent.settled",
+  messageStart: "agent.message_start",
+  messageEnd: "agent.message_end",
+  queueUpdate: "agent.queue_update",
+  thinkingLevelChanged: "agent.thinking_level_changed",
+} as const;
+
+const DEBUG_AGENT_EVENTS = new Set<string>(Object.values(AGENT_DEBUG_EVENT));
+
+export function isDebugAgentEvent(name: string): boolean {
+  return DEBUG_AGENT_EVENTS.has(name);
+}
+
 /** Sandbox telemetry, terminal status, plus controller-emitted attach metadata. */
 export type RunEventType = RunEventInput["type"] | "status" | "plugins.attached";
 

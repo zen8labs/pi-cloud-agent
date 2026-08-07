@@ -10,7 +10,7 @@ import {
   ModelRuntime,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { SANDBOX_ENV } from "@pi-cloud-agent/protocol";
+import { AGENT_DEBUG_EVENT, SANDBOX_ENV } from "@pi-cloud-agent/protocol";
 import type { RuntimeConfig } from "./config";
 import { persistRefreshedOAuthCredential } from "./oauth-credential";
 import type { Reporter } from "./reporter";
@@ -116,7 +116,9 @@ export async function runAgentSession(
       mcp: Boolean(config.mcpConfig),
     });
 
-    const unsubscribe = session.subscribe(createAgentEventHandler(reporter));
+    const unsubscribe = session.subscribe(
+      createAgentEventHandler(reporter, config.debugEvents),
+    );
 
     try {
       await session.prompt(config.prompt);
@@ -150,23 +152,13 @@ export async function runAgentSession(
 
 export function createAgentEventHandler(
   reporter: Reporter,
+  debugEvents: boolean,
 ): (event: AgentSessionEvent) => void {
   let turnNumber = 0;
   let turnStartedAt: string | null = null;
   return (event) => {
+    reportDebugAgentEvent(event, reporter, debugEvents);
     switch (event.type) {
-      case "agent_start":
-        reporter.log("agent.start");
-        break;
-      case "agent_end":
-        reporter.log("agent.end", {
-          willRetry: event.willRetry,
-          messageCount: event.messages.length,
-        });
-        break;
-      case "agent_settled":
-        reporter.log("agent.settled");
-        break;
       case "turn_start":
         turnNumber += 1;
         turnStartedAt = new Date().toISOString();
@@ -179,12 +171,6 @@ export function createAgentEventHandler(
         }
         break;
       }
-      case "message_start":
-        reporter.log("agent.message_start", summarizeMessage(event.message));
-        break;
-      case "message_end":
-        reporter.log("agent.message_end", summarizeMessage(event.message));
-        break;
       case "tool_execution_start":
         reporter.event({
           type: "tool_call",
@@ -245,20 +231,48 @@ export function createAgentEventHandler(
           errorMessage: event.errorMessage,
         });
         break;
-      case "queue_update":
-        reporter.log("agent.queue_update", {
-          steeringCount: event.steering.length,
-          followUpCount: event.followUp.length,
-        });
-        break;
-      case "thinking_level_changed":
-        reporter.log("agent.thinking_level_changed", { level: event.level });
-        break;
       case "tool_execution_update":
       case "bash_execution_update":
         break;
     }
   };
+}
+
+function reportDebugAgentEvent(
+  event: AgentSessionEvent,
+  reporter: Reporter,
+  enabled: boolean,
+): void {
+  if (!enabled) return;
+  switch (event.type) {
+    case "agent_start":
+      reporter.log(AGENT_DEBUG_EVENT.start);
+      break;
+    case "agent_end":
+      reporter.log(AGENT_DEBUG_EVENT.end, {
+        willRetry: event.willRetry,
+        messageCount: event.messages.length,
+      });
+      break;
+    case "agent_settled":
+      reporter.log(AGENT_DEBUG_EVENT.settled);
+      break;
+    case "message_start":
+      reporter.log(AGENT_DEBUG_EVENT.messageStart, summarizeMessage(event.message));
+      break;
+    case "message_end":
+      reporter.log(AGENT_DEBUG_EVENT.messageEnd, summarizeMessage(event.message));
+      break;
+    case "queue_update":
+      reporter.log(AGENT_DEBUG_EVENT.queueUpdate, {
+        steeringCount: event.steering.length,
+        followUpCount: event.followUp.length,
+      });
+      break;
+    case "thinking_level_changed":
+      reporter.log(AGENT_DEBUG_EVENT.thinkingLevelChanged, { level: event.level });
+      break;
+  }
 }
 
 /**

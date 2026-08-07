@@ -143,6 +143,7 @@ describe("provisioning", () => {
     expect(env[SANDBOX_ENV.taskPrompt]).toBe("Summarize this repository.");
     expect(env[SANDBOX_ENV.repoCloneUrl]).toBe("https://github.com/acme/widgets.git");
     expect(env[SANDBOX_ENV.controlPlaneUrl]).toBe("http://localhost:8080");
+    expect(env[SANDBOX_ENV.debugEvents]).toBe("false");
     expect(env[SANDBOX_ENV.callbackToken]).toBeUndefined();
     expect(provider.created[0]?.secrets[SANDBOX_ENV.callbackToken]).toHaveLength(32);
     expect(provider.created[0]?.command).toContain("run.js");

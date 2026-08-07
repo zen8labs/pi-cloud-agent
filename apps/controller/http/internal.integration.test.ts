@@ -28,6 +28,12 @@ describe("sandbox event retention", () => {
         body: JSON.stringify(body),
       });
 
+    const debug = await request({
+      type: "log",
+      data: { event: "agent.message_start", role: "assistant" },
+    });
+    expect(await debug.json()).toEqual({ stored: false });
+
     const lifecycle = await request({
       type: "log",
       data: { event: "agent.retry", attempt: 1, maxAttempts: 3 },
@@ -45,5 +51,31 @@ describe("sandbox event retention", () => {
       "agent.turn_end",
     ]);
     expect((await getRun(database, run.id))?.lastEventAt).not.toBeNull();
+  });
+
+  it("retains debug lifecycle events only when debug export is enabled", async () => {
+    const run = await seedRun(database);
+    const app = createApp({
+      config: testConfig({ OTEL_EXPORT_DEBUG_EVENTS: "true" }),
+      database,
+      log: silentLogger(),
+    });
+
+    const response = await app.request(`/internal/runs/${run.id}/events`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${run.callbackToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        type: "log",
+        data: { event: "agent.message_start", role: "assistant" },
+      }),
+    });
+
+    expect(await response.json()).toEqual({ seq: 1 });
+    expect((await listEvents(database, run.id, 0)).map((event) => event.data.event)).toEqual([
+      "agent.message_start",
+    ]);
   });
 });

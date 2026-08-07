@@ -1,4 +1,5 @@
 import {
+  isDebugAgentEvent,
   oauthCredentialUpdateSchema,
   redactUrlCredentials,
   runEventInputSchema,
@@ -36,6 +37,13 @@ export function internalRoutes(observability?: Observability): Hono<AppEnv> {
 
     const parsed = runEventInputSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "unrecognized event" }, 422);
+    if (
+      parsed.data.type === "log" &&
+      !c.get("config").observability.exportDebugEvents &&
+      isDebugAgentEvent(parsed.data.data.event)
+    ) {
+      return c.json({ stored: false });
+    }
 
     // Second line of defence. The runtime scrubs its own secrets before sending —
     // it is the only side that knows all of them — but a URL with embedded

@@ -210,6 +210,7 @@ function buildEnv(
     [SANDBOX_ENV.runId]: run.id,
     [SANDBOX_ENV.sessionId]: run.sessionId ?? "",
     [SANDBOX_ENV.workspaceResumed]: String(workspaceResumed),
+    [SANDBOX_ENV.debugEvents]: String(config.observability.exportDebugEvents),
 
     [SANDBOX_ENV.taskPrompt]: buildTaskPrompt(skillText, task.prompt, run.turnNumber),
 
