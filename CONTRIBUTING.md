@@ -12,7 +12,6 @@ The extension surfaces are where this project wants to grow. Each is documented 
 
 | To add | Read | Effort |
 |---|---|---|
-| a profile (a vertical: triage, docs, refactor…) | [docs/adding-a-profile.md](docs/adding-a-profile.md) | one directory, one registry line |
 | a sandbox backend (Docker, Modal, Daytona…) | [docs/adding-a-sandbox-provider.md](docs/adding-a-sandbox-provider.md) | two methods |
 | a forge (Gitea, Forgejo, GitHub Enterprise…) | [docs/adding-a-vcs-provider.md](docs/adding-a-vcs-provider.md) | one file |
 
@@ -24,7 +23,7 @@ Some changes are cheap to make and expensive to undo. For these, please open an 
 
 - adding a new contract to `packages/protocol`, or widening an existing one
 - moving the trust boundary, including adding a dependency to `packages/runtime`
-- adding controller-side knowledge of a specific profile or provider
+- adding controller-side knowledge of a specific workflow or provider
 - adding a dependency, a provider, or a service (a queue, a cache, a broker)
 - introducing an agent server, a polling bridge, or controller-side parsing of agent output
 - anything that trades flexibility for a one-time convenience
@@ -68,7 +67,6 @@ Live tests never run in CI. If you change the sandbox image, the runtime, or the
 One file at a time:
 
 ```bash
-pnpm vitest run packages/profiles/profiles.test.ts
 pnpm vitest run --project integration apps/controller/db/runs.integration.test.ts
 ```
 

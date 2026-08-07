@@ -2,7 +2,7 @@
 
 Plugin package format and attach resolution. Trusted-side only.
 
-A **plugin** is an installable bundle of skills and/or MCP servers. Profiles stay marketplace-ignorant; this package composes plugin capabilities *beside* a profile at provision time.
+A **plugin** is an installable bundle of skills and/or MCP servers. This package resolves those capabilities at provision time.
 
 **Depends on:** `zod` only (no protocol types — keep the runtime free of plugin-domain imports). The sandbox runtime never imports this package — skills fold into `TASK_PROMPT`, and MCP arrives as resolved `MCP_CONFIG`.
 
@@ -24,7 +24,7 @@ A **plugin** is an installable bundle of skills and/or MCP servers. Profiles sta
 
 - **Path traversal is rejected.** Component paths in the manifest must stay inside the package root.
 - **Secrets never live in the package.** `variables` declare names only; values come from the dashboard broker.
-- **Plugin skills replace the profile skill** when any enabled plugin contributes skills. Otherwise the profile skill is unchanged.
+- Enabled plugin skills are composed into the task prompt.
 - **MCP is never taken from the cloned user repository.** Only the resolved snapshot from the catalog package.
 - **No plugin TypeScript runs on the controller.** This package only reads manifests and markdown.
 

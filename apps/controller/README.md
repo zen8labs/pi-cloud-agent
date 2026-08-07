@@ -4,7 +4,7 @@
 
 Decides what runs and when, resolves connected identities, mints run credentials, starts sandboxes, records what happened, and reclaims machines.
 
-**Depends on:** `protocol`, `profiles`, `plugins`, `sandbox`, `vcs`. It is the only package allowed to compose everything, and the only one that reaches Postgres.
+**Depends on:** `protocol`, `plugins`, `sandbox`, `vcs`. It is the only package allowed to compose everything, and the only one that reaches Postgres.
 
 ## Files
 
@@ -41,7 +41,7 @@ Decides what runs and when, resolves connected identities, mints run credentials
 - **Every run transition is a single `UPDATE` with its expected state in the `WHERE`**, returning whether it changed a row. No read-then-write, no transaction held open across network I/O. See [../../docs/resumability.md](../../docs/resumability.md).
 - **No in-memory run state.** If it is needed to resume a run, it is a column. This is the rule that removed the event bus.
 - **No in-memory session state.** Pi history is checkpointed in Postgres; a provider workspace id is only an optimization. See [../../docs/sessions.md](../../docs/sessions.md).
-- **No profile- or provider-specific behavior.** Intake asks the owning profile whether it accepts a trigger; this app contains no mention of code review. If you find yourself adding a condition here, it belongs in a profile's `accepts`.
+- **No workflow-specific behavior.** Intake resolves the user's repository and request; attached skills are handled through plugins.
 - **`attachSandbox` is the first durable write after a machine exists.** Before it commits a crash leaks a sandbox; after it, the reconciler always finds it.
 - **The controller never parses agent output.** The agent actuates its own outcomes. Adding a parser here is one of the changes to raise first.
 - **Migrations are never applied on boot.** A schema change is a deliberate step, not a side effect of one replica winning a race during a deploy.

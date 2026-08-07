@@ -92,9 +92,6 @@ importers:
       '@pi-cloud-agent/plugins':
         specifier: workspace:*
         version: link:../../packages/plugins
-      '@pi-cloud-agent/profiles':
-        specifier: workspace:*
-        version: link:../../packages/profiles
       '@pi-cloud-agent/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -211,25 +208,6 @@ importers:
 
   packages/plugins:
     dependencies:
-      zod:
-        specifier: 'catalog:'
-        version: 4.4.3
-    devDependencies:
-      '@pi-cloud-agent/tsconfig':
-        specifier: workspace:*
-        version: link:../tsconfig
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.13.3
-      typescript:
-        specifier: 'catalog:'
-        version: 5.9.3
-
-  packages/profiles:
-    dependencies:
-      '@pi-cloud-agent/protocol':
-        specifier: workspace:*
-        version: link:../protocol
       zod:
         specifier: 'catalog:'
         version: 4.4.3

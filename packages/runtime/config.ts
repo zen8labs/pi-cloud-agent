@@ -24,7 +24,6 @@ export interface RuntimeConfig {
   workspaceResumed: boolean;
 
   prompt: string;
-  profile: string;
 
   model: {
     provider: string;
@@ -90,7 +89,6 @@ export function readConfig(): RuntimeConfig {
     workspaceResumed: optional(SANDBOX_ENV.workspaceResumed) === "true",
 
     prompt: required(SANDBOX_ENV.taskPrompt),
-    profile: optional(SANDBOX_ENV.profile, "general"),
 
     model: {
       provider: modelRef.slice(0, separator),

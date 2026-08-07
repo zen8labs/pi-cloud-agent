@@ -6,7 +6,7 @@ import type {
   SessionDetail,
   ThinkingLevel,
 } from "@pi-cloud-agent/protocol";
-import { ArrowLeftIcon, GitBranchIcon, SquareIcon, WaypointsIcon } from "lucide-react";
+import { ArrowLeftIcon, GitBranchIcon, SquareIcon } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -173,7 +173,6 @@ function SessionMeta({
 }) {
   const repo = run?.repo ?? session?.repo ?? null;
   const provider = run?.provider ?? session?.provider ?? null;
-  const profile = run?.profile ?? session?.profile ?? null;
 
   return (
     <div className="hidden w-60 shrink-0 overflow-y-auto px-4 pb-5 pt-4 xl:block">
@@ -191,8 +190,6 @@ function SessionMeta({
         ) : null}
 
         <ChangesLine added={changes.added} removed={changes.removed} />
-
-        {profile ? <ProfileLine profile={profile} /> : null}
 
         {run ? <p className="text-muted-foreground">{absoluteTime(run.createdAt)}</p> : null}
 
@@ -228,26 +225,6 @@ function ForgeIcon({ provider }: { provider: string | null }) {
     <span title="GitHub" className="inline-flex shrink-0 text-muted-foreground">
       <GithubMarkIcon className="size-3.5" />
     </span>
-  );
-}
-
-/** Title-case the profile slug and label it so "general" reads as an agent profile. */
-function ProfileLine({ profile }: { profile: string }) {
-  const label = profile
-    .split(/[-_]/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-  return (
-    <p
-      className="flex min-w-0 items-center gap-1.5 text-muted-foreground"
-      title={`Agent profile: ${profile}`}
-    >
-      <WaypointsIcon className="size-3 shrink-0" />
-      <span className="truncate">
-        Profile · <span className="text-foreground">{label}</span>
-      </span>
-    </p>
   );
 }
 

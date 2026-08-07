@@ -15,7 +15,6 @@ export const SANDBOX_ENV = {
   sessionId: "SESSION_ID",
   workspaceResumed: "WORKSPACE_RESUMED",
 
-  profile: "PROFILE",
   taskPrompt: "TASK_PROMPT",
 
   /**

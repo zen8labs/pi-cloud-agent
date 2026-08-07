@@ -44,7 +44,6 @@ const seconds = (n: number) => new Date(Date.now() + n * 1000);
 
 export interface CreateRunInput {
   userId?: string | null;
-  profile: string;
   provider: string;
   repoFullName: string;
   trigger: Trigger;

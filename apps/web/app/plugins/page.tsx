@@ -61,8 +61,8 @@ export default function PluginsPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Plugins</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Install marketplace plugins for skills and MCP tools. Plugin skills replace the
-            profile skill when attached.
+            Install marketplace plugins for skills and MCP tools. Attached skills are included
+            in the task prompt.
           </p>
         </div>
       </header>

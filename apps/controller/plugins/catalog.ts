@@ -14,7 +14,6 @@ import {
   substituteVariables,
   toCatalogVersion,
 } from "@pi-cloud-agent/plugins";
-import { getProfile } from "@pi-cloud-agent/profiles";
 import { eq } from "drizzle-orm";
 import type { Config } from "../config";
 import type { Database } from "../db/client";
@@ -46,15 +45,13 @@ export async function resolvePluginsForRun(
   database: Database,
   config: Config,
   userId: string | null,
-  profileName: string,
 ): Promise<ResolvedRunPlugins> {
   const catalog = await loadApprovedCatalog(database);
   const settings = await loadSettings(database);
   const userStates = userId ? await loadUserStates(database, userId) : [];
   const effective = resolveEffectivePlugins(catalog, settings, userStates);
 
-  const profileSkill = getProfile(profileName).skill;
-  const skillText = composeSkillText(effective, profileSkill);
+  const skillText = composeSkillText(effective);
 
   const { mcpConfig, secretValues } = await resolveMcp(database, config, userId, effective);
 

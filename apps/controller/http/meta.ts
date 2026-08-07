@@ -1,10 +1,4 @@
-import { DEFAULT_PROFILE, listProfiles } from "@pi-cloud-agent/profiles";
-import type {
-  BranchesResponse,
-  ConfigResponse,
-  ReposResponse,
-  VcsRepository,
-} from "@pi-cloud-agent/protocol";
+import type { BranchesResponse, ReposResponse, VcsRepository } from "@pi-cloud-agent/protocol";
 import { vcsProviderNames } from "@pi-cloud-agent/vcs";
 import { Hono } from "hono";
 import type { Config } from "../config";
@@ -14,18 +8,6 @@ import type { AppEnv } from "./deps";
 
 export function metaRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
-
-  app.get("/config", (c) => {
-    const response: ConfigResponse = {
-      profiles: listProfiles().map((profile) => ({
-        name: profile.name,
-        description: profile.description,
-        configJsonSchema: profile.configJsonSchema,
-      })),
-      defaultProfile: DEFAULT_PROFILE,
-    };
-    return c.json(response);
-  });
 
   app.get("/repos", async (c) => {
     return c.json(

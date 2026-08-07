@@ -60,7 +60,6 @@ describe("browser boundary", () => {
     });
     const firstRun = await createRun(database, {
       userId: first.id,
-      profile: "general",
       provider: "github",
       repoFullName: "acme/first",
       trigger: manualTrigger({ owner: "acme", name: "first" }),
@@ -69,7 +68,6 @@ describe("browser boundary", () => {
     });
     const secondRun = await createRun(database, {
       userId: second.id,
-      profile: "general",
       provider: "github",
       repoFullName: "acme/second",
       trigger: manualTrigger({ owner: "acme", name: "second" }),
@@ -153,7 +151,7 @@ describe("browser boundary", () => {
     expect((await app.request("/runs")).status).toBe(401);
     expect((await app.request("/sessions")).status).toBe(401);
     expect((await app.request("/llm/connections")).status).toBe(401);
-    expect((await app.request("/config")).status).toBe(200);
+    expect((await app.request("/config")).status).toBe(404);
   });
 
   it("returns a validation error when a selected model is stale or foreign", async () => {

@@ -1,7 +1,7 @@
 # Adding a plugin
 
 A plugin is an installable bundle of **skills** and/or **MCP servers**. It
-attaches *beside* a profile: profiles decide when a run starts and what job to
+attaches to a user task: the task request decides what job to
 do; plugins add extra capabilities for users who install them.
 
 The reference package is [`marketplace/plugins/context7`](../marketplace/plugins/context7).
@@ -53,8 +53,7 @@ Rules:
 ### Skills
 
 Each `skills/*/SKILL.md` may have frontmatter `name` + `description`. When any
-enabled plugin contributes skills, those skills **replace** the profile skill in
-`TASK_PROMPT`. Otherwise the profile skill is unchanged.
+enabled plugin contributes skills, those skills are composed into `TASK_PROMPT`.
 
 ### MCP
 

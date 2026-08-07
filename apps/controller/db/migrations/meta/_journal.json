@@ -99,6 +99,13 @@
       "when": 1786004698129,
       "tag": "0013_fixed_sprite",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1786010881404,
+      "tag": "0014_damp_serpent_society",
+      "breakpoints": true
     }
   ]
 }

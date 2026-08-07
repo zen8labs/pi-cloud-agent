@@ -31,7 +31,6 @@ Integration tests share one database and truncate between tests, so they run in 
 | File | The guarantee it defends |
 |---|---|
 | `packages/protocol/secret.test.ts` | a credential cannot reach output by accident |
-| `packages/profiles/profiles.test.ts` | profiles own their triggering policy and their config, and `accepts` never green-lights what `buildTask` would refuse |
 | `packages/sandbox/registry.test.ts` | a misconfigured provider fails at startup, naming the variable and the alternatives |
 | `packages/runtime/reporter.test.ts` | secrets do not leave the sandbox; telemetry loss cannot fail a run; the terminal status retries |
 | `apps/controller/db/runs.integration.test.ts` | the SQL properties: exclusive claim, guarded transitions, gapless sequences under concurrency |

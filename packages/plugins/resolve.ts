@@ -63,13 +63,9 @@ export function isPluginAttached(
 }
 
 /**
- * Plugin skills replace the profile skill when any enabled plugin contributes skills.
- * Otherwise the profile skill is used unchanged.
+ * Compose the skills contributed by enabled plugins.
  */
-export function composeSkillText(
-  plugins: EffectivePlugin[],
-  profileSkill: string | undefined,
-): string | undefined {
+export function composeSkillText(plugins: EffectivePlugin[]): string | undefined {
   const pluginSkills = plugins
     .flatMap((plugin) =>
       plugin.skillTexts.map((text) => ({ plugin: plugin.name, text: text.trim() })),
@@ -80,8 +76,7 @@ export function composeSkillText(
   if (pluginSkills.length > 0) {
     return pluginSkills.map((entry) => entry.text).join("\n\n---\n\n");
   }
-  const trimmed = profileSkill?.trim();
-  return trimmed || undefined;
+  return undefined;
 }
 
 /** Prepend skill text to the concrete request, or return the prompt alone. */

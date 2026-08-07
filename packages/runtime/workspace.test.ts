@@ -16,7 +16,6 @@ const config: RuntimeConfig = {
   controlPlaneUrl: "https://controller.test",
   callbackToken: "callback-token-value-1234",
   prompt: "test",
-  profile: "general",
   model: {
     provider: "test-provider",
     name: "test-model",
