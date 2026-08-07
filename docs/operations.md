@@ -71,6 +71,24 @@ curl -s localhost:8080/runs/$RUN_ID/events | jq '.events[]'
 curl -s "localhost:8080/runs/$RUN_ID/events?afterSeq=42" | jq '.events[]'
 ```
 
+## Sending agent traces to Langfuse
+
+The controller exports completed runs over OTLP/HTTP. Configure the Langfuse public OTLP endpoint and Basic Auth header in the controller environment, then restart it:
+
+```bash
+export LANGFUSE_PUBLIC_KEY=pk-lf-...
+export LANGFUSE_SECRET_KEY=sk-lf-...
+export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=https://cloud.langfuse.com/api/public/otel/v1/traces
+export OTEL_EXPORTER_OTLP_TRACES_HEADERS="Authorization=Basic $(printf '%s:%s' "$LANGFUSE_PUBLIC_KEY" "$LANGFUSE_SECRET_KEY" | base64),x-langfuse-ingestion-version=4"
+export OTEL_SERVICE_NAME=pi-cloud-agent
+export OTEL_EXPORT_DEBUG_EVENTS=false
+pnpm controller
+```
+
+Run an agent normally. Its completed trace comprehensively contains the run, prompts, each model turn, thinking, generated text, tool calls, tool arguments, tool results, usage, timing, and status. Set `OTEL_EXPORT_DEBUG_EVENTS=true` temporarily to emit, retain, and export the detailed Pi lifecycle event stream while diagnosing a runtime issue; it is false by default, so the sandbox does not send those low-value events. Old OTLP observations are immutable, so create a new run after changing the mapping or configuration. For self-hosted or regional Langfuse, replace the hostname while keeping `/api/public/otel/v1/traces`. The exporter uses protobuf over HTTP; no Langfuse SDK is required in this repository.
+
+The controller always exports trace content so production runs can be used as evaluation data. `OTEL_EXPORT_DEBUG_EVENTS` only controls low-value lifecycle noise; leave it false for normal traces and enable it temporarily when diagnosing the runtime event stream. Content can include repository source, prompts, personal data, or credentials accidentally printed by a tool, so configure access and retention controls on the selected OTLP destination.
+
 ## Reading the state directly
 
 ```bash
@@ -102,8 +120,8 @@ psql -c "select id, active_run_id, latest_run_id, turn_count, sandbox_id, worksp
 ```text
 status: queued → provisioning → running → succeeded
 events: git.cloned → git.checkout_ready → setup.skipped
-        → agent.session_start → token… → tool_call… → agent.turn_end
-        → agent.session_complete → status{done}
+        → agent.session_start → agent.turn_start → message… → token…
+        → tool_call… → agent.turn_end → agent.session_complete → status{done}
 ```
 
 The terminal evidence is a `status` event followed by the run row reaching `succeeded` or `failed`. **Token and tool-call events are telemetry and never control completion**. A run that streamed a thousand tokens and never reported a status is a timeout, not a success.

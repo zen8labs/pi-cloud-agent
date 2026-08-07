@@ -89,7 +89,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   app.route("/runs", runRoutes());
   app.route("/sessions", sessionRoutes());
   app.route("/plugins", pluginRoutes());
-  app.route("/internal", internalRoutes());
+  app.route("/internal", internalRoutes(deps.observability));
   app.route("/llm", llmRoutes(new OAuthFlowManager(deps.database, deps.config)));
   app.route("/vcs", vcsRoutes());
   app.route("/", metaRoutes());

@@ -50,6 +50,15 @@ const schema = z.object({
   WEB_URL: z.string().url().default("http://localhost:3000"),
   WEB_CORS_ORIGINS: z.string().default("http://localhost:3000"),
 
+  /** Optional vendor-neutral OTLP/HTTP destination for completed agent traces. */
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: z
+    .string()
+    .refine((value) => !value || URL.canParse(value), "must be a valid URL when configured")
+    .default(""),
+  OTEL_EXPORTER_OTLP_TRACES_HEADERS: z.string().default(""),
+  OTEL_SERVICE_NAME: z.string().min(1).default("pi-cloud-agent"),
+  OTEL_EXPORT_DEBUG_EVENTS: z.enum(["true", "false"]).default("false"),
+
   APP_SESSION_SECRET: z.string().default(""),
   APP_AUTH_REQUIRED: z.enum(["true", "false"]).default("true"),
   VCS_ENCRYPTION_KEY: z.string().regex(/^[0-9a-f]{64}$/i, "must be 64 hexadecimal characters"),
@@ -92,6 +101,12 @@ export interface Config {
   web: {
     url: string;
     corsOrigins: string[];
+  };
+  observability: {
+    tracesEndpoint: string;
+    tracesHeaders: Record<string, string>;
+    serviceName: string;
+    exportDebugEvents: boolean;
   };
   auth: {
     requireUser: boolean;
@@ -137,6 +152,8 @@ function build(env: Env): Config {
     );
   }
 
+  const tracesHeaders = parseHeaders(value.OTEL_EXPORTER_OTLP_TRACES_HEADERS);
+
   return {
     port: value.PORT,
     logLevel: value.LOG_LEVEL,
@@ -151,6 +168,12 @@ function build(env: Env): Config {
     web: {
       url: value.WEB_URL.replace(/\/$/, ""),
       corsOrigins,
+    },
+    observability: {
+      tracesEndpoint: value.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
+      tracesHeaders,
+      serviceName: value.OTEL_SERVICE_NAME,
+      exportDebugEvents: value.OTEL_EXPORT_DEBUG_EVENTS === "true",
     },
     auth: {
       requireUser,
@@ -195,4 +218,26 @@ export function getConfig(): Config {
 /** For tests: build a config from an explicit environment, bypassing the file. */
 export function configFrom(env: Env): Config {
   return build(env);
+}
+
+function parseHeaders(raw: string): Record<string, string> {
+  if (!raw.trim()) return {};
+  const headers: Record<string, string> = {};
+  for (const pair of raw.split(",")) {
+    const separator = pair.indexOf("=");
+    if (separator <= 0) {
+      throw new Error(
+        "OTEL_EXPORTER_OTLP_TRACES_HEADERS must be comma-separated key=value pairs",
+      );
+    }
+    const key = pair.slice(0, separator).trim();
+    const value = pair.slice(separator + 1).trim();
+    if (!key || !value) {
+      throw new Error(
+        "OTEL_EXPORTER_OTLP_TRACES_HEADERS must contain non-empty keys and values",
+      );
+    }
+    headers[key] = value;
+  }
+  return headers;
 }

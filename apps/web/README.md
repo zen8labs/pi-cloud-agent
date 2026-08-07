@@ -15,7 +15,8 @@ Next.js App Router, React, Tailwind 4, Base UI, and local-source [AI Elements](h
 | `app/settings/page.tsx` | connect and disconnect GitHub and Azure DevOps identities |
 | `app/plugins/page.tsx` | browse, install, configure marketplace plugins |
 | `app/sessions/[id]/page.tsx` | ordered turns: merged activity, live latest run, real follow-up |
-| `components/ActivityFeed.tsx` | folds the flat event log into a readable conversation |
+| `components/ActivityFeed.tsx` | renders the folded activity feed |
+| `lib/foldActivityEvents.ts` | folds the flat event log into conversation blocks |
 | `components/ToolArgsView.tsx` | write/edit diffs, bash shell panel with output, else JSON |
 | `components/ChangeStatsCard.tsx` | end-of-turn file change summary (+/− per path) |
 | `components/ChatComposer.tsx` | product wrapper around the AI Elements prompt primitives |

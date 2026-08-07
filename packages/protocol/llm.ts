@@ -14,6 +14,21 @@ export const LLM_AUTH_TYPES = ["api_key", "oauth"] as const;
 export const llmAuthTypeSchema = z.enum(LLM_AUTH_TYPES);
 export type LlmAuthType = (typeof LLM_AUTH_TYPES)[number];
 
+export const oauthCredentialSchema = z
+  .object({
+    type: z.literal("oauth"),
+    access: z.string().min(1).max(100_000),
+    refresh: z.string().min(1).max(100_000),
+    expires: z.number().finite(),
+  })
+  .passthrough();
+export type OAuthCredential = z.infer<typeof oauthCredentialSchema>;
+export const oauthCredentialUpdateSchema = z.object({
+  previous: oauthCredentialSchema,
+  credential: oauthCredentialSchema,
+});
+export type OAuthCredentialUpdate = z.infer<typeof oauthCredentialUpdateSchema>;
+
 export const THINKING_LEVELS = [
   "off",
   "minimal",

@@ -52,7 +52,7 @@ beforeEach(() => {
         throw new Error("network down");
       }
       sent.push({ path: new URL(url).pathname, body: JSON.parse(init.body) });
-      return { ok: true } as Response;
+      return { ok: true, json: async () => ({ updated: true }) } as Response;
     }),
   );
 });
@@ -94,6 +94,29 @@ describe("reporter", () => {
     ).toEqual(["a", "b", "c"]);
   });
 
+  it("does not enqueue debug lifecycle logs when debug export is disabled", async () => {
+    const reporter = createReporter(readConfig());
+    reporter.log("agent.session_created");
+    reporter.log("agent.turn_start");
+    reporter.log("agent.message_start");
+    reporter.log("agent.session_checkpointed");
+    reporter.log("agent.turn_end");
+    await reporter.flush();
+
+    expect(sent.map((entry) => (entry.body as { data: { event: string } }).data.event)).toEqual(
+      ["agent.turn_end"],
+    );
+  });
+
+  it("enqueues debug lifecycle logs when debug export is enabled", async () => {
+    vi.stubEnv(SANDBOX_ENV.debugEvents, "true");
+    const reporter = createReporter(readConfig());
+    reporter.log("agent.turn_start");
+    await reporter.flush();
+
+    expect(sent).toHaveLength(1);
+  });
+
   it("swallows a telemetry failure — losing a log line must not fail a run", async () => {
     const reporter = createReporter(readConfig());
     failNext = 1;
@@ -122,6 +145,20 @@ describe("reporter", () => {
     const reporter = createReporter(readConfig());
     await reporter.status({ status: "error", detail: `clone failed using ${SCM_TOKEN}` });
     expect(JSON.stringify(sent[0]?.body)).not.toContain(SCM_TOKEN);
+  });
+
+  it("retries refreshed OAuth credential delivery because the next run depends on it", async () => {
+    const reporter = createReporter(readConfig());
+    failNext = 2;
+    const previous = { type: "oauth" as const, access: "old", refresh: "r1", expires: 1 };
+    const credential = { type: "oauth" as const, access: "new", refresh: "r2", expires: 2 };
+    await expect(reporter.modelCredential({ previous, credential })).resolves.toBe(true);
+    expect(sent).toEqual([
+      {
+        path: "/internal/runs/run-1/model-credential",
+        body: { previous, credential },
+      },
+    ]);
   });
 
   it("uses the same redactor for stderr-bound failures", () => {

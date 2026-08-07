@@ -2,6 +2,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  type AgentSessionEvent,
   createAgentSession,
   DefaultResourceLoader,
   type ExtensionAPI,
@@ -9,8 +10,9 @@ import {
   ModelRuntime,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { SANDBOX_ENV } from "@pi-cloud-agent/protocol";
+import { AGENT_DEBUG_EVENT, SANDBOX_ENV } from "@pi-cloud-agent/protocol";
 import type { RuntimeConfig } from "./config";
+import { persistRefreshedOAuthCredential } from "./oauth-credential";
 import type { Reporter } from "./reporter";
 import { loadSessionManager, saveSessionCheckpoint } from "./session-state";
 
@@ -114,58 +116,7 @@ export async function runAgentSession(
       mcp: Boolean(config.mcpConfig),
     });
 
-    const unsubscribe = session.subscribe((event) => {
-      switch (event.type) {
-        case "message_update":
-          if (event.assistantMessageEvent.type === "text_delta") {
-            reporter.event({
-              type: "token",
-              data: { content: event.assistantMessageEvent.delta },
-            });
-          }
-          break;
-        case "tool_execution_start":
-          reporter.event({
-            type: "tool_call",
-            data: {
-              callId: event.toolCallId,
-              tool: event.toolName,
-              status: "running",
-              args: event.args,
-            },
-          });
-          break;
-        case "tool_execution_end": {
-          reporter.event({
-            type: "tool_call",
-            data: {
-              callId: event.toolCallId,
-              tool: event.toolName,
-              status: event.isError ? "error" : "completed",
-              output: textOf(event.result),
-            },
-          });
-          break;
-        }
-        case "turn_end": {
-          const assistant = asAssistant(event.message);
-          reporter.log("agent.turn_end", {
-            stopReason: assistant?.stopReason ?? null,
-            usage: assistant?.usage ?? null,
-          });
-          break;
-        }
-        case "auto_retry_start":
-          reporter.log("agent.retry", {
-            attempt: event.attempt,
-            maxAttempts: event.maxAttempts,
-            detail: event.errorMessage,
-          });
-          break;
-        default:
-          break;
-      }
-    });
+    const unsubscribe = session.subscribe(createAgentEventHandler(reporter));
 
     try {
       await session.prompt(config.prompt);
@@ -187,7 +138,132 @@ export async function runAgentSession(
       session.dispose();
     }
   } finally {
-    await rm(authDirectory, { recursive: true, force: true });
+    try {
+      if (config.model.authType === "oauth") {
+        await persistRefreshedOAuthCredential(config, reporter, authPath);
+      }
+    } finally {
+      await rm(authDirectory, { recursive: true, force: true });
+    }
+  }
+}
+
+export function createAgentEventHandler(
+  reporter: Reporter,
+): (event: AgentSessionEvent) => void {
+  let turnNumber = 0;
+  let turnStartedAt: string | null = null;
+  return (event) => {
+    reportDebugAgentEvent(event, reporter);
+    switch (event.type) {
+      case "turn_start":
+        turnNumber += 1;
+        turnStartedAt = new Date().toISOString();
+        reporter.log("agent.turn_start", { turnNumber, turnStartedAt });
+        break;
+      case "message_update": {
+        const update = event.assistantMessageEvent;
+        if (update.type === "text_delta") {
+          reporter.event({ type: "token", data: { content: update.delta } });
+        }
+        break;
+      }
+      case "tool_execution_start":
+        reporter.event({
+          type: "tool_call",
+          data: {
+            callId: event.toolCallId,
+            tool: event.toolName,
+            status: "running",
+            turnNumber,
+            args: event.args,
+          },
+        });
+        break;
+      case "tool_execution_end":
+        reporter.event({
+          type: "tool_call",
+          data: {
+            callId: event.toolCallId,
+            tool: event.toolName,
+            status: event.isError ? "error" : "completed",
+            turnNumber,
+            output: textOf(event.result),
+          },
+        });
+        break;
+      case "turn_end": {
+        const assistant = asAssistant(event.message);
+        reporter.log("agent.turn_end", {
+          turnNumber,
+          turnStartAt: turnStartedAt,
+          stopReason: assistant?.stopReason ?? null,
+          usage: assistant?.usage ?? null,
+          output: assistant?.content ?? null,
+        });
+        break;
+      }
+      case "auto_retry_start":
+        reporter.log("agent.retry", {
+          attempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          detail: event.errorMessage,
+        });
+        break;
+      case "auto_retry_end":
+        reporter.log("agent.retry_end", {
+          attempt: event.attempt,
+          success: event.success,
+          finalError: event.finalError,
+        });
+        break;
+      case "compaction_start":
+        reporter.log("agent.compaction_start", { reason: event.reason });
+        break;
+      case "compaction_end":
+        reporter.log("agent.compaction_end", {
+          reason: event.reason,
+          aborted: event.aborted,
+          willRetry: event.willRetry,
+          errorMessage: event.errorMessage,
+        });
+        break;
+      case "tool_execution_update":
+      case "bash_execution_update":
+        break;
+    }
+  };
+}
+
+function reportDebugAgentEvent(event: AgentSessionEvent, reporter: Reporter): void {
+  switch (event.type) {
+    case "agent_start":
+      reporter.log(AGENT_DEBUG_EVENT.start);
+      break;
+    case "agent_end":
+      reporter.log(AGENT_DEBUG_EVENT.end, {
+        willRetry: event.willRetry,
+        messageCount: event.messages.length,
+      });
+      break;
+    case "agent_settled":
+      reporter.log(AGENT_DEBUG_EVENT.settled);
+      break;
+    case "message_start":
+      reporter.log(AGENT_DEBUG_EVENT.messageStart, summarizeMessage(event.message));
+      break;
+    case "message_end":
+      reporter.log(AGENT_DEBUG_EVENT.messageEnd, summarizeMessage(event.message));
+      break;
+    case "queue_update":
+      reporter.log(AGENT_DEBUG_EVENT.queueUpdate, {
+        steeringCount: event.steering.length,
+        followUpCount: event.followUp.length,
+      });
+      break;
+    case "thinking_level_changed":
+      reporter.log(AGENT_DEBUG_EVENT.thinkingLevelChanged, { level: event.level });
+      break;
   }
 }
 
@@ -239,6 +315,7 @@ function textOf(
 
 interface AssistantLike {
   role: "assistant";
+  content?: unknown;
   stopReason?: string;
   errorMessage?: string;
   usage?: unknown;
@@ -249,4 +326,14 @@ function asAssistant(message: unknown): AssistantLike | null {
   return (message as { role?: string }).role === "assistant"
     ? (message as AssistantLike)
     : null;
+}
+
+function summarizeMessage(message: unknown): Record<string, unknown> {
+  if (!message || typeof message !== "object") return {};
+  const value = message as Record<string, unknown>;
+  return {
+    role: value.role,
+    stopReason: value.stopReason,
+    usage: value.usage,
+  };
 }

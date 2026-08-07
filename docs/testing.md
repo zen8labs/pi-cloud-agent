@@ -37,6 +37,7 @@ Integration tests share one database and truncate between tests, so they run in 
 | `apps/controller/db/sessions.integration.test.ts` | one active turn, ordered runs, checkpoint ownership, and workspace parking |
 | `apps/controller/reconcile/reconciler.integration.test.ts` | restart safety plus workspace suspend/resume and cold fallback |
 | `apps/controller/http/api.integration.test.ts` | the HTTP contract, including authenticated checkpoint callbacks and session turns |
+| `apps/web/lib/foldActivityEvents.test.ts` | completed-turn thinking renders as one Thought block, including legacy per-word logs |
 
 The refusal cases matter more than the happy paths.
 

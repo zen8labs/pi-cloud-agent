@@ -3,6 +3,7 @@ import { getConfig } from "./config";
 import { db } from "./db/client";
 import { createApp } from "./http/app";
 import { createLogger } from "./logger";
+import { createObservability } from "./observability";
 import { createReconciler } from "./reconcile/loop";
 import { createCredentialBroker } from "./secrets/broker";
 
@@ -18,8 +19,13 @@ import { createCredentialBroker } from "./secrets/broker";
 const config = getConfig();
 const log = createLogger("controller", { level: config.logLevel });
 const database = db();
+const observability = createObservability({
+  config,
+  database,
+  log: createLogger("observability", { level: config.logLevel }),
+});
 
-const app = createApp({ config, database, log });
+const app = createApp({ config, database, log, observability });
 const reconciler = createReconciler({
   config,
   database,
@@ -39,6 +45,7 @@ const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   });
 });
 
+await observability.start();
 await reconciler.start();
 
 let shuttingDown = false;
@@ -49,8 +56,9 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     log.info("shutting down", { signal });
     // In-flight runs are unaffected: their sandboxes keep working and keep
     // reporting, and whichever process is running next finishes the bookkeeping.
-    void reconciler.stop().finally(() => {
-      server.close(() => process.exit(0));
-    });
+    void reconciler
+      .stop()
+      .finally(() => observability.stop())
+      .finally(() => server.close(() => process.exit(0)));
   });
 }

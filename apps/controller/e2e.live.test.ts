@@ -112,8 +112,8 @@ describe("a real resumable session, end to end", () => {
         const firstEvents = await listEvents(database, run.id, 0);
         const firstLogs = logNames(firstEvents);
         expect(firstLogs).toContain("git.cloned");
-        expect(firstLogs).toContain("agent.session_created");
-        expect(firstLogs).toContain("agent.session_checkpointed");
+        expect(firstLogs).toContain("agent.session_start");
+        expect(firstIdle.agentCheckpoint).toBeTruthy();
         expect(firstEvents.at(-1)?.type).toBe("status");
 
         // Prove a controller process can disappear while the session is idle.
@@ -139,7 +139,6 @@ describe("a real resumable session, end to end", () => {
         const secondEvents = await listEvents(database, followUp.id, 0);
         const secondLogs = logNames(secondEvents);
         expect(secondLogs).toContain("git.workspace_resumed");
-        expect(secondLogs).toContain("agent.session_restored");
         expect(secondLogs).not.toContain("git.cloned");
         expect(second.sandboxId).toBe(first.sandboxId);
         expect(secondIdle.sandboxId).toBe(firstIdle.sandboxId);

@@ -14,6 +14,7 @@ export const SANDBOX_ENV = {
 
   sessionId: "SESSION_ID",
   workspaceResumed: "WORKSPACE_RESUMED",
+  debugEvents: "AGENT_DEBUG_EVENTS",
 
   taskPrompt: "TASK_PROMPT",
 

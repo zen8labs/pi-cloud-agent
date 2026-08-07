@@ -22,6 +22,7 @@ export interface RuntimeConfig {
   callbackToken: string;
   sessionId: string;
   workspaceResumed: boolean;
+  debugEvents: boolean;
 
   prompt: string;
 
@@ -87,6 +88,7 @@ export function readConfig(): RuntimeConfig {
     callbackToken: required(SANDBOX_ENV.callbackToken),
     sessionId: optional(SANDBOX_ENV.sessionId),
     workspaceResumed: optional(SANDBOX_ENV.workspaceResumed) === "true",
+    debugEvents: optional(SANDBOX_ENV.debugEvents) === "true",
 
     prompt: required(SANDBOX_ENV.taskPrompt),
 

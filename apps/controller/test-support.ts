@@ -30,10 +30,6 @@ export function setupTestDatabase(): Database {
   return createDatabase(TEST_DATABASE_URL);
 }
 
-/**
- * Shared Postgres lifecycle for an integration test file.
- * Assign with `bindTestDatabase((db) => { database = db; })` — do not destructure.
- */
 export function bindTestDatabase(assign: (database: Database) => void): void {
   let database: Database;
   beforeAll(() => {
@@ -48,7 +44,6 @@ export function bindTestDatabase(assign: (database: Database) => void): void {
   });
 }
 
-/** Postgres lifecycle plus a Hono app wired to the same database. */
 export function bindTestApp(
   assign: (deps: { database: Database; app: ReturnType<typeof createApp> }) => void,
 ): void {
@@ -62,7 +57,7 @@ export function bindTestApp(
 
 export async function resetTables(database: Database): Promise<void> {
   await database.execute(
-    sql`truncate table plugin_audit_log, plugin_oauth_tokens, plugin_oauth_clients, plugin_user_variables, plugin_user_state, plugin_settings, plugin_versions, plugins, llm_connections, web_sessions, oauth_states, vcs_connections, run_events, runs, sessions, app_users cascade`,
+    sql`truncate table plugin_audit_log, plugin_oauth_tokens, plugin_oauth_clients, plugin_user_variables, plugin_user_state, plugin_settings, plugin_versions, plugins, llm_connections, web_sessions, oauth_states, vcs_connections, observability_exports, run_events, runs, sessions, app_users cascade`,
   );
 }
 
