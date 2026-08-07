@@ -317,7 +317,7 @@ function traceAttributes(run: RunRow): Attributes {
 
 function runAttributes(run: RunRow): Attributes {
   const attributes: Attributes = {
-    "agent.profile": run.profile,
+    "agent.trigger.kind": run.trigger.kind,
     "agent.model": run.model,
     "gen_ai.operation.name": "invoke_agent",
     "gen_ai.provider.name": run.model.split("/", 1)[0] ?? run.model,

@@ -20,7 +20,6 @@ const ALLOWED: Record<string, string[]> = {
   // Contracts only. Depending on anything would make it not a contract.
   protocol: [],
   // Implementations depend on the contracts and nothing else.
-  profiles: ["protocol"],
   sandbox: ["protocol"],
   vcs: ["protocol"],
   // Plugin package format + attach resolution. Trusted-side only; runtime never
@@ -29,11 +28,10 @@ const ALLOWED: Record<string, string[]> = {
   // UNTRUSTED ZONE. Runs inside the sandbox alongside repository code.
   // It must never be able to reach a credential broker, a VCS client, a
   // sandbox provider, or the database. It talks to the controller over HTTP.
-  // Note it does not depend on `profiles` either: the controller composes the
-  // full prompt, so the sandbox image carries no profile code at all.
+  // The sandbox image carries no controller-side workflow or plugin code.
   runtime: ["protocol"],
   // TRUSTED ZONE. The only package that may compose everything.
-  controller: ["protocol", "profiles", "sandbox", "vcs", "plugins"],
+  controller: ["protocol", "sandbox", "vcs", "plugins"],
   // Browser client. Types only — it reaches the controller over HTTP.
   web: ["protocol", "plugins"],
   tsconfig: [],

@@ -53,7 +53,6 @@ describe("durable session HTTP contract", () => {
     const created = await send("POST", "/sessions", {
       repo: "acme/widgets",
       prompt: "Create a note for the next turn",
-      profile: "general",
     });
     expect(created.status).toBe(201);
     const session = await json<SessionSummary>(created);
@@ -135,7 +134,6 @@ describe("durable session HTTP contract", () => {
       await send("POST", "/sessions", {
         repo: "acme/widgets",
         prompt: "Finish without a checkpoint",
-        profile: "general",
       }),
     );
     const run = await getRun(database, session.latestRunId);

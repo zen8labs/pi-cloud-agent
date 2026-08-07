@@ -1,4 +1,3 @@
-import { DEFAULT_PROFILE, getProfile } from "@pi-cloud-agent/profiles";
 import {
   type CreateRunBody,
   createRunRequestSchema,
@@ -12,7 +11,6 @@ import { getVcsProvider } from "../vcs/connections";
 import type { AppEnv } from "./deps";
 
 interface ManualRequest {
-  profile: string;
   repo: RepoRef;
   trigger: Trigger;
 }
@@ -81,10 +79,5 @@ async function resolveManualRequest(
     prNumber: null,
   };
   const trigger: Trigger = { kind: "manual", repo, prompt: body.prompt };
-  const profile = body.profile || DEFAULT_PROFILE;
-  const definition = getProfile(profile);
-  if (!definition.accepts(trigger, {})) {
-    throw new Error(`the "${profile}" profile does not accept this request`);
-  }
-  return { profile, repo, trigger };
+  return { repo, trigger };
 }

@@ -11,7 +11,7 @@ Next.js App Router, React, Tailwind 4, Base UI, and local-source [AI Elements](h
 | Path | Role |
 |---|---|
 | `app/page.tsx` | redirects the root route to the chat-first workspace |
-| `app/chat/page.tsx` | start a run; profiles come from the controller, not from here |
+| `app/chat/page.tsx` | choose a repository and start a task |
 | `app/settings/page.tsx` | connect and disconnect GitHub and Azure DevOps identities |
 | `app/plugins/page.tsx` | browse, install, configure marketplace plugins |
 | `app/sessions/[id]/page.tsx` | ordered turns: merged activity, live latest run, real follow-up |

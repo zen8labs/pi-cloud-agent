@@ -17,7 +17,7 @@ RUN apt-get update \
         bash \
     && rm -rf /var/lib/apt/lists/*
 
-# The GitHub CLI is how a profile actuates its own outcomes — posting a review,
+# The GitHub CLI is how the agent actuates outcomes — posting a review,
 # opening a pull request — with the token it was given.
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
         -o /usr/share/keyrings/githubcli-archive-keyring.gpg \

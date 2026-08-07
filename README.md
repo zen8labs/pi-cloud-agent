@@ -55,7 +55,6 @@ apps/
   web/            operator dashboard
 packages/
   protocol/       the contracts: types, schemas, provider interfaces
-  profiles/       verticals: general (pr-review dormant on disk as a rebuild seed)
   sandbox/        SandboxProvider implementations
   vcs/            GitHub and Azure DevOps provider implementations
   runtime/        runs inside the sandbox (untrusted)
@@ -74,7 +73,7 @@ The split is by **substitutability and trust**, not by feature. `packages/runtim
 
 ## Contributing
 
-Profiles, sandbox backends, and forges are the surfaces this project wants to grow, and none of them require touching the controller. Bug fixes, corrected docs, and deletions are equally welcome.
+Skills/plugins, sandbox backends, and forges are the surfaces this project wants to grow, and none of them require touching the controller. Bug fixes, corrected docs, and deletions are equally welcome.
 
 [DEVELOPMENT.md](DEVELOPMENT.md) covers environment setup and validation. [CONTRIBUTING.md](CONTRIBUTING.md) covers the rules CI enforces and the short list of changes worth discussing before you write code. By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 

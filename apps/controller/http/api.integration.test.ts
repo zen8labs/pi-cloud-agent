@@ -1,5 +1,4 @@
 import type {
-  ConfigResponse,
   LlmConnectionsResponse,
   RunDetail,
   RunEventsResponse,
@@ -74,7 +73,6 @@ describe("starting runs", () => {
     const response = await post("/runs", {
       repo: "acme/widgets",
       prompt: "explain this repository",
-      profile: "general",
     });
     expect(response.status).toBe(201);
 
@@ -90,16 +88,6 @@ describe("starting runs", () => {
     expect((await post("/runs", { prompt: "no repo" })).status).toBe(422);
     expect((await post("/runs", { repo: "not-a-path", prompt: "hi" })).status).toBe(422);
     expect((await post("/runs", { repo: "acme/widgets", prompt: "" })).status).toBe(422);
-  });
-
-  it("reports an unknown profile by name", async () => {
-    const response = await post("/runs", {
-      repo: "acme/widgets",
-      prompt: "hi",
-      profile: "nope",
-    });
-    expect(response.status).toBe(422);
-    expect((await json<{ error: string }>(response)).error).toContain('Unknown profile "nope"');
   });
 
   it("lists runs newest first", async () => {
@@ -311,12 +299,6 @@ describe("watching a run", () => {
 });
 
 describe("dashboard support", () => {
-  it("reports the registered profiles and model-selection policy", async () => {
-    const config = await json<ConfigResponse>(await app.request("/config"));
-    expect(config.defaultProfile).toBe("general");
-    expect(config.profiles.map((profile) => profile.name)).toEqual(["general"]);
-  });
-
   it("is healthy", async () => {
     expect((await json<{ ok: boolean }>(await app.request("/healthz"))).ok).toBe(true);
   });
@@ -446,7 +428,6 @@ describe("model connections", () => {
         body: JSON.stringify({
           repo: "acme/widgets",
           prompt: "Use the original model",
-          profile: "general",
           modelConnectionId: original.id,
           modelId: "original-model",
           thinkingLevel: "off",

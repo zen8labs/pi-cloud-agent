@@ -1,7 +1,6 @@
 import type {
   AppUserSummary,
   BranchesResponse,
-  ConfigResponse,
   CreateLlmConnectionRequest,
   CreateRunRequest,
   CreateSessionTurnRequest,
@@ -128,9 +127,6 @@ export const api = {
 
   cancelRun: (id: string): Promise<{ status: string }> =>
     request<{ status: string }>(`/runs/${id}/cancel`, { method: "POST" }),
-
-  getConfig: (): Promise<ConfigResponse> =>
-    cached("config", () => request<ConfigResponse>("/config")),
 
   listRepos: (): Promise<VcsRepository[]> =>
     cached("repos", () => request<{ repos: VcsRepository[] }>("/repos").then((r) => r.repos)),

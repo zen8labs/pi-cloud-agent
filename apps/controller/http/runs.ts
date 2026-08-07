@@ -52,7 +52,6 @@ export function runRoutes(): Hono<AppEnv> {
 
     const run = await createRun(c.get("database"), {
       userId: user.id,
-      profile: manual.profile,
       provider: body.provider,
       repoFullName: body.repo,
       trigger: manual.trigger,
@@ -65,7 +64,6 @@ export function runRoutes(): Hono<AppEnv> {
 
     c.get("log").info("run queued", {
       runId: run.id,
-      profile: manual.profile,
       repo: body.repo,
     });
     return c.json(toSummary(run), 201);
@@ -202,7 +200,6 @@ function toSummary(run: RunRow): RunSummary {
   return {
     id: run.id,
     status: run.status,
-    profile: run.profile,
     provider: run.provider,
     repo: run.repoFullName,
     model: run.model,

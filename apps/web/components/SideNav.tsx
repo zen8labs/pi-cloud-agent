@@ -139,7 +139,7 @@ function SessionGroup({
 
 function sessionLabel(session: SessionSummary): string {
   const repository = session.repo.split("/").at(-1) || session.repo;
-  return `${repository} · ${session.profile}`;
+  return repository;
 }
 
 function Brand() {

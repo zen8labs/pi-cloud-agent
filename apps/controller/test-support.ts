@@ -147,12 +147,11 @@ export function manualTrigger(overrides: Partial<Trigger["repo"]> = {}): Trigger
 
 export async function seedRun(
   database: Database,
-  overrides: { profile?: string; trigger?: Trigger; userId?: string } = {},
+  overrides: { trigger?: Trigger; userId?: string } = {},
 ): Promise<RunRow> {
   const trigger = overrides.trigger ?? manualTrigger();
   return createRun(database, {
     userId: overrides.userId,
-    profile: overrides.profile ?? "general",
     provider: trigger.repo.provider,
     repoFullName: `${trigger.repo.owner}/${trigger.repo.name}`,
     trigger,
@@ -169,7 +168,6 @@ export async function seedSession(
   return createSessionWithRun(database, {
     userId,
     title: "Summarize this repository",
-    profile: "general",
     provider: trigger.repo.provider,
     repoFullName: `${trigger.repo.owner}/${trigger.repo.name}`,
     repo: trigger.repo,

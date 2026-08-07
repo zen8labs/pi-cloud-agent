@@ -1,12 +1,11 @@
 "use client";
 
 import type {
-  ConfigResponse,
   LlmConnectionSummary,
   ThinkingLevel,
   VcsRepository,
 } from "@pi-cloud-agent/protocol";
-import { FolderGit2Icon, GitBranchIcon, SlidersHorizontalIcon } from "lucide-react";
+import { FolderGit2Icon, GitBranchIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
@@ -40,12 +39,10 @@ export default function ChatPage() {
 function NewSession() {
   const router = useRouter();
   const params = useSearchParams();
-  const [config, setConfig] = useState<ConfigResponse | null>(null);
   const [repos, setRepos] = useState<VcsRepository[]>([]);
   const [modelConnections, setModelConnections] = useState<LlmConnectionSummary[]>([]);
   const [repo, setRepo] = useState(params.get("repo") ?? "");
   const [provider, setProvider] = useState("github");
-  const [profile, setProfile] = useState(params.get("profile") ?? "");
   const [modelSelection, setModelSelection] = useState("");
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>("off");
   const [prompt, setPrompt] = useState("");
@@ -57,16 +54,14 @@ function NewSession() {
 
   useEffect(() => {
     let alive = true;
-    Promise.all([api.getConfig(), api.listRepos(), api.listLlmConnections()])
-      .then(([loadedConfig, loadedRepos, loadedConnections]) => {
+    Promise.all([api.listRepos(), api.listLlmConnections()])
+      .then(([loadedRepos, loadedConnections]) => {
         if (!alive) return;
-        setConfig(loadedConfig);
         setRepos(loadedRepos);
         setModelConnections(loadedConnections);
         const selection = defaultModelSelection(loadedConnections);
         setModelSelection(selection);
         setThinkingLevel(preferredThinkingLevel(selectedModel(loadedConnections, selection)));
-        setProfile((current) => current || loadedConfig.defaultProfile);
         const selected = loadedRepos[0];
         if (selected) {
           setRepo((current) => current || selected.fullName);
@@ -112,13 +107,7 @@ function NewSession() {
   }, [provider, repo]);
 
   const canSubmit =
-    Boolean(repo) &&
-    Boolean(profile) &&
-    Boolean(prompt.trim()) &&
-    !submitting &&
-    Boolean(modelSelection);
-  const activeProfile = config?.profiles.find((entry) => entry.name === profile);
-
+    Boolean(repo) && Boolean(prompt.trim()) && !submitting && Boolean(modelSelection);
   const submit = async () => {
     if (!canSubmit) return;
     setSubmitting(true);
@@ -129,7 +118,6 @@ function NewSession() {
       const session = await api.createSession({
         repo,
         provider,
-        profile,
         prompt: prompt.trim(),
         branch: branch || null,
         modelConnectionId: selection.connectionId,
@@ -176,9 +164,6 @@ function NewSession() {
                   setRepo(value);
                   setProvider("github");
                 }}
-                profile={profile}
-                profiles={config?.profiles.map((entry) => entry.name) ?? []}
-                onProfileChange={setProfile}
                 modelSelection={modelSelection}
                 modelConnections={modelConnections}
                 onModelSelectionChange={setModelSelection}
@@ -209,8 +194,7 @@ function NewSession() {
                 to choose a repository.
               </>
             ) : (
-              (activeProfile?.description ??
-              "Profiles and repositories load from the controller.")
+              "Choose a repository and describe the task for the agent."
             )}
           </p>
           {error && (
@@ -232,9 +216,6 @@ type ComposerOptionsProps = {
   repos: VcsRepository[];
   onRepoChange: (value: VcsRepository) => void;
   onManualRepoChange: (value: string) => void;
-  profile: string;
-  profiles: string[];
-  onProfileChange: (value: string) => void;
   modelSelection: string;
   modelConnections: LlmConnectionSummary[];
   onModelSelectionChange: (value: string) => void;
@@ -292,22 +273,6 @@ function ComposerOptions(props: ComposerOptionsProps) {
         </SelectTrigger>
         <SelectContent>
           {props.branches.map((name) => (
-            <SelectItem key={name} value={name}>
-              {name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <SlidersHorizontalIcon className="ml-1 size-3.5 shrink-0 text-muted-foreground" />
-      <Select
-        value={props.profile}
-        onValueChange={(value) => props.onProfileChange(value ?? "")}
-      >
-        <SelectTrigger aria-label="Profile" className={triggerClass}>
-          <SelectValue placeholder="Profile" />
-        </SelectTrigger>
-        <SelectContent>
-          {props.profiles.map((name) => (
             <SelectItem key={name} value={name}>
               {name}
             </SelectItem>

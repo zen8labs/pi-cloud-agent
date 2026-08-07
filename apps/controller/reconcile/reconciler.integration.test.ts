@@ -134,7 +134,7 @@ describe("provisioning", () => {
   });
 
   it("hands the sandbox a complete environment and the composed prompt", async () => {
-    await seedRun(database, { profile: "general" });
+    await seedRun(database);
     const provider = fakeProvider();
 
     await tick(reconciler(provider));

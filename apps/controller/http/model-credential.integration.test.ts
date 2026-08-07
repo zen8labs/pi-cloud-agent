@@ -53,7 +53,6 @@ it("persists a refreshed OAuth credential without letting a stale run overwrite 
   const trigger = manualTrigger();
   const run = await createRun(database, {
     userId,
-    profile: "general",
     provider: trigger.repo.provider,
     repoFullName: "acme/widgets",
     trigger,

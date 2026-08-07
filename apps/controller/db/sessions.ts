@@ -13,7 +13,6 @@ import { type RunRow, runs, type SessionRow, sessions } from "./schema";
 export interface CreateSessionInput {
   userId?: string | null;
   title: string;
-  profile: string;
   provider: string;
   repoFullName: string;
   repo: RepoRef;
@@ -51,7 +50,6 @@ export async function createSessionWithRun(
         id: sessionId,
         userId: input.userId ?? null,
         title: input.title,
-        profile: input.profile,
         provider: input.provider,
         repoFullName: input.repoFullName,
         repo: input.repo,
@@ -68,7 +66,6 @@ export async function createSessionWithRun(
         userId: input.userId ?? null,
         sessionId,
         turnNumber: 1,
-        profile: input.profile,
         provider: input.provider,
         repoFullName: input.repoFullName,
         trigger: input.trigger,
@@ -130,7 +127,6 @@ export async function createSessionTurn(
         userId: claimed.userId,
         sessionId,
         turnNumber: claimed.turnCount,
-        profile: claimed.profile,
         provider: claimed.provider,
         repoFullName: claimed.repoFullName,
         trigger,

@@ -43,7 +43,7 @@ Anything that breaks a boundary we claim to hold:
 - credential exposure beyond what's described above: a token reaching logs, telemetry, an event payload, the dashboard, or another run
 - a run's callback token being usable for a different run, or for anything beyond its two endpoints
 - a run escaping its own state machine: a terminal decision being overwritten, or a run being claimed twice
-- a profile or provider gaining controller-side privileges it shouldn't have
+- a workflow or provider gaining controller-side privileges it shouldn't have
 - anything that lets sandbox-side code reach the controller's database or credential broker
 - dependency vulnerabilities that are actually reachable from this code
 

@@ -95,7 +95,7 @@ The controller always exports trace content so production runs can be used as ev
 psql() { docker compose exec -T db psql -U pi_cloud_agent -d pi_cloud_agent "$@"; }
 
 # recent runs
-psql -c "select id, status, profile, repo_full_name, attempt, created_at
+psql -c "select id, status, repo_full_name, attempt, created_at
          from runs order by created_at desc limit 10;"
 
 # one run's event log
@@ -185,7 +185,7 @@ Demo with Context7: Install → Configure with a key from https://context7.com/d
 
 Demo with Exa: Install → **Connect** (OAuth) → start a `general` run that needs live web search. Paste an API key under Configure only as a fallback.
 
-Plugin skills replace the profile skill; MCP arrives as resolved `MCP_CONFIG` in the sandbox (never from the cloned repo).
+Plugin skills are composed into the task prompt; MCP arrives as resolved `MCP_CONFIG` in the sandbox (never from the cloned repo).
 
 Yanked versions cannot newly attach; in-flight runs keep the plugin set pinned on `runs.plugins`.
 
