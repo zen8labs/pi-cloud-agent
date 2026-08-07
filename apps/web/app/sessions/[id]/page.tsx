@@ -36,10 +36,10 @@ const SessionDiffSidebar = dynamic(
   },
 );
 
-const DIFF_WIDTH_STORAGE_KEY = "pca-diff-width-v2";
-const DEFAULT_DIFF_WIDTH = 600;
+const DIFF_WIDTH_STORAGE_KEY = "pca-diff-width-v3";
+const DEFAULT_DIFF_WIDTH = 760;
 const MIN_DIFF_WIDTH = 320;
-const MAX_DIFF_WIDTH = 840;
+const MAX_DIFF_WIDTH = 960;
 
 function getMaxDiffWidth(): number {
   if (typeof window === "undefined") return MAX_DIFF_WIDTH;
@@ -58,7 +58,9 @@ export default function SessionPage() {
   const { session, turns, error, refresh } = useSession(id);
   const [cancelling, setCancelling] = useState(false);
   const [diffOpen, setDiffOpen] = useState(false);
-  const [diffWidth, setDiffWidth] = useState(DEFAULT_DIFF_WIDTH);
+  const [diffWidth, setDiffWidth] = useState(() =>
+    clampDiffWidth(DEFAULT_DIFF_WIDTH, getMaxDiffWidth()),
+  );
   const diffRequest = useRef(0);
   const [diffTarget, setDiffTarget] = useState<{ path: string; request: number } | null>(null);
   const latest = turns.at(-1)?.run ?? null;
@@ -77,9 +79,10 @@ export default function SessionPage() {
 
   useEffect(() => {
     try {
-      const storedWidth = Number(localStorage.getItem(DIFF_WIDTH_STORAGE_KEY));
-      if (Number.isFinite(storedWidth))
-        setDiffWidth(clampDiffWidth(storedWidth, getMaxDiffWidth()));
+      const storedWidth = localStorage.getItem(DIFF_WIDTH_STORAGE_KEY);
+      if (storedWidth !== null && Number.isFinite(Number(storedWidth))) {
+        setDiffWidth(clampDiffWidth(Number(storedWidth), getMaxDiffWidth()));
+      }
     } catch {
       // Storage unavailable: keep the default width.
     }

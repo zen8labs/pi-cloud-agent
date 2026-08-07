@@ -2,9 +2,12 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 
-const STORAGE_KEY = "pca-nav-collapsed";
-const WIDTH_STORAGE_KEY = "pca-nav-width";
-const DEFAULT_WIDTH = 252;
+// The previous key could leave users in the broken, oversized collapsed rail
+// from the first resizable-sidebar implementation. Start the corrected layout
+// expanded once, then persist intentional collapse/expand choices normally.
+const STORAGE_KEY = "pca-nav-collapsed-v2";
+const WIDTH_STORAGE_KEY = "pca-nav-width-v2";
+const DEFAULT_WIDTH = 320;
 const MIN_WIDTH = 180;
 const MAX_WIDTH = 360;
 
@@ -32,8 +35,10 @@ export function NavCollapseProvider({ children }: { children: React.ReactNode })
   useEffect(() => {
     try {
       setCollapsed(localStorage.getItem(STORAGE_KEY) === "1");
-      const storedWidth = Number(localStorage.getItem(WIDTH_STORAGE_KEY));
-      if (Number.isFinite(storedWidth)) setWidth(clampWidth(storedWidth));
+      const storedWidth = localStorage.getItem(WIDTH_STORAGE_KEY);
+      if (storedWidth !== null && Number.isFinite(Number(storedWidth))) {
+        setWidth(clampWidth(Number(storedWidth)));
+      }
     } catch {
       // Storage unavailable: keep the default expanded navigation.
     }
