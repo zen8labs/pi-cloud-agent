@@ -11,6 +11,7 @@ const MAX_WIDTH = 360;
 type NavCollapse = {
   collapsed: boolean;
   toggle: () => void;
+  expand: () => void;
   width: number;
   resize: (width: number) => void;
   resetWidth: () => void;
@@ -19,6 +20,7 @@ type NavCollapse = {
 const NavCollapseContext = createContext<NavCollapse>({
   collapsed: false,
   toggle: () => {},
+  expand: () => {},
   width: DEFAULT_WIDTH,
   resize: () => {},
   resetWidth: () => {},
@@ -45,6 +47,14 @@ export function NavCollapseProvider({ children }: { children: React.ReactNode })
       }
       return !current;
     });
+  const expand = () => {
+    setCollapsed(false);
+    try {
+      localStorage.setItem(STORAGE_KEY, "0");
+    } catch {
+      // Persisting is best-effort; expansion still works for the session.
+    }
+  };
   const resize = (nextWidth: number) => {
     const next = clampWidth(nextWidth);
     setWidth(next);
@@ -56,7 +66,9 @@ export function NavCollapseProvider({ children }: { children: React.ReactNode })
   };
   const resetWidth = () => resize(DEFAULT_WIDTH);
   return (
-    <NavCollapseContext.Provider value={{ collapsed, toggle, width, resize, resetWidth }}>
+    <NavCollapseContext.Provider
+      value={{ collapsed, toggle, expand, width, resize, resetWidth }}
+    >
       {children}
     </NavCollapseContext.Provider>
   );

@@ -32,14 +32,12 @@ export function SidebarResizeHandle({
   };
 
   return (
-    <hr
+    <button
+      type="button"
       aria-label={`${side === "left" ? "Navigation" : "Changes"} sidebar resize handle`}
-      aria-orientation="vertical"
-      aria-valuemax={maxSize}
-      aria-valuemin={minSize}
-      aria-valuenow={currentSize}
+      title="Drag to resize"
       className={cn(
-        "absolute inset-y-0 m-0 w-1 cursor-col-resize border-0 bg-transparent p-0 touch-none transition-colors hover:bg-ring/50 focus-visible:bg-ring/70 focus-visible:outline-none",
+        "group pointer-events-auto absolute inset-y-0 z-20 m-0 w-2 cursor-col-resize border-0 bg-transparent p-0 touch-none transition-colors hover:bg-border/40 focus-visible:bg-border/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
         side === "left" ? "-right-px" : "-left-px",
       )}
       onDoubleClick={onReset}
@@ -76,7 +74,11 @@ export function SidebarResizeHandle({
       onPointerCancel={() => {
         dragging.current = false;
       }}
-      tabIndex={0}
-    />
+    >
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-y-1/2 left-1/2 h-10 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-border/80 transition-colors group-hover:bg-foreground/60"
+      />
+    </button>
   );
 }

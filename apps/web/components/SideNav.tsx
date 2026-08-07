@@ -7,8 +7,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AccountMenu } from "@/components/AccountMenu";
-import { MAX_WIDTH, MIN_WIDTH, useNavCollapse } from "@/components/nav-collapse";
-import { SidebarResizeHandle } from "@/components/SidebarResizeHandle";
+import { useNavCollapse } from "@/components/nav-collapse";
 import { api } from "@/lib/api";
 import { loadSessionTitles } from "@/lib/session-titles";
 import { cn } from "@/lib/utils";
@@ -95,23 +94,8 @@ export function SideNav() {
         <div className="border-t border-border px-2.5 py-2.5">
           <AccountMenu />
         </div>
-        <NavigationResizeHandle />
       </aside>
     </>
-  );
-}
-
-function NavigationResizeHandle() {
-  const { width, resize, resetWidth } = useNavCollapse();
-  return (
-    <SidebarResizeHandle
-      side="left"
-      currentSize={width}
-      minSize={MIN_WIDTH}
-      maxSize={MAX_WIDTH}
-      onResize={resize}
-      onReset={resetWidth}
-    />
   );
 }
 
