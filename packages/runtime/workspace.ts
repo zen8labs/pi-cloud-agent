@@ -14,24 +14,51 @@ const MAX_OUTPUT_CHARS = 1_000_000;
 interface CommandResult {
   code: number;
   output: string;
+  outputTruncated: boolean;
   signal: NodeJS.Signals | null;
   timedOut: boolean;
+}
+
+type OutputPosition = "head" | "tail";
+
+export function trimCommandOutput(
+  output: string,
+  maxOutputChars: number,
+  position: OutputPosition = "tail",
+): { output: string; truncated: boolean } {
+  if (output.length <= maxOutputChars) return { output, truncated: false };
+  return {
+    output:
+      position === "head" ? output.slice(0, maxOutputChars) : output.slice(-maxOutputChars),
+    truncated: true,
+  };
 }
 
 function run(
   command: string,
   args: string[],
-  options: { cwd?: string; timeoutMs?: number; maxOutputChars?: number } = {},
+  options: {
+    cwd?: string;
+    timeoutMs?: number;
+    maxOutputChars?: number;
+    outputPosition?: OutputPosition;
+  } = {},
 ): Promise<CommandResult> {
   return new Promise((resolve) => {
     const child = spawn(command, args, { cwd: options.cwd, env: process.env });
     let output = "";
+    let outputTruncated = false;
     let timedOut = false;
     let settled = false;
     const collect = (chunk: Buffer) => {
-      output += chunk.toString();
       const maxOutputChars = options.maxOutputChars ?? MAX_OUTPUT_CHARS;
-      if (output.length > maxOutputChars) output = output.slice(-maxOutputChars);
+      const trimmed = trimCommandOutput(
+        output + chunk.toString(),
+        maxOutputChars,
+        options.outputPosition,
+      );
+      output = trimmed.output;
+      outputTruncated ||= trimmed.truncated;
     };
     child.stdout.on("data", collect);
     child.stderr.on("data", collect);
@@ -55,6 +82,7 @@ function run(
       finish({
         code: 1,
         output: redactUrlCredentials(output).trim(),
+        outputTruncated,
         signal: null,
         timedOut,
       });
@@ -64,6 +92,7 @@ function run(
         // A process closed by a signal has no exit code. It did not succeed.
         code: code ?? (timedOut ? 124 : 1),
         output: redactUrlCredentials(output).trim(),
+        outputTruncated,
         signal,
         timedOut,
       }),
@@ -74,18 +103,20 @@ function run(
 const DIFF_MAX_OUTPUT_CHARS = 2_000_000;
 
 /** Capture the revision at the start of a turn so committed edits are visible. */
-export async function gitRevision(path: string): Promise<string> {
+export async function gitRevision(path: string): Promise<string | null> {
   const result = await run("git", ["rev-parse", "HEAD"], { cwd: path, timeoutMs: 30_000 });
   if (result.code !== 0 || !result.output) {
-    throw new Error(`could not determine the checkout revision: ${result.output}`);
+    // A freshly initialized repository has no HEAD until its first commit.
+    // The diff baseline is optional, so let the agent create that first commit.
+    return null;
   }
   return result.output.trim();
 }
 
 export interface GitDiffSnapshot {
   patch: string;
-  baseSha: string;
-  headSha: string;
+  baseSha: string | null;
+  headSha: string | null;
   files: number;
   added: number;
   removed: number;
@@ -96,38 +127,55 @@ export interface GitDiffSnapshot {
  * Capture tracked, staged, committed-during-turn, deleted, renamed, and
  * untracked changes without modifying the checkout.
  */
-export async function gitDiff(path: string, baseSha: string): Promise<GitDiffSnapshot> {
+export async function gitDiff(path: string, baseSha: string | null): Promise<GitDiffSnapshot> {
   const headSha = await gitRevision(path);
-  const tracked = await run(
-    "git",
-    ["diff", "--no-ext-diff", "--binary", "--find-renames", baseSha, "--"],
-    { cwd: path, timeoutMs: 60_000, maxOutputChars: DIFF_MAX_OUTPUT_CHARS },
-  );
-  if (tracked.code !== 0)
+  const tracked = baseSha
+    ? await run("git", ["diff", "--no-ext-diff", "--binary", "--find-renames", baseSha, "--"], {
+        cwd: path,
+        timeoutMs: 60_000,
+        maxOutputChars: DIFF_MAX_OUTPUT_CHARS,
+        outputPosition: "head",
+      })
+    : null;
+  if (tracked && tracked.code !== 0)
     throw new Error(`could not capture the checkout diff: ${tracked.output}`);
 
-  const untracked = await run("git", ["ls-files", "--others", "--exclude-standard", "-z"], {
-    cwd: path,
-    timeoutMs: 30_000,
-    maxOutputChars: 200_000,
-  });
+  const untracked = await run(
+    "git",
+    baseSha
+      ? ["ls-files", "--others", "--exclude-standard", "-z"]
+      : ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+    {
+      cwd: path,
+      timeoutMs: 30_000,
+      maxOutputChars: 200_000,
+      outputPosition: "head",
+    },
+  );
   if (untracked.code !== 0)
     throw new Error(`could not list untracked files: ${untracked.output}`);
 
-  const chunks = [tracked.output];
+  const chunks = tracked ? [tracked.output] : [];
+  let sourceTruncated = Boolean(tracked?.outputTruncated || untracked.outputTruncated);
   for (const file of untracked.output.split("\0").filter(Boolean)) {
     const fileDiff = await run(
       "git",
       ["diff", "--no-index", "--no-ext-diff", "--binary", "--", "/dev/null", file],
-      { cwd: path, timeoutMs: 60_000, maxOutputChars: DIFF_MAX_OUTPUT_CHARS },
+      {
+        cwd: path,
+        timeoutMs: 60_000,
+        maxOutputChars: DIFF_MAX_OUTPUT_CHARS,
+        outputPosition: "head",
+      },
     );
     // `git diff --no-index` returns 1 when files differ, which is the success
     // case here. Any other non-zero result is a genuine capture failure.
     if (fileDiff.code > 1) throw new Error(`could not capture ${file}: ${fileDiff.output}`);
     chunks.push(fileDiff.output);
+    sourceTruncated ||= fileDiff.outputTruncated;
   }
 
-  const limited = limitDiff(chunks.filter(Boolean).join("\n"));
+  const limited = limitDiff(chunks.filter(Boolean).join("\n"), sourceTruncated);
   return {
     patch: limited.patch,
     baseSha,
@@ -139,14 +187,25 @@ export async function gitDiff(path: string, baseSha: string): Promise<GitDiffSna
   };
 }
 
-function limitDiff(patch: string): { patch: string; truncated: boolean } {
-  if (patch.length <= DIFF_MAX_OUTPUT_CHARS) return { patch, truncated: false };
-  const chunks = patch.split(/(?=^diff --git )/m);
+function limitDiff(
+  patch: string,
+  sourceTruncated = false,
+): { patch: string; truncated: boolean } {
+  if (!sourceTruncated && patch.length <= DIFF_MAX_OUTPUT_CHARS)
+    return { patch, truncated: false };
+  const chunks = patch
+    .split(/(?=^diff --git )/m)
+    .filter((chunk) => chunk.startsWith("diff --git "));
   let output = "";
   for (const chunk of chunks) {
+    if (output.length === 0 && chunk.length > DIFF_MAX_OUTPUT_CHARS) {
+      output = chunk.slice(0, DIFF_MAX_OUTPUT_CHARS);
+      break;
+    }
     if (output.length + chunk.length > DIFF_MAX_OUTPUT_CHARS) break;
     output += chunk;
   }
+  if (!output && !chunks.length) output = patch.slice(0, DIFF_MAX_OUTPUT_CHARS);
   return {
     patch: `${output.trimEnd()}\n\n[diff truncated by the runtime]\n`,
     truncated: true,
