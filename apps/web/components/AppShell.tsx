@@ -43,9 +43,12 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
-  const { collapsed } = useNavCollapse();
+  const { collapsed, width } = useNavCollapse();
   return (
-    <div className={cn("app-shell", collapsed && "nav-collapsed")}>
+    <div
+      className={cn("app-shell", collapsed && "nav-collapsed")}
+      style={{ "--nav-width": `${width}px` } as React.CSSProperties}
+    >
       {collapsed ? <NavRail /> : <SideNav />}
       <main className="app-main">{children}</main>
     </div>

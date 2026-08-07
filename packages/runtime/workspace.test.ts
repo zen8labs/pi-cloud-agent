@@ -186,4 +186,54 @@ describe("git snapshots", () => {
     expect(snapshot.patch).toMatch(/^diff --git a\/large\.txt b\/large\.txt/);
     expect(snapshot.patch).toContain("[diff truncated by the runtime]");
   });
+
+  it("keeps git warnings out of the machine-readable patch", async () => {
+    const addChild = (stdout: string, stderr: string, code: number) => {
+      const child = new EventEmitter() as EventEmitter & {
+        stdout: EventEmitter;
+        stderr: EventEmitter;
+      };
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      queueMicrotask(() => {
+        if (stdout) child.stdout.emit("data", Buffer.from(stdout));
+        if (stderr) child.stderr.emit("data", Buffer.from(stderr));
+        child.emit("close", code, null);
+      });
+      return child;
+    };
+
+    const patch =
+      "diff --git a/hello.ts b/hello.ts\n--- a/hello.ts\n+++ b/hello.ts\n@@ -1 +1 @@\n-old\n+new\n";
+    vi.mocked(spawn)
+      .mockImplementationOnce(
+        () => addChild("head-sha\n", "warning: safe.directory\n", 0) as never,
+      )
+      .mockImplementationOnce(() => addChild(patch, "warning: line ending\n", 0) as never)
+      .mockImplementationOnce(() => addChild("", "warning: unrelated\n", 0) as never);
+
+    const snapshot = await gitDiff(config.repo.path, "base-sha");
+
+    expect(snapshot.patch).toBe(patch);
+    expect(snapshot.patch).not.toContain("warning:");
+  });
+
+  it("decodes a UTF-8 character split across output chunks", async () => {
+    const child = new EventEmitter() as EventEmitter & {
+      stdout: EventEmitter;
+      stderr: EventEmitter;
+    };
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const output = Buffer.from("head-é\n");
+    const split = output.indexOf(0xc3) + 1;
+    const pending = gitRevision(config.repo.path);
+    child.stdout.emit("data", output.subarray(0, split));
+    child.stdout.emit("data", output.subarray(split));
+    child.emit("close", 0, null);
+
+    await expect(pending).resolves.toBe("head-é");
+  });
 });

@@ -1,11 +1,6 @@
 "use client";
 
-import type {
-  LlmConnectionSummary,
-  RunDetail,
-  SessionDetail,
-  ThinkingLevel,
-} from "@pi-cloud-agent/protocol";
+import type { RunDetail, SessionDetail } from "@pi-cloud-agent/protocol";
 import { ArrowLeftIcon, GitBranchIcon, PanelRightIcon, SquareIcon } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
@@ -17,20 +12,12 @@ import {
   ConversationContent,
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
-import { ChatComposer } from "@/components/ChatComposer";
-import { ModelSelect } from "@/components/ModelSelect";
 import { AzureDevOpsMarkIcon, GithubMarkIcon } from "@/components/ProviderIcons";
+import { SessionFollowUp } from "@/components/SessionFollowUp";
+import { SidebarResizeHandle } from "@/components/SidebarResizeHandle";
 import { StatusBadge } from "@/components/StatusBadge";
-import { ThinkingLevelSelect } from "@/components/ThinkingLevelSelect";
 import { api } from "@/lib/api";
 import { absoluteTime } from "@/lib/format";
-import {
-  defaultModelSelection,
-  parseModelSelection,
-  preferredModelSelection,
-  preferredThinkingLevel,
-  selectedModel,
-} from "@/lib/model-selection";
 import { resolveBranch, summarizeChanges } from "@/lib/session-meta";
 import { useSession } from "@/lib/useSession";
 import { cn } from "@/lib/utils";
@@ -49,17 +36,36 @@ const SessionDiffSidebar = dynamic(
   },
 );
 
+const DIFF_WIDTH_STORAGE_KEY = "pca-diff-width";
+const DEFAULT_DIFF_WIDTH = 480;
+const MIN_DIFF_WIDTH = 320;
+const MAX_DIFF_WIDTH = 720;
+
+function getMaxDiffWidth(): number {
+  if (typeof window === "undefined") return MAX_DIFF_WIDTH;
+  return Math.max(
+    MIN_DIFF_WIDTH,
+    Math.min(MAX_DIFF_WIDTH, Math.floor(window.innerWidth * 0.48)),
+  );
+}
+
+function clampDiffWidth(width: number, maxWidth = MAX_DIFF_WIDTH): number {
+  return Math.min(maxWidth, Math.max(MIN_DIFF_WIDTH, Math.round(width)));
+}
+
 export default function SessionPage() {
   const { id } = useParams<{ id: string }>();
   const { session, turns, error, refresh } = useSession(id);
   const [cancelling, setCancelling] = useState(false);
   const [diffOpen, setDiffOpen] = useState(false);
+  const [diffWidth, setDiffWidth] = useState(DEFAULT_DIFF_WIDTH);
   const diffRequest = useRef(0);
   const [diffTarget, setDiffTarget] = useState<{ path: string; request: number } | null>(null);
   const latest = turns.at(-1)?.run ?? null;
   const active = session ? session.status !== "idle" : false;
   const allEvents = useMemo(() => turns.flatMap((turn) => turn.events), [turns]);
   const changes = useMemo(() => summarizeChanges(allEvents), [allEvents]);
+  const maxDiffWidth = getMaxDiffWidth();
   const branch = useMemo(
     () => resolveBranch(latest?.branch ?? null, allEvents),
     [allEvents, latest?.branch],
@@ -68,6 +74,26 @@ export default function SessionPage() {
     setDiffOpen(true);
     setDiffTarget(path ? { path, request: ++diffRequest.current } : null);
   }, []);
+
+  useEffect(() => {
+    try {
+      const storedWidth = Number(localStorage.getItem(DIFF_WIDTH_STORAGE_KEY));
+      if (Number.isFinite(storedWidth))
+        setDiffWidth(clampDiffWidth(storedWidth, getMaxDiffWidth()));
+    } catch {
+      // Storage unavailable: keep the default width.
+    }
+  }, []);
+
+  const resizeDiff = (nextWidth: number) => {
+    const next = clampDiffWidth(nextWidth, maxDiffWidth);
+    setDiffWidth(next);
+    try {
+      localStorage.setItem(DIFF_WIDTH_STORAGE_KEY, String(next));
+    } catch {
+      // Persisting is best-effort; resizing still works for the session.
+    }
+  };
 
   const cancel = async () => {
     if (!latest) return;
@@ -129,7 +155,7 @@ export default function SessionPage() {
             {session && (
               <div className="bg-background px-4 pb-5 pt-2 sm:px-6">
                 <div className="mx-auto max-w-3xl">
-                  <FollowUp
+                  <SessionFollowUp
                     sessionId={session.id}
                     repo={session.repo}
                     previousModel={latest?.model ?? session.model}
@@ -146,7 +172,7 @@ export default function SessionPage() {
           </section>
           <div
             className={cn(
-              "hidden h-full shrink-0 overflow-hidden transition-[width,opacity] duration-200 ease-out motion-reduce:transition-none xl:block",
+              "hidden h-full shrink-0 overflow-hidden transition-[width,opacity] duration-200 ease-out motion-reduce:transition-none lg:block",
               diffOpen ? "pointer-events-none w-0 opacity-0" : "w-60 opacity-100",
             )}
           >
@@ -162,10 +188,21 @@ export default function SessionPage() {
       </div>
       <div
         className={cn(
-          "hidden h-full shrink-0 overflow-hidden transition-[width,opacity] duration-200 ease-out motion-reduce:transition-none xl:block",
-          diffOpen ? "w-[min(52vw,720px)] opacity-100" : "pointer-events-none w-0 opacity-0",
+          "relative hidden h-full shrink-0 overflow-hidden transition-[width,opacity] duration-200 ease-out motion-reduce:transition-none lg:block",
+          diffOpen ? "opacity-100" : "pointer-events-none opacity-0",
         )}
+        style={{ width: diffOpen ? diffWidth : 0 }}
       >
+        {diffOpen ? (
+          <SidebarResizeHandle
+            side="right"
+            currentSize={diffWidth}
+            minSize={MIN_DIFF_WIDTH}
+            maxSize={maxDiffWidth}
+            onResize={resizeDiff}
+            onReset={() => resizeDiff(DEFAULT_DIFF_WIDTH)}
+          />
+        ) : null}
         <SessionDiffSidebar
           turns={turns}
           open={diffOpen}
@@ -226,7 +263,7 @@ function SessionHeader({
         aria-label={diffOpen ? "Hide changes" : "Show changes"}
         aria-pressed={diffOpen}
         className={cn(
-          "hidden size-7 place-items-center rounded-md transition-colors duration-200 motion-reduce:transition-none hover:bg-accent hover:text-foreground xl:grid",
+          "hidden size-7 place-items-center rounded-md transition-colors duration-200 motion-reduce:transition-none hover:bg-accent hover:text-foreground lg:grid",
           diffOpen ? "bg-accent text-foreground" : "text-muted-foreground",
         )}
       >
@@ -238,7 +275,7 @@ function SessionHeader({
 
 /**
  * Environment strip inside the chat window (not a page-level sidebar).
- * Auto-hides below xl while the dedicated Changes rail owns the page-level right slot.
+ * Auto-hides below lg while the dedicated Changes rail owns the page-level right slot.
  */
 function SessionMeta({
   session,
@@ -344,145 +381,5 @@ function ChangesLine({
         </>
       )}
     </button>
-  );
-}
-
-/** Transport seam for multi-turn sessions. It can switch from replay to Pi session resume without changing the composer. */
-function FollowUp({
-  sessionId,
-  repo,
-  previousModel,
-  previousModelConnectionId,
-  previousThinkingLevel,
-  active,
-  onQueued,
-}: {
-  sessionId: string;
-  repo: string;
-  previousModel: string;
-  previousModelConnectionId: string | null;
-  previousThinkingLevel: ThinkingLevel;
-  active: boolean;
-  onQueued: () => Promise<void>;
-}) {
-  const [prompt, setPrompt] = useState("");
-  const [modelConnections, setModelConnections] = useState<LlmConnectionSummary[]>([]);
-  const [modelSelection, setModelSelection] = useState("");
-  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>("off");
-  const [modelsLoading, setModelsLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (active) return;
-    let alive = true;
-    setModelsLoading(true);
-    api
-      .listLlmConnections()
-      .then((connections) => {
-        if (!alive) return;
-        setModelConnections(connections);
-        const selection = preferredModelSelection(
-          connections,
-          previousModelConnectionId,
-          previousModel,
-        );
-        setModelSelection(selection);
-        setThinkingLevel(
-          preferredThinkingLevel(selectedModel(connections, selection), previousThinkingLevel),
-        );
-      })
-      .catch((cause) => {
-        if (alive) setError(cause instanceof Error ? cause.message : String(cause));
-      })
-      .finally(() => {
-        if (alive) setModelsLoading(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [active, previousModel, previousModelConnectionId, previousThinkingLevel]);
-
-  const selected = parseModelSelection(modelSelection);
-  const canSubmit = !active && !submitting && Boolean(prompt.trim()) && Boolean(selected);
-
-  const submit = async () => {
-    if (!canSubmit || !selected) return;
-    setSubmitting(true);
-    setError(null);
-    try {
-      await api.createSessionTurn(sessionId, {
-        prompt: prompt.trim(),
-        modelConnectionId: selected.connectionId,
-        modelId: selected.modelId,
-        thinkingLevel,
-      });
-      setPrompt("");
-      await onQueued();
-      setSubmitting(false);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-      const connections = await api.listLlmConnections().catch(() => null);
-      if (connections) {
-        setModelConnections(connections);
-        setModelSelection(defaultModelSelection(connections));
-        const selection = defaultModelSelection(connections);
-        setThinkingLevel(preferredThinkingLevel(selectedModel(connections, selection)));
-      }
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div>
-      <ChatComposer
-        value={prompt}
-        onChange={setPrompt}
-        onSubmit={submit}
-        placeholder={active ? "Pi is still working…" : `Follow up on ${repo}…`}
-        submitLabel="Send"
-        submitEnabled={canSubmit}
-        submitting={submitting}
-        disabled={active || modelsLoading || modelConnections.length === 0}
-        compact
-        tools={
-          <div className="flex min-w-0 items-center text-muted-foreground">
-            <ModelSelect
-              connections={modelConnections}
-              value={modelSelection}
-              onChange={(value) => {
-                setModelSelection(value);
-                setThinkingLevel(
-                  preferredThinkingLevel(selectedModel(modelConnections, value), thinkingLevel),
-                );
-              }}
-              disabled={active || modelsLoading}
-              ariaLabel="Model for next turn"
-              placeholder={modelsLoading ? "Loading models…" : "Choose model"}
-              className="h-7 min-w-0 max-w-44 border-0 bg-transparent px-1.5 text-xs shadow-none dark:bg-transparent"
-            />
-            <ThinkingLevelSelect
-              levels={
-                selectedModel(modelConnections, modelSelection)?.thinkingLevels ?? ["off"]
-              }
-              value={thinkingLevel}
-              onChange={setThinkingLevel}
-              disabled={active || modelsLoading}
-              className="h-7 min-w-0 max-w-36 border-0 bg-transparent px-1.5 text-xs shadow-none dark:bg-transparent"
-            />
-          </div>
-        }
-      />
-      {modelConnections.length === 0 && !modelsLoading ? (
-        <p className="mt-2 text-xs text-muted-foreground">
-          Add a model connection in{" "}
-          <Link href="/settings" className="underline underline-offset-2">
-            Settings
-          </Link>{" "}
-          before continuing.
-        </p>
-      ) : null}
-      {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
-    </div>
   );
 }

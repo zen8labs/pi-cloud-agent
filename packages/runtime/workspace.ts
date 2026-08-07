@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { redactUrlCredentials, SANDBOX_ENV, SANDBOX_PATHS } from "@pi-cloud-agent/protocol";
 import type { RuntimeConfig } from "./config";
 import type { Reporter } from "./reporter";
@@ -14,6 +15,7 @@ const MAX_OUTPUT_CHARS = 1_000_000;
 interface CommandResult {
   code: number;
   output: string;
+  stderr: string;
   outputTruncated: boolean;
   signal: NodeJS.Signals | null;
   timedOut: boolean;
@@ -42,26 +44,42 @@ function run(
     timeoutMs?: number;
     maxOutputChars?: number;
     outputPosition?: OutputPosition;
+    includeStderr?: boolean;
   } = {},
 ): Promise<CommandResult> {
   return new Promise((resolve) => {
     const child = spawn(command, args, { cwd: options.cwd, env: process.env });
-    let output = "";
-    let outputTruncated = false;
+    const stdoutDecoder = new StringDecoder("utf8");
+    const stderrDecoder = new StringDecoder("utf8");
+    let stdout = "";
+    let stderr = "";
+    let stdoutTruncated = false;
+    let stderrTruncated = false;
     let timedOut = false;
     let settled = false;
-    const collect = (chunk: Buffer) => {
+    const append = (stream: "stdout" | "stderr", text: string) => {
+      if (!text) return;
       const maxOutputChars = options.maxOutputChars ?? MAX_OUTPUT_CHARS;
       const trimmed = trimCommandOutput(
-        output + chunk.toString(),
+        (stream === "stdout" ? stdout : stderr) + text,
         maxOutputChars,
         options.outputPosition,
       );
-      output = trimmed.output;
-      outputTruncated ||= trimmed.truncated;
+      if (stream === "stdout") {
+        stdout = trimmed.output;
+        stdoutTruncated ||= trimmed.truncated;
+      } else {
+        stderr = trimmed.output;
+        stderrTruncated ||= trimmed.truncated;
+      }
     };
-    child.stdout.on("data", collect);
-    child.stderr.on("data", collect);
+    child.stdout.on("data", (chunk: Buffer) => append("stdout", stdoutDecoder.write(chunk)));
+    child.stderr.on("data", (chunk: Buffer) => append("stderr", stderrDecoder.write(chunk)));
+
+    const flush = () => {
+      append("stdout", stdoutDecoder.end());
+      append("stderr", stderrDecoder.end());
+    };
 
     const timer = options.timeoutMs
       ? setTimeout(() => {
@@ -70,33 +88,35 @@ function run(
         }, options.timeoutMs)
       : null;
 
-    const finish = (result: CommandResult) => {
+    const finish = (code: number, signal: NodeJS.Signals | null) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
-      resolve(result);
+      flush();
+      const cleanStdout = redactUrlCredentials(stdout);
+      const cleanStderr = redactUrlCredentials(stderr).trim();
+      resolve({
+        code,
+        output:
+          options.includeStderr === false
+            ? cleanStdout
+            : [cleanStdout.trim(), cleanStderr].filter(Boolean).join("\n"),
+        stderr: cleanStderr,
+        outputTruncated:
+          stdoutTruncated || (options.includeStderr !== false && stderrTruncated),
+        signal,
+        timedOut,
+      });
     };
 
     child.on("error", (error) => {
-      collect(Buffer.from(`\n${error.message}`));
-      finish({
-        code: 1,
-        output: redactUrlCredentials(output).trim(),
-        outputTruncated,
-        signal: null,
-        timedOut,
-      });
+      append("stderr", `\n${error.message}`);
+      finish(1, null);
     });
-    child.on("close", (code, signal) =>
-      finish({
-        // A process closed by a signal has no exit code. It did not succeed.
-        code: code ?? (timedOut ? 124 : 1),
-        output: redactUrlCredentials(output).trim(),
-        outputTruncated,
-        signal,
-        timedOut,
-      }),
-    );
+    child.on("close", (code, signal) => {
+      // A process closed by a signal has no exit code. It did not succeed.
+      finish(code ?? (timedOut ? 124 : 1), signal);
+    });
   });
 }
 
@@ -104,7 +124,11 @@ const DIFF_MAX_OUTPUT_CHARS = 2_000_000;
 
 /** Capture the revision at the start of a turn so committed edits are visible. */
 export async function gitRevision(path: string): Promise<string | null> {
-  const result = await run("git", ["rev-parse", "HEAD"], { cwd: path, timeoutMs: 30_000 });
+  const result = await run("git", ["rev-parse", "HEAD"], {
+    cwd: path,
+    timeoutMs: 30_000,
+    includeStderr: false,
+  });
   if (result.code !== 0 || !result.output) {
     // A freshly initialized repository has no HEAD until its first commit.
     // The diff baseline is optional, so let the agent create that first commit.
@@ -135,10 +159,11 @@ export async function gitDiff(path: string, baseSha: string | null): Promise<Git
         timeoutMs: 60_000,
         maxOutputChars: DIFF_MAX_OUTPUT_CHARS,
         outputPosition: "head",
+        includeStderr: false,
       })
     : null;
   if (tracked && tracked.code !== 0)
-    throw new Error(`could not capture the checkout diff: ${tracked.output}`);
+    throw new Error(`could not capture the checkout diff: ${tracked.stderr || tracked.output}`);
 
   const untracked = await run(
     "git",
@@ -150,10 +175,11 @@ export async function gitDiff(path: string, baseSha: string | null): Promise<Git
       timeoutMs: 30_000,
       maxOutputChars: 200_000,
       outputPosition: "head",
+      includeStderr: false,
     },
   );
   if (untracked.code !== 0)
-    throw new Error(`could not list untracked files: ${untracked.output}`);
+    throw new Error(`could not list untracked files: ${untracked.stderr || untracked.output}`);
 
   const chunks = tracked ? [tracked.output] : [];
   let sourceTruncated = Boolean(tracked?.outputTruncated || untracked.outputTruncated);
@@ -166,11 +192,13 @@ export async function gitDiff(path: string, baseSha: string | null): Promise<Git
         timeoutMs: 60_000,
         maxOutputChars: DIFF_MAX_OUTPUT_CHARS,
         outputPosition: "head",
+        includeStderr: false,
       },
     );
     // `git diff --no-index` returns 1 when files differ, which is the success
     // case here. Any other non-zero result is a genuine capture failure.
-    if (fileDiff.code > 1) throw new Error(`could not capture ${file}: ${fileDiff.output}`);
+    if (fileDiff.code > 1)
+      throw new Error(`could not capture ${file}: ${fileDiff.stderr || fileDiff.output}`);
     chunks.push(fileDiff.output);
     sourceTruncated ||= fileDiff.outputTruncated;
   }

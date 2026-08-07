@@ -136,8 +136,8 @@
 @media (prefers-reduced-motion: reduce) {
   .sign-in-rise, .iso-float { animation: none; }
 }
-.app-shell { display: grid; height: 100dvh; grid-template-columns: 252px minmax(0, 1fr); overflow: hidden; transition: grid-template-columns 220ms cubic-bezier(0.22, 1, 0.36, 1); }
-.app-shell.nav-collapsed { grid-template-columns: 46px minmax(0, 1fr); }
+.app-shell { --nav-width: 252px; display: grid; height: 100dvh; grid-template-columns: var(--nav-width) minmax(0, 1fr); overflow: hidden; transition: grid-template-columns 220ms cubic-bezier(0.22, 1, 0.36, 1); }
+.app-shell.nav-collapsed { --nav-width: 46px; grid-template-columns: var(--nav-width) minmax(0, 1fr); }
 .nav-rail { display: flex; min-height: 0; height: 100%; flex-direction: column; align-items: center; border-right: 1px solid var(--border); background: var(--sidebar); padding: 10px 0; }
 .rail-link { display: grid; width: 2rem; height: 2rem; place-items: center; border-radius: 0.5rem; color: var(--muted-foreground); transition: color 120ms, background 120ms; }
 .rail-link:hover { background: var(--accent); color: var(--foreground); }
