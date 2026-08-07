@@ -1,9 +1,11 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase } from "../db/client";
 import { getRun, listEvents } from "../db/runs";
+import { getSession } from "../db/sessions";
 import {
   resetTables,
   seedRun,
+  seedSession,
   setupTestDatabase,
   silentLogger,
   testConfig,
@@ -15,6 +17,25 @@ beforeEach(() => resetTables(database));
 afterAll(() => closeDatabase(database));
 
 describe("sandbox event retention", () => {
+  it("persists the session diff baseline from its standalone event", async () => {
+    const { run, session } = await seedSession(database);
+    const app = createApp({ config: testConfig(), database, log: silentLogger() });
+    const response = await app.request(`/internal/runs/${run.id}/events`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${run.callbackToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        type: "log",
+        data: { event: "git.diff_base", baseSha: "base-sha" },
+      }),
+    });
+
+    expect(await response.json()).toEqual({ seq: 1 });
+    expect((await getSession(database, session.id))?.diffBaseSha).toBe("base-sha");
+  });
+
   it("keeps authenticated lifecycle activity in history and refreshes liveness", async () => {
     const run = await seedRun(database);
     const app = createApp({ config: testConfig(), database, log: silentLogger() });

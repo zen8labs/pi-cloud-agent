@@ -108,6 +108,10 @@ describe("foldEvents thinking", () => {
     expect(blocks).toEqual([]);
   });
 
+  it("does not render diff bookkeeping logs", () => {
+    expect(foldEvents([log(1, "git.diff_base", { baseSha: "base-sha" })], null)).toEqual([]);
+  });
+
   it("joins multiple reasoning parts from one completed turn", () => {
     const blocks = foldEvents(
       [

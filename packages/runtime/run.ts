@@ -39,6 +39,12 @@ async function main(): Promise<void> {
       await runSetupScript(config, reporter);
     }
     const baseSha = config.sessionBaseSha || (await gitRevision(config.repo.path));
+    if (baseSha) {
+      // Persist the immutable session baseline before the agent can commit,
+      // fail, or be cancelled. Later turns must diff from this revision.
+      reporter.log("git.diff_base", { baseSha });
+      await reporter.flush();
+    }
     stage = "agent session";
     await runAgentSession(config, reporter);
 

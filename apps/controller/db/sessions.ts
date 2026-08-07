@@ -217,7 +217,7 @@ export async function saveSessionCheckpoint(
   return updated.length > 0;
 }
 
-/** Set the immutable original revision once the first turn reports its diff. */
+/** Set the immutable original revision when the first turn reports its baseline or diff. */
 export async function saveSessionDiffBaseSha(
   database: Database,
   run: RunRow,

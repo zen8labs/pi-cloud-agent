@@ -76,7 +76,10 @@ export function createReporter(config: RuntimeConfig): Reporter {
       const scrubbed = { ...event, data: scrubDeep(event.data, clean) } as RunEventInput;
       queue = queue.then(async () => {
         try {
-          if (scrubbed.type === "log" && scrubbed.data.event === "git.diff") {
+          if (
+            scrubbed.type === "log" &&
+            (scrubbed.data.event === "git.diff" || scrubbed.data.event === "git.diff_base")
+          ) {
             await postDiff(scrubbed);
           } else {
             await post(`/internal/runs/${config.runId}/events`, scrubbed, TELEMETRY_TIMEOUT_MS);

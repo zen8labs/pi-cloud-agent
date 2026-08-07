@@ -223,7 +223,7 @@ function foldLog(blocks: FlatBlock[], state: FoldState, event: RunEvent): void {
     return;
   }
   // The full patch is rendered in the dedicated session Changes sidebar.
-  if (name === "git.diff") return;
+  if (name === "git.diff" || name === "git.diff_base") return;
   if (name.startsWith("agent.")) return;
   const text = logText(data);
   if (text) blocks.push({ key: `log-${event.seq}`, kind: "log", text, at: event.at });

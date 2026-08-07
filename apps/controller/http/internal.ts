@@ -49,7 +49,10 @@ export function internalRoutes(observability?: Observability): Hono<AppEnv> {
       return c.json({ stored: false });
     }
 
-    if (parsed.data.type === "log" && parsed.data.data.event === "git.diff") {
+    if (
+      parsed.data.type === "log" &&
+      (parsed.data.data.event === "git.diff" || parsed.data.data.event === "git.diff_base")
+    ) {
       await saveDiffBase(c.get("database"), run, parsed.data.data);
     }
 
