@@ -11,6 +11,15 @@ function log(seq: number, event: string, fields: Record<string, unknown> = {}): 
   };
 }
 
+function token(seq: number, content: string): RunEvent {
+  return {
+    seq,
+    type: "token",
+    data: { content },
+    at: `2026-08-05T00:00:0${seq}.000Z`,
+  };
+}
+
 describe("foldEvents thinking", () => {
   it("renders thinking blocks carried by the completed turn output", () => {
     const blocks = foldEvents(
@@ -34,45 +43,39 @@ describe("foldEvents thinking", () => {
     ]);
   });
 
-  it("keeps one Thought block for a finished thinking payload", () => {
-    const blocks = foldEvents(
-      [log(1, "agent.thinking", { content: "The user is asking what this does." })],
-      null,
-    );
-    expect(blocks).toEqual([
-      {
-        key: "thinking-1",
-        kind: "thinking",
-        text: "The user is asking what this does.",
-        at: "2026-08-05T00:00:01.000Z",
-      },
-    ]);
-  });
-
-  it("concatenates legacy per-word thinking_delta logs into one Thought block", () => {
+  it("places completed-turn reasoning before that turn's streamed answer", () => {
     const blocks = foldEvents(
       [
-        log(1, "agent.message_update", { updateType: "thinking_delta", delta: "The" }),
-        log(2, "agent.message_update", { updateType: "thinking_delta", delta: " user" }),
-        log(3, "agent.message_update", { updateType: "thinking_delta", delta: " asked." }),
+        log(1, "agent.turn_start", { turnNumber: 1 }),
+        token(2, "Here is the answer."),
+        log(3, "agent.turn_end", {
+          turnNumber: 1,
+          output: [{ type: "thinking", thinking: "First, inspect the evidence." }],
+        }),
       ],
       null,
     );
-    expect(blocks).toHaveLength(1);
-    expect(blocks[0]).toMatchObject({
+
+    expect(blocks.map((block) => block.kind)).toEqual(["work", "thinking", "assistant"]);
+    expect(blocks[1]).toMatchObject({
       kind: "thinking",
-      text: "The user asked.",
+      text: "First, inspect the evidence.",
     });
+    expect(blocks[2]).toMatchObject({ kind: "assistant", text: "Here is the answer." });
   });
 
   it("keeps identical reasoning when it genuinely recurs in a later turn", () => {
     const blocks = foldEvents(
       [
-        log(1, "agent.turn_end", {
+        log(1, "agent.turn_start", { turnNumber: 1 }),
+        token(2, "First answer."),
+        log(3, "agent.turn_end", {
           turnNumber: 1,
           output: [{ type: "thinking", thinking: "Let me check the tests." }],
         }),
-        log(2, "agent.turn_end", {
+        log(4, "agent.turn_start", { turnNumber: 2 }),
+        token(5, "Second answer."),
+        log(6, "agent.turn_end", {
           turnNumber: 2,
           output: [{ type: "thinking", thinking: "Let me check the tests." }],
         }),
@@ -80,19 +83,23 @@ describe("foldEvents thinking", () => {
       null,
     );
 
-    expect(blocks).toHaveLength(2);
-    expect(blocks.map((block) => (block.kind === "thinking" ? block.text : null))).toEqual([
-      "Let me check the tests.",
-      "Let me check the tests.",
+    expect(blocks.map((block) => block.kind)).toEqual([
+      "work",
+      "thinking",
+      "assistant",
+      "work",
+      "thinking",
+      "assistant",
     ]);
+    expect(
+      blocks.filter((block) => block.kind === "thinking").map((block) => block.text),
+    ).toEqual(["Let me check the tests.", "Let me check the tests."]);
   });
 
-  it("deduplicates a multi-part completed turn against its legacy delta block", () => {
+  it("joins multiple reasoning parts from one completed turn", () => {
     const blocks = foldEvents(
       [
-        log(1, "agent.message_update", { updateType: "thinking_delta", delta: "Check " }),
-        log(2, "agent.message_update", { updateType: "thinking_delta", delta: "tests." }),
-        log(3, "agent.turn_end", {
+        log(1, "agent.turn_end", {
           turnNumber: 1,
           output: [
             { type: "thinking", thinking: "Check " },

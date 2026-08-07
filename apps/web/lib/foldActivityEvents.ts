@@ -42,13 +42,17 @@ type ChangesBlock = {
 
 export type ActivityBlock = FlatBlock | WorkBlock | ChangesBlock;
 
+type FoldState = {
+  assistantStartIndex: number | null;
+};
+
 export function foldEvents(events: RunEvent[], userPrompt: string | null): ActivityBlock[] {
   const flat: FlatBlock[] = userPrompt
     ? [{ key: "prompt", kind: "user", text: userPrompt }]
     : [];
   const tools = new Map<string, ToolLine>();
-  const finalizedThinking = new Set<string>();
-  for (const event of events) foldEvent(flat, tools, finalizedThinking, event);
+  const state: FoldState = { assistantStartIndex: null };
+  for (const event of events) foldEvent(flat, tools, state, event);
   const visible = flat.filter(
     (block) => (block.kind !== "assistant" && block.kind !== "thinking") || block.text.trim(),
   );
@@ -138,12 +142,12 @@ function groupWork(blocks: FlatBlock[]): ActivityBlock[] {
 function foldEvent(
   blocks: FlatBlock[],
   tools: Map<string, ToolLine>,
-  finalizedThinking: Set<string>,
+  state: FoldState,
   event: RunEvent,
 ): void {
   switch (event.type) {
     case "token":
-      foldToken(blocks, event);
+      foldToken(blocks, state, event);
       break;
     case "tool_call":
       foldTool(blocks, tools, event);
@@ -152,16 +156,19 @@ function foldEvent(
       foldStatus(blocks, event);
       break;
     default:
-      foldLog(blocks, finalizedThinking, event);
+      foldLog(blocks, state, event);
   }
 }
 
-function foldToken(blocks: FlatBlock[], event: RunEvent): void {
+function foldToken(blocks: FlatBlock[], state: FoldState, event: RunEvent): void {
   const content = String(event.data?.content ?? "");
   const last = blocks.at(-1);
   if (!content) return;
   if (last?.kind === "assistant") last.text += content;
-  else blocks.push({ key: `assistant-${event.seq}`, kind: "assistant", text: content });
+  else {
+    if (state.assistantStartIndex === null) state.assistantStartIndex = blocks.length;
+    blocks.push({ key: `assistant-${event.seq}`, kind: "assistant", text: content });
+  }
 }
 
 function foldTool(blocks: FlatBlock[], tools: Map<string, ToolLine>, event: RunEvent): void {
@@ -207,28 +214,25 @@ function foldStatus(blocks: FlatBlock[], event: RunEvent): void {
   });
 }
 
-function foldLog(blocks: FlatBlock[], finalizedThinking: Set<string>, event: RunEvent): void {
+function foldLog(blocks: FlatBlock[], state: FoldState, event: RunEvent): void {
   const data = event.data ?? {};
+  if (data.event === "agent.turn_start") state.assistantStartIndex = null;
   if (data.event === "agent.turn_end") {
-    foldTurnThinking(blocks, finalizedThinking, data.output, event);
-    return;
-  }
-  const thinking = thinkingContent(data);
-  if (thinking !== null) {
-    foldThinking(blocks, finalizedThinking, thinking, event);
+    foldTurnThinking(blocks, state, data.output, event);
     return;
   }
   const text = logText(data);
   if (text) blocks.push({ key: `log-${event.seq}`, kind: "log", text, at: event.at });
 }
 
-/** Current runs carry reasoning in the durable turn result instead of a debug log. */
 function foldTurnThinking(
   blocks: FlatBlock[],
-  finalizedThinking: Set<string>,
+  state: FoldState,
   value: unknown,
   event: RunEvent,
 ): void {
+  const assistantStartIndex = state.assistantStartIndex;
+  state.assistantStartIndex = null;
   if (!Array.isArray(value)) return;
   const content = value
     .flatMap((part) => {
@@ -241,40 +245,14 @@ function foldTurnThinking(
     .join("");
   if (!content) return;
 
-  const last = blocks.at(-1);
-  if (last?.kind === "thinking" && !finalizedThinking.has(last.key) && last.text === content) {
-    last.at = event.at;
-    finalizedThinking.add(last.key);
-    return;
-  }
-  const key = `thinking-${event.seq}`;
-  blocks.push({ key, kind: "thinking", text: content, at: event.at });
-  finalizedThinking.add(key);
-}
-
-/** New runs emit one agent.thinking; older runs logged each thinking_delta. */
-function thinkingContent(data: Record<string, unknown>): string | null {
-  if (data.event === "agent.thinking") return String(data.content ?? "");
-  if (data.event === "agent.message_update" && data.updateType === "thinking_delta") {
-    return String(data.delta ?? "");
-  }
-  return null;
-}
-
-function foldThinking(
-  blocks: FlatBlock[],
-  finalizedThinking: Set<string>,
-  content: string,
-  event: RunEvent,
-): void {
-  if (!content) return;
-  const last = blocks.at(-1);
-  if (last?.kind === "thinking" && !finalizedThinking.has(last.key)) {
-    last.text += content;
-    last.at = event.at;
-    return;
-  }
-  blocks.push({ key: `thinking-${event.seq}`, kind: "thinking", text: content, at: event.at });
+  const block: FlatBlock = {
+    key: `thinking-${event.seq}`,
+    kind: "thinking",
+    text: content,
+    at: event.at,
+  };
+  if (assistantStartIndex === null) blocks.push(block);
+  else blocks.splice(assistantStartIndex, 0, block);
 }
 
 function logText(data: Record<string, unknown>): string {
