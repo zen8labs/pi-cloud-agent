@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { redactUrlCredentials, SANDBOX_ENV, SANDBOX_PATHS } from "@pi-cloud-agent/protocol";
 import type { RuntimeConfig } from "./config";
 import type { Reporter } from "./reporter";
@@ -14,26 +15,71 @@ const MAX_OUTPUT_CHARS = 1_000_000;
 interface CommandResult {
   code: number;
   output: string;
+  stderr: string;
+  outputTruncated: boolean;
   signal: NodeJS.Signals | null;
   timedOut: boolean;
+}
+
+type OutputPosition = "head" | "tail";
+
+export function trimCommandOutput(
+  output: string,
+  maxOutputChars: number,
+  position: OutputPosition = "tail",
+): { output: string; truncated: boolean } {
+  if (output.length <= maxOutputChars) return { output, truncated: false };
+  return {
+    output:
+      position === "head" ? output.slice(0, maxOutputChars) : output.slice(-maxOutputChars),
+    truncated: true,
+  };
 }
 
 function run(
   command: string,
   args: string[],
-  options: { cwd?: string; timeoutMs?: number } = {},
+  options: {
+    cwd?: string;
+    timeoutMs?: number;
+    maxOutputChars?: number;
+    outputPosition?: OutputPosition;
+    includeStderr?: boolean;
+  } = {},
 ): Promise<CommandResult> {
   return new Promise((resolve) => {
     const child = spawn(command, args, { cwd: options.cwd, env: process.env });
-    let output = "";
+    const stdoutDecoder = new StringDecoder("utf8");
+    const stderrDecoder = new StringDecoder("utf8");
+    let stdout = "";
+    let stderr = "";
+    let stdoutTruncated = false;
+    let stderrTruncated = false;
     let timedOut = false;
     let settled = false;
-    const collect = (chunk: Buffer) => {
-      output += chunk.toString();
-      if (output.length > MAX_OUTPUT_CHARS) output = output.slice(-MAX_OUTPUT_CHARS);
+    const append = (stream: "stdout" | "stderr", text: string) => {
+      if (!text) return;
+      const maxOutputChars = options.maxOutputChars ?? MAX_OUTPUT_CHARS;
+      const trimmed = trimCommandOutput(
+        (stream === "stdout" ? stdout : stderr) + text,
+        maxOutputChars,
+        options.outputPosition,
+      );
+      if (stream === "stdout") {
+        stdout = trimmed.output;
+        stdoutTruncated ||= trimmed.truncated;
+      } else {
+        stderr = trimmed.output;
+        stderrTruncated ||= trimmed.truncated;
+      }
     };
-    child.stdout.on("data", collect);
-    child.stderr.on("data", collect);
+    child.stdout.on("data", (chunk: Buffer) => append("stdout", stdoutDecoder.write(chunk)));
+    child.stderr.on("data", (chunk: Buffer) => append("stderr", stderrDecoder.write(chunk)));
+
+    const flush = () => {
+      append("stdout", stdoutDecoder.end());
+      append("stderr", stderrDecoder.end());
+    };
 
     const timer = options.timeoutMs
       ? setTimeout(() => {
@@ -42,32 +88,208 @@ function run(
         }, options.timeoutMs)
       : null;
 
-    const finish = (result: CommandResult) => {
+    const finish = (code: number, signal: NodeJS.Signals | null) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
-      resolve(result);
+      flush();
+      const cleanStdout = redactUrlCredentials(stdout);
+      const cleanStderr = redactUrlCredentials(stderr).trim();
+      resolve({
+        code,
+        output:
+          options.includeStderr === false
+            ? cleanStdout
+            : [cleanStdout.trim(), cleanStderr].filter(Boolean).join("\n"),
+        stderr: cleanStderr,
+        outputTruncated:
+          stdoutTruncated || (options.includeStderr !== false && stderrTruncated),
+        signal,
+        timedOut,
+      });
     };
 
     child.on("error", (error) => {
-      collect(Buffer.from(`\n${error.message}`));
-      finish({
-        code: 1,
-        output: redactUrlCredentials(output).trim(),
-        signal: null,
-        timedOut,
-      });
+      append("stderr", `\n${error.message}`);
+      finish(1, null);
     });
-    child.on("close", (code, signal) =>
-      finish({
-        // A process closed by a signal has no exit code. It did not succeed.
-        code: code ?? (timedOut ? 124 : 1),
-        output: redactUrlCredentials(output).trim(),
-        signal,
-        timedOut,
-      }),
-    );
+    child.on("close", (code, signal) => {
+      // A process closed by a signal has no exit code. It did not succeed.
+      finish(code ?? (timedOut ? 124 : 1), signal);
+    });
   });
+}
+
+const DIFF_MAX_OUTPUT_CHARS = 2_000_000;
+const UNTRACKED_FILE_LIST_MAX_CHARS = 200_000;
+const MAX_UNTRACKED_FILES = 256;
+
+/** Capture the revision at the start of a turn so committed edits are visible. */
+export async function gitRevision(path: string): Promise<string | null> {
+  const result = await run("git", ["rev-parse", "HEAD"], {
+    cwd: path,
+    timeoutMs: 30_000,
+    includeStderr: false,
+  });
+  if (result.code !== 0 || !result.output) {
+    // A freshly initialized repository has no HEAD until its first commit.
+    // The diff baseline is optional, so let the agent create that first commit.
+    return null;
+  }
+  return result.output.trim();
+}
+
+export interface GitDiffSnapshot {
+  patch: string;
+  baseSha: string | null;
+  headSha: string | null;
+  files: number;
+  added: number;
+  removed: number;
+  truncated: boolean;
+}
+
+/**
+ * Capture tracked, staged, committed-during-turn, deleted, renamed, and
+ * untracked changes without modifying the checkout.
+ */
+export async function gitDiff(path: string, baseSha: string | null): Promise<GitDiffSnapshot> {
+  const headSha = await gitRevision(path);
+  const tracked = baseSha
+    ? await run("git", ["diff", "--no-ext-diff", "--binary", "--find-renames", baseSha, "--"], {
+        cwd: path,
+        timeoutMs: 60_000,
+        maxOutputChars: DIFF_MAX_OUTPUT_CHARS,
+        outputPosition: "head",
+        includeStderr: false,
+      })
+    : null;
+  if (tracked && tracked.code !== 0)
+    throw new Error(`could not capture the checkout diff: ${tracked.stderr || tracked.output}`);
+
+  const untracked = await run(
+    "git",
+    baseSha
+      ? ["ls-files", "--others", "--exclude-standard", "-z"]
+      : ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+    {
+      cwd: path,
+      timeoutMs: 30_000,
+      maxOutputChars: UNTRACKED_FILE_LIST_MAX_CHARS,
+      outputPosition: "head",
+      includeStderr: false,
+    },
+  );
+  if (untracked.code !== 0)
+    throw new Error(`could not list untracked files: ${untracked.stderr || untracked.output}`);
+
+  const captured = await captureUntrackedDiff(
+    path,
+    untracked.output,
+    tracked ? [tracked.output] : [],
+    Boolean(tracked?.outputTruncated || untracked.outputTruncated),
+  );
+  const limited = limitDiff(
+    captured.chunks.filter(Boolean).join("\n"),
+    captured.sourceTruncated,
+  );
+  return {
+    patch: limited.patch,
+    baseSha,
+    headSha,
+    files: countDiffFiles(limited.patch),
+    added: countDiffLines(limited.patch, "+"),
+    removed: countDiffLines(limited.patch, "-"),
+    truncated: limited.truncated,
+  };
+}
+
+async function captureUntrackedDiff(
+  path: string,
+  output: string,
+  chunks: string[],
+  sourceTruncated: boolean,
+): Promise<{ chunks: string[]; sourceTruncated: boolean }> {
+  const listedFiles = parseNulSeparatedPaths(output);
+  const files = listedFiles.paths.slice(0, MAX_UNTRACKED_FILES);
+  let capturedChars = chunks.reduce((total, chunk) => total + chunk.length, 0);
+  sourceTruncated ||= listedFiles.incomplete || listedFiles.paths.length > files.length;
+  for (const file of files) {
+    const remainingChars = DIFF_MAX_OUTPUT_CHARS - capturedChars;
+    if (remainingChars <= 0) {
+      sourceTruncated = true;
+      break;
+    }
+    const fileDiff = await run(
+      "git",
+      ["diff", "--no-index", "--no-ext-diff", "--binary", "--", "/dev/null", file],
+      {
+        cwd: path,
+        timeoutMs: 60_000,
+        maxOutputChars: remainingChars,
+        outputPosition: "head",
+        includeStderr: false,
+      },
+    );
+    // `git diff --no-index` returns 1 when files differ, which is the success
+    // case here. Any other non-zero result is a genuine capture failure.
+    if (fileDiff.code > 1) {
+      // A file can disappear between ls-files and diff (or be unreadable). Do
+      // not discard the complete session snapshot because one optional file
+      // could not be captured.
+      sourceTruncated = true;
+      continue;
+    }
+    chunks.push(fileDiff.output);
+    capturedChars += fileDiff.output.length;
+    sourceTruncated ||= fileDiff.outputTruncated;
+    if (fileDiff.outputTruncated) break;
+  }
+  return { chunks, sourceTruncated };
+}
+
+function parseNulSeparatedPaths(output: string): { paths: string[]; incomplete: boolean } {
+  const lastDelimiter = output.lastIndexOf("\0");
+  if (lastDelimiter < 0) return { paths: [], incomplete: output.length > 0 };
+  return {
+    paths: output.slice(0, lastDelimiter).split("\0").filter(Boolean),
+    incomplete: lastDelimiter !== output.length - 1,
+  };
+}
+
+function limitDiff(
+  patch: string,
+  sourceTruncated = false,
+): { patch: string; truncated: boolean } {
+  if (!sourceTruncated && patch.length <= DIFF_MAX_OUTPUT_CHARS)
+    return { patch, truncated: false };
+  const chunks = patch
+    .split(/(?=^diff --git )/m)
+    .filter((chunk) => chunk.startsWith("diff --git "));
+  let output = "";
+  for (const chunk of chunks) {
+    if (output.length === 0 && chunk.length > DIFF_MAX_OUTPUT_CHARS) {
+      output = chunk.slice(0, DIFF_MAX_OUTPUT_CHARS);
+      break;
+    }
+    if (output.length + chunk.length > DIFF_MAX_OUTPUT_CHARS) break;
+    output += chunk;
+  }
+  if (!output && !chunks.length) output = patch.slice(0, DIFF_MAX_OUTPUT_CHARS);
+  return {
+    patch: `${output.trimEnd()}\n\n[diff truncated by the runtime]\n`,
+    truncated: true,
+  };
+}
+
+function countDiffFiles(patch: string): number {
+  return patch.split("\ndiff --git ").length - (patch.startsWith("diff --git ") ? 0 : 1);
+}
+
+function countDiffLines(patch: string, prefix: "+" | "-"): number {
+  return patch
+    .split("\n")
+    .filter((line) => line.startsWith(prefix) && !line.startsWith(`${prefix}${prefix}`)).length;
 }
 
 /**
@@ -167,16 +389,24 @@ export async function prepareCheckout(
     }
   }
 
-  if (repo.baseSha) {
-    // Fetched but not checked out: the agent needs it to diff against the merge
-    // base, and a shallow clone would not otherwise have it.
-    await run("git", ["fetch", "--depth", String(CLONE_DEPTH), "origin", repo.baseSha], {
-      cwd: repo.path,
-    });
-  }
+  await fetchDiffRevisions(config);
 
   reporter.log("git.checkout_ready", { path: repo.path, headSha: repo.headSha || null });
   return "created";
+}
+
+async function fetchDiffRevisions(config: RuntimeConfig): Promise<void> {
+  const revisions = [config.repo.baseSha, config.sessionBaseSha].filter(
+    (revision, index, all): revision is string =>
+      Boolean(revision) && all.indexOf(revision) === index,
+  );
+  for (const revision of revisions) {
+    // Fetched but not checked out: a shallow clone would not otherwise have the
+    // revision needed for a cumulative diff.
+    await run("git", ["fetch", "--depth", String(CLONE_DEPTH), "origin", revision], {
+      cwd: config.repo.path,
+    });
+  }
 }
 
 async function reuseCheckout(path: string, reporter: Reporter): Promise<boolean> {

@@ -55,9 +55,21 @@ Stop the development process with `Ctrl-C`. Postgres remains running and can be 
 
 ## GitHub App setup
 
-Create a GitHub App from **GitHub Settings → Developer settings → GitHub Apps → New GitHub App**. Set the local homepage to `http://localhost:3000` and the user authorization callback to `http://localhost:8080/auth/github/callback`. Enable user authorization during installation, keep authorization-token expiration enabled, and grant **Repository → Contents: Read and write** plus **Repository → Metadata: Read-only**. Install the App only on repositories that the agent should access.
+Create a GitHub App from **GitHub Settings → Developer settings → GitHub Apps → New GitHub App**. Set the local homepage to `http://localhost:3000` and the user authorization callback to `http://localhost:8080/auth/github/callback`. Enable user authorization during installation, keep user-to-server token expiration enabled, and grant the following repository permissions:
 
-Copy the App Client ID and Client Secret into `.env`. Users authorize through the dashboard; they do not enter a personal access token.
+- **Contents: Read and write** — clone private repositories and push agent branches and commits.
+- **Metadata: Read-only** — resolve repository and branch metadata.
+- **Pull requests: Read and write** — read pull requests and create, update, and review them.
+
+Do not grant **Workflows** unless the agent is explicitly allowed to edit `.github/workflows/**`. Install the App only on repositories that the agent should access. Organization owners may need to approve the installation or later permission increases. After changing permissions, reapprove the installation and reconnect the GitHub identity.
+
+Copy the App Client ID and Client Secret into `.env` using the names already present in `.env.example`:
+
+```dotenv
+GITHUB_APP_CLIENT_ID=<client-id>
+GITHUB_APP_CLIENT_SECRET=<client-secret>
+GITHUB_APP_REDIRECT_URI=http://localhost:8080/auth/github/callback
+```
 
 ## Optional: Azure DevOps
 

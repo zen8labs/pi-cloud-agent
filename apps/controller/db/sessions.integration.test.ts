@@ -9,6 +9,7 @@ import {
   parkSession,
   SessionBusyError,
   saveSessionCheckpoint,
+  saveSessionDiffBaseSha,
 } from "./sessions";
 
 let database: Database;
@@ -52,6 +53,16 @@ describe("durable sessions", () => {
     expect(stored?.agentCheckpoint).toBe('{"type":"session"}\n');
     expect(stored?.sandboxId).toBe("workspace-1");
     expect(stored?.activeRunId).toBeNull();
+  });
+
+  it("persists the first turn's revision as the immutable session diff base", async () => {
+    const { session, run } = await seedSession(database);
+
+    expect(await saveSessionDiffBaseSha(database, run, "base-sha")).toBe(true);
+    expect(await saveSessionDiffBaseSha(database, run, "another-sha")).toBe(false);
+
+    const stored = await getSession(database, session.id);
+    expect(stored?.diffBaseSha).toBe("base-sha");
   });
 
   it("numbers turns monotonically and preserves the session repository", async () => {

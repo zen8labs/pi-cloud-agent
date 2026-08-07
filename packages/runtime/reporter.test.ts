@@ -125,6 +125,26 @@ describe("reporter", () => {
     expect(sent).toHaveLength(0);
   });
 
+  it("retries the diff snapshot before closing the run", async () => {
+    const reporter = createReporter(readConfig());
+    failNext = 2;
+    reporter.log("git.diff", { patch: "diff --git a/a b/a" });
+    await reporter.flush();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.path).toBe("/internal/runs/run-1/events");
+  });
+
+  it("retries the session diff baseline before the agent starts", async () => {
+    const reporter = createReporter(readConfig());
+    failNext = 2;
+    reporter.log("git.diff_base", { baseSha: "base-sha" });
+    await reporter.flush();
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.body).toMatchObject({
+      data: { event: "git.diff_base", baseSha: "base-sha" },
+    });
+  });
+
   it("retries the terminal status, because nothing else completes a run", async () => {
     const reporter = createReporter(readConfig());
     failNext = 2;

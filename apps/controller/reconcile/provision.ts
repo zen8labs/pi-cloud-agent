@@ -77,7 +77,15 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
     const session = await getSessionForRun(database, run);
     const workspaceResumed = Boolean(session?.sandboxId);
     const env = {
-      ...buildEnv(run, task, config, workspaceResumed, resolved.skillText, credentials.model),
+      ...buildEnv(
+        run,
+        task,
+        config,
+        workspaceResumed,
+        resolved.skillText,
+        credentials.model,
+        session?.diffBaseSha ?? null,
+      ),
       ...credentials.env,
     };
     const secrets: Record<string, Secret> = {
@@ -203,12 +211,14 @@ function buildEnv(
   workspaceResumed: boolean,
   skillText: string | undefined,
   model: import("../llm/connections").ResolvedLlmModel,
+  sessionBaseSha: string | null,
 ): Record<string, string> {
   const { repo } = task;
   return {
     [SANDBOX_ENV.controlPlaneUrl]: config.controlPlaneUrl,
     [SANDBOX_ENV.runId]: run.id,
     [SANDBOX_ENV.sessionId]: run.sessionId ?? "",
+    [SANDBOX_ENV.sessionBaseSha]: sessionBaseSha ?? "",
     [SANDBOX_ENV.workspaceResumed]: String(workspaceResumed),
     [SANDBOX_ENV.debugEvents]: String(config.observability.exportDebugEvents),
 

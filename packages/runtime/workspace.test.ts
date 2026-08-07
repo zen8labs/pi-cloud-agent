@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeConfig } from "./config";
 import type { Reporter } from "./reporter";
-import { runSetupScript } from "./workspace";
+import { gitDiff, gitRevision, runSetupScript, trimCommandOutput } from "./workspace";
 
 vi.mock("node:child_process", () => ({ spawn: vi.fn() }));
 vi.mock("node:fs", () => ({ existsSync: vi.fn() }));
@@ -12,6 +12,7 @@ vi.mock("node:fs", () => ({ existsSync: vi.fn() }));
 const config: RuntimeConfig = {
   runId: "run-1",
   sessionId: "",
+  sessionBaseSha: "",
   workspaceResumed: false,
   debugEvents: false,
   controlPlaneUrl: "https://controller.test",
@@ -42,6 +43,26 @@ const config: RuntimeConfig = {
   mcpConfig: null,
 };
 
+type MockChild = EventEmitter & { stdout: EventEmitter; stderr: EventEmitter };
+
+function addMockChild(
+  children: MockChild[],
+  output: string,
+  code: number,
+  stderr = "",
+): MockChild {
+  const child = new EventEmitter() as MockChild;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  children.push(child);
+  queueMicrotask(() => {
+    if (output) child.stdout.emit("data", Buffer.from(output));
+    if (stderr) child.stderr.emit("data", Buffer.from(stderr));
+    child.emit("close", code, null);
+  });
+  return child;
+}
+
 function fakeReporter(): Reporter {
   return {
     event: vi.fn(),
@@ -54,7 +75,7 @@ function fakeReporter(): Reporter {
 
 afterEach(() => {
   vi.useRealTimers();
-  vi.clearAllMocks();
+  vi.resetAllMocks();
 });
 
 describe("repository setup", () => {
@@ -85,5 +106,161 @@ describe("repository setup", () => {
       "setup.failed",
       expect.objectContaining({ timedOut: true, signal: "SIGKILL" }),
     );
+  });
+});
+
+describe("git snapshots", () => {
+  it("keeps the beginning of oversized command output and records truncation", () => {
+    expect(trimCommandOutput("0123456789", 5, "head")).toEqual({
+      output: "01234",
+      truncated: true,
+    });
+    expect(trimCommandOutput("01234", 5, "head")).toEqual({
+      output: "01234",
+      truncated: false,
+    });
+    expect(trimCommandOutput("0123456789", 5)).toEqual({
+      output: "56789",
+      truncated: true,
+    });
+  });
+
+  it("treats an unborn HEAD as a missing revision", async () => {
+    const child = new EventEmitter() as EventEmitter & {
+      stdout: EventEmitter;
+      stderr: EventEmitter;
+    };
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const pending = gitRevision(config.repo.path);
+    child.stderr.emit("data", Buffer.from("fatal: Needed a single revision"));
+    child.emit("close", 128, null);
+
+    await expect(pending).resolves.toBeNull();
+  });
+
+  it("captures files when a repository has no baseline commit", async () => {
+    const children: MockChild[] = [];
+
+    vi.mocked(spawn)
+      .mockImplementationOnce(
+        () => addMockChild(children, "fatal: Needed a single revision", 128) as never,
+      )
+      .mockImplementationOnce(() => addMockChild(children, "hello.ts\0", 0) as never)
+      .mockImplementationOnce(
+        () =>
+          addMockChild(
+            children,
+            "diff --git a/hello.ts b/hello.ts\nnew file mode 100644\n--- /dev/null\n+++ b/hello.ts\n@@ -0,0 +1 @@\n+hello\n",
+            1,
+          ) as never,
+      );
+
+    await expect(gitDiff(config.repo.path, null)).resolves.toMatchObject({
+      baseSha: null,
+      headSha: null,
+      files: 1,
+      added: 1,
+      removed: 0,
+    });
+    expect(children).toHaveLength(3);
+  });
+
+  it("drops an incomplete path when the untracked-file list is truncated", async () => {
+    const children: MockChild[] = [];
+
+    vi.mocked(spawn)
+      .mockImplementationOnce(
+        () => addMockChild(children, "fatal: Needed a single revision", 128) as never,
+      )
+      .mockImplementationOnce(
+        () => addMockChild(children, `good.ts\0${"partial-path".repeat(30_000)}`, 0) as never,
+      )
+      .mockImplementationOnce(() => addMockChild(children, "", 1) as never);
+
+    const snapshot = await gitDiff(config.repo.path, null);
+
+    expect(snapshot.truncated).toBe(true);
+    expect(children).toHaveLength(3);
+    expect(vi.mocked(spawn).mock.calls[2]?.[1]).toContain("good.ts");
+    expect(vi.mocked(spawn).mock.calls[2]?.[1]).not.toContain("partial-path");
+  });
+
+  it("bounds untracked diff processes and accumulated output", async () => {
+    const children: MockChild[] = [];
+    const files = `${Array.from({ length: 257 }, (_, index) => `file-${index}.txt`).join("\0")}\0`;
+    const patch = `diff --git a/file-0.txt b/file-0.txt\n${"x".repeat(2_100_000)}`;
+
+    vi.mocked(spawn)
+      .mockImplementationOnce(() => addMockChild(children, "head-sha\n", 0) as never)
+      .mockImplementationOnce(() => addMockChild(children, "", 0) as never)
+      .mockImplementationOnce(() => addMockChild(children, files, 0) as never);
+    for (let index = 0; index < 256; index += 1) {
+      vi.mocked(spawn).mockImplementationOnce(
+        () => addMockChild(children, index === 0 ? patch : "", 1) as never,
+      );
+    }
+
+    const snapshot = await gitDiff(config.repo.path, "base-sha");
+
+    expect(snapshot.truncated).toBe(true);
+    expect(children).toHaveLength(4);
+  });
+
+  it("keeps a valid prefix and marks an oversized tracked patch", async () => {
+    const children: MockChild[] = [];
+    const oversizedPatch = `diff --git a/large.txt b/large.txt\n${"a".repeat(2_100_000)}`;
+    vi.mocked(spawn)
+      .mockImplementationOnce(() => addMockChild(children, "head-sha\n", 0) as never)
+      .mockImplementationOnce(() => addMockChild(children, oversizedPatch, 0) as never)
+      .mockImplementationOnce(() => addMockChild(children, "", 0) as never);
+
+    const snapshot = await gitDiff(config.repo.path, "base-sha");
+
+    expect(snapshot.truncated).toBe(true);
+    expect(snapshot.patch).toMatch(/^diff --git a\/large\.txt b\/large\.txt/);
+    expect(snapshot.patch).toContain("[diff truncated by the runtime]");
+  });
+
+  it("keeps git warnings out of the machine-readable patch", async () => {
+    const children: MockChild[] = [];
+    const patch =
+      "diff --git a/hello.ts b/hello.ts\n--- a/hello.ts\n+++ b/hello.ts\n@@ -1 +1 @@\n-old\n+new\n";
+    vi.mocked(spawn)
+      .mockImplementationOnce(
+        () => addMockChild(children, "head-sha\n", 0, "warning: safe.directory\n") as never,
+      )
+      .mockImplementationOnce(
+        () => addMockChild(children, patch, 0, "warning: line ending\n") as never,
+      )
+      .mockImplementationOnce(
+        () => addMockChild(children, "", 0, "warning: unrelated\n") as never,
+      );
+
+    const snapshot = await gitDiff(config.repo.path, "base-sha");
+
+    expect(snapshot.patch).toBe(patch);
+    expect(snapshot.patch).not.toContain("warning:");
+  });
+
+  it("decodes a UTF-8 character split across output chunks", async () => {
+    const child = new EventEmitter() as EventEmitter & {
+      stdout: EventEmitter;
+      stderr: EventEmitter;
+    };
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const output = Buffer.from("head-é\n");
+    const split = output.indexOf(0xc3) + 1;
+    const pending = gitRevision(config.repo.path);
+    child.stdout.emit("data", output.subarray(0, split));
+    child.stdout.emit("data", output.subarray(split));
+    child.emit("close", 0, null);
+
+    await expect(pending).resolves.toBe("head-é");
   });
 });

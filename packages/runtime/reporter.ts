@@ -10,12 +10,13 @@ import { createRuntimeRedactor } from "./config";
 /**
  * Outbound-only reporting.
  *
- * Two channels with deliberately different guarantees. Telemetry is fire and
- * forget in order: dropping a token event costs a line in the feed, so it is not
- * worth retrying or blocking the agent for. The terminal status is the opposite —
- * it is the only thing that completes a run, so it retries with backoff, and if
- * it never lands the controller's reconciler eventually times the run out rather
- * than leaving it live forever.
+ * Two channels with deliberately different guarantees. Most telemetry is fire
+ * and forget in order: dropping a token event costs a line in the feed, so it is
+ * not worth retrying or blocking the agent for. The final git snapshot is the
+ * exception and gets bounded retries before the terminal status. That status is
+ * the only thing that completes a run, so it retries with backoff, and if it never
+ * lands the controller's reconciler eventually times the run out rather than
+ * leaving it live forever.
  *
  * Everything sent passes through the redactor first. This is the right place for
  * it: the sandbox is the only side that knows every secret in play.
@@ -30,6 +31,7 @@ export interface Reporter {
 }
 
 const TELEMETRY_TIMEOUT_MS = 10_000;
+const DIFF_EVENT_ATTEMPTS = 4;
 const STATUS_ATTEMPTS = 4;
 
 export function createReporter(config: RuntimeConfig): Reporter {
@@ -53,12 +55,35 @@ export function createReporter(config: RuntimeConfig): Reporter {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
   }
 
+  async function postDiff(body: RunEventInput): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= DIFF_EVENT_ATTEMPTS; attempt += 1) {
+      try {
+        await post(`/internal/runs/${config.runId}/events`, body, TELEMETRY_TIMEOUT_MS);
+        return;
+      } catch (error) {
+        lastError = error;
+        if (attempt < DIFF_EVENT_ATTEMPTS) {
+          await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** (attempt - 1)));
+        }
+      }
+    }
+    throw lastError;
+  }
+
   const reporter: Reporter = {
     event(event: RunEventInput): void {
       const scrubbed = { ...event, data: scrubDeep(event.data, clean) } as RunEventInput;
       queue = queue.then(async () => {
         try {
-          await post(`/internal/runs/${config.runId}/events`, scrubbed, TELEMETRY_TIMEOUT_MS);
+          if (
+            scrubbed.type === "log" &&
+            (scrubbed.data.event === "git.diff" || scrubbed.data.event === "git.diff_base")
+          ) {
+            await postDiff(scrubbed);
+          } else {
+            await post(`/internal/runs/${config.runId}/events`, scrubbed, TELEMETRY_TIMEOUT_MS);
+          }
         } catch (error) {
           // Never escalate: telemetry loss must not fail a run that is working.
           process.stderr.write(`telemetry dropped: ${clean(String(error))}\n`);

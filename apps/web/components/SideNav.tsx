@@ -52,7 +52,7 @@ export function SideNav() {
         </div>
       </header>
 
-      <aside className="side-nav">
+      <aside className="side-nav relative">
         <div className="flex items-center justify-between px-3.5 pb-2 pt-4">
           <Brand />
           <CollapseButton />

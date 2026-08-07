@@ -20,10 +20,12 @@ export function ActivityFeed({
   events,
   userPrompt,
   active,
+  onOpenChanges,
 }: {
   events: RunEvent[];
   userPrompt: string | null;
   active: boolean;
+  onOpenChanges?: (path: string) => void;
 }) {
   const blocks = useMemo(() => foldEvents(events, userPrompt), [events, userPrompt]);
   if (!blocks.length) return <Empty active={active} />;
@@ -41,6 +43,7 @@ export function ActivityFeed({
           key={block.key}
           block={block}
           streaming={active && index === lastActivityIndex}
+          onOpenChanges={onOpenChanges}
         />
       ))}
       {active && lastActivityIndex >= 0 && blocks[lastActivityIndex]?.kind !== "work" && (
@@ -53,7 +56,15 @@ export function ActivityFeed({
   );
 }
 
-function BlockView({ block, streaming }: { block: ActivityBlock; streaming: boolean }) {
+function BlockView({
+  block,
+  streaming,
+  onOpenChanges,
+}: {
+  block: ActivityBlock;
+  streaming: boolean;
+  onOpenChanges?: (path: string) => void;
+}) {
   if (block.kind === "user") {
     return (
       <Message from="user">
@@ -85,7 +96,13 @@ function BlockView({ block, streaming }: { block: ActivityBlock; streaming: bool
   }
   if (block.kind === "work") return <WorkGroup block={block} streaming={streaming} />;
   if (block.kind === "changes") {
-    return <ChangeStatsCard files={block.files} createdOnly={block.createdOnly} />;
+    return (
+      <ChangeStatsCard
+        files={block.files}
+        createdOnly={block.createdOnly}
+        onFileClick={onOpenChanges}
+      />
+    );
   }
   if (block.kind === "status") return <StatusDivider block={block} />;
   return null;

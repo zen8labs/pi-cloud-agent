@@ -3,15 +3,18 @@
 import { ChevronDownIcon, SquarePenIcon } from "lucide-react";
 import { useState } from "react";
 import type { FileChangeStat } from "@/components/ToolArgsView";
+import { cn } from "@/lib/utils";
 
 const VISIBLE_COUNT = 3;
 
 export function ChangeStatsCard({
   files,
   createdOnly,
+  onFileClick,
 }: {
   files: FileChangeStat[];
   createdOnly: boolean;
+  onFileClick?: (path: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   if (!files.length) return null;
@@ -44,18 +47,25 @@ export function ChangeStatsCard({
       </div>
       <ul className="border-t border-border/70 px-3.5 py-1.5">
         {visible.map((file) => (
-          <li
-            key={file.path}
-            className="flex min-w-0 items-center justify-between gap-3 py-1 text-[13px]"
-          >
-            <span className="min-w-0 truncate font-mono text-xs text-foreground/80">
-              {file.path}
-            </span>
-            <span className="shrink-0 font-mono text-xs tabular-nums">
-              <span className="text-emerald-600 dark:text-emerald-400">+{file.added}</span>
-              <span className="text-muted-foreground"> </span>
-              <span className="text-red-600 dark:text-red-400">-{file.removed}</span>
-            </span>
+          <li key={file.path} className="min-w-0 text-[13px]">
+            <button
+              type="button"
+              onClick={() => onFileClick?.(file.path)}
+              aria-label={`Open changes for ${file.path}`}
+              className={cn(
+                "flex w-full min-w-0 items-center justify-between gap-3 py-1 text-left",
+                onFileClick && "cursor-pointer rounded-sm transition-colors hover:bg-accent/60",
+              )}
+            >
+              <span className="min-w-0 truncate font-mono text-xs text-foreground/80">
+                {file.path}
+              </span>
+              <span className="shrink-0 font-mono text-xs tabular-nums">
+                <span className="text-emerald-600 dark:text-emerald-400">+{file.added}</span>
+                <span className="text-muted-foreground"> </span>
+                <span className="text-red-600 dark:text-red-400">-{file.removed}</span>
+              </span>
+            </button>
           </li>
         ))}
       </ul>
