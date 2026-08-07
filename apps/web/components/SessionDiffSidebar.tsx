@@ -6,6 +6,7 @@ import { parsePatchFiles } from "@pierre/diffs";
 import { CodeView, type CodeViewHandle } from "@pierre/diffs/react";
 import { XIcon } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isActiveStatus } from "@/lib/format";
 import type { SessionTurn } from "@/lib/useSession";
 
 type TurnDiff = {
@@ -106,7 +107,8 @@ export function SessionDiffSidebar({
   }, [items, open, targetPath, targetRequest]);
 
   const stats = latestDiff ?? { files: 0, added: 0, removed: 0 };
-  const hasActiveTurn = turns.at(-1)?.run.status === "running";
+  const latestStatus = turns.at(-1)?.run.status;
+  const hasActiveTurn = latestStatus ? isActiveStatus(latestStatus) : false;
 
   return (
     <aside

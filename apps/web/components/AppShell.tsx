@@ -50,10 +50,15 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 
 function Shell({ children }: { children: React.ReactNode }) {
   const { collapsed, expand, resetWidth, width, resize } = useNavCollapse();
+  const [resizing, setResizing] = useState(false);
   const currentSize = collapsed ? 46 : width;
   return (
     <div
-      className={cn("app-shell relative", collapsed && "nav-collapsed")}
+      className={cn(
+        "app-shell relative",
+        collapsed && "nav-collapsed",
+        resizing && "is-resizing",
+      )}
       style={{ "--nav-width": `${collapsed ? 46 : width}px` } as React.CSSProperties}
     >
       {collapsed ? <NavRail /> : <SideNav />}
@@ -73,6 +78,7 @@ function Shell({ children }: { children: React.ReactNode }) {
               resize(nextWidth);
             }}
             onReset={resetWidth}
+            onDraggingChange={setResizing}
           />
         </div>
       </div>

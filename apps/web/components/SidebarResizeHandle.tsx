@@ -12,6 +12,7 @@ export function SidebarResizeHandle({
   maxSize,
   onResize,
   onReset,
+  onDraggingChange,
 }: {
   side: ResizeSide;
   currentSize: number;
@@ -19,6 +20,7 @@ export function SidebarResizeHandle({
   maxSize: number;
   onResize: (size: number) => void;
   onReset: () => void;
+  onDraggingChange?: (dragging: boolean) => void;
 }) {
   const dragging = useRef(false);
 
@@ -59,6 +61,7 @@ export function SidebarResizeHandle({
       onPointerDown={(event) => {
         event.preventDefault();
         dragging.current = true;
+        onDraggingChange?.(true);
         event.currentTarget.setPointerCapture(event.pointerId);
         resizeFromPointer(event.clientX);
       }}
@@ -67,12 +70,14 @@ export function SidebarResizeHandle({
       }}
       onPointerUp={(event) => {
         dragging.current = false;
+        onDraggingChange?.(false);
         if (event.currentTarget.hasPointerCapture(event.pointerId)) {
           event.currentTarget.releasePointerCapture(event.pointerId);
         }
       }}
       onPointerCancel={() => {
         dragging.current = false;
+        onDraggingChange?.(false);
       }}
     >
       <span

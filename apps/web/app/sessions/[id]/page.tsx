@@ -58,6 +58,7 @@ export default function SessionPage() {
   const { session, turns, error, refresh } = useSession(id);
   const [cancelling, setCancelling] = useState(false);
   const [diffOpen, setDiffOpen] = useState(false);
+  const [diffResizing, setDiffResizing] = useState(false);
   const [diffWidth, setDiffWidth] = useState(() =>
     clampDiffWidth(DEFAULT_DIFF_WIDTH, getMaxDiffWidth()),
   );
@@ -191,8 +192,9 @@ export default function SessionPage() {
       </div>
       <div
         className={cn(
-          "relative hidden h-full shrink-0 overflow-hidden transition-[width,opacity] duration-200 ease-out motion-reduce:transition-none lg:block",
+          "relative hidden h-full shrink-0 overflow-hidden duration-200 ease-out motion-reduce:transition-none lg:block",
           diffOpen ? "opacity-100" : "pointer-events-none opacity-0",
+          diffResizing ? "transition-none" : "transition-[width,opacity]",
         )}
         style={{ width: diffOpen ? diffWidth : 0 }}
       >
@@ -204,6 +206,7 @@ export default function SessionPage() {
             maxSize={maxDiffWidth}
             onResize={resizeDiff}
             onReset={() => resizeDiff(DEFAULT_DIFF_WIDTH)}
+            onDraggingChange={setDiffResizing}
           />
         ) : null}
         {diffOpen ? (
