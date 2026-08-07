@@ -6,8 +6,8 @@ import { createContext, useContext, useEffect, useState } from "react";
 // from the first resizable-sidebar implementation. Start the corrected layout
 // expanded once, then persist intentional collapse/expand choices normally.
 const STORAGE_KEY = "pca-nav-collapsed-v2";
-const WIDTH_STORAGE_KEY = "pca-nav-width-v2";
-const DEFAULT_WIDTH = 320;
+const WIDTH_STORAGE_KEY = "pca-nav-width-v3";
+const DEFAULT_WIDTH = 252;
 const MIN_WIDTH = 180;
 const MAX_WIDTH = 360;
 

@@ -36,10 +36,10 @@ const SessionDiffSidebar = dynamic(
   },
 );
 
-const DIFF_WIDTH_STORAGE_KEY = "pca-diff-width-v3";
-const DEFAULT_DIFF_WIDTH = 760;
+const DIFF_WIDTH_STORAGE_KEY = "pca-diff-width-v4";
+const DEFAULT_DIFF_WIDTH = 600;
 const MIN_DIFF_WIDTH = 320;
-const MAX_DIFF_WIDTH = 960;
+const MAX_DIFF_WIDTH = 840;
 
 function getMaxDiffWidth(): number {
   if (typeof window === "undefined") return MAX_DIFF_WIDTH;
