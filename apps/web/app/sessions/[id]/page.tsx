@@ -6,11 +6,11 @@ import type {
   SessionDetail,
   ThinkingLevel,
 } from "@pi-cloud-agent/protocol";
-import { ArrowLeftIcon, GitBranchIcon, GitCompareArrowsIcon, SquareIcon } from "lucide-react";
+import { ArrowLeftIcon, GitBranchIcon, PanelRightIcon, SquareIcon } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityFeed } from "@/components/ActivityFeed";
 import {
   Conversation,
@@ -33,10 +33,20 @@ import {
 } from "@/lib/model-selection";
 import { resolveBranch, summarizeChanges } from "@/lib/session-meta";
 import { useSession } from "@/lib/useSession";
+import { cn } from "@/lib/utils";
 
 const SessionDiffSidebar = dynamic(
   () => import("@/components/SessionDiffSidebar").then((module) => module.SessionDiffSidebar),
-  { ssr: false },
+  {
+    ssr: false,
+    loading: () => (
+      <aside className="flex h-full min-h-0 w-full flex-col border-l border-border bg-background">
+        <div className="flex h-12 shrink-0 items-center border-b border-border px-4 text-[13px] font-semibold">
+          Changes
+        </div>
+      </aside>
+    ),
+  },
 );
 
 export default function SessionPage() {
@@ -44,6 +54,8 @@ export default function SessionPage() {
   const { session, turns, error, refresh } = useSession(id);
   const [cancelling, setCancelling] = useState(false);
   const [diffOpen, setDiffOpen] = useState(false);
+  const diffRequest = useRef(0);
+  const [diffTarget, setDiffTarget] = useState<{ path: string; request: number } | null>(null);
   const latest = turns.at(-1)?.run ?? null;
   const active = session ? session.status !== "idle" : false;
   const allEvents = useMemo(() => turns.flatMap((turn) => turn.events), [turns]);
@@ -52,6 +64,10 @@ export default function SessionPage() {
     () => resolveBranch(latest?.branch ?? null, allEvents),
     [allEvents, latest?.branch],
   );
+  const openChanges = useCallback((path?: string) => {
+    setDiffOpen(true);
+    setDiffTarget(path ? { path, request: ++diffRequest.current } : null);
+  }, []);
 
   const cancel = async () => {
     if (!latest) return;
@@ -66,64 +82,99 @@ export default function SessionPage() {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background">
-      <SessionHeader
-        session={session}
-        active={active}
-        cancelling={cancelling}
-        onCancel={cancel}
-        diffOpen={diffOpen}
-        onToggleDiff={() => setDiffOpen((current) => !current)}
-      />
-      <div className="flex min-h-0 min-w-0 flex-1">
-        <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {error && !session ? (
-            <div className="grid flex-1 place-items-center px-6">
-              <div
-                role="alert"
-                className="max-w-lg rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
-              >
-                {error}
+    <div className="flex h-full min-h-0 bg-background">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <SessionHeader
+          session={session}
+          active={active}
+          cancelling={cancelling}
+          onCancel={cancel}
+          diffOpen={diffOpen}
+          onToggleDiff={() => {
+            if (diffOpen) {
+              setDiffOpen(false);
+              setDiffTarget(null);
+            } else {
+              openChanges();
+            }
+          }}
+        />
+        <div className="flex min-h-0 min-w-0 flex-1">
+          <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {error && !session ? (
+              <div className="grid flex-1 place-items-center px-6">
+                <div
+                  role="alert"
+                  className="max-w-lg rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+                >
+                  {error}
+                </div>
               </div>
-            </div>
-          ) : (
-            <Conversation className="min-h-0 flex-1">
-              <ConversationContent className="mx-auto w-full max-w-3xl gap-8 px-5 py-10 sm:px-8">
-                {turns.map((turn, index) => (
-                  <ActivityFeed
-                    key={turn.run.id}
-                    events={turn.events}
-                    userPrompt={turn.run.prompt}
-                    active={active && index === turns.length - 1}
+            ) : (
+              <Conversation className="min-h-0 flex-1">
+                <ConversationContent className="mx-auto w-full max-w-3xl gap-8 px-5 py-10 sm:px-8">
+                  {turns.map((turn, index) => (
+                    <ActivityFeed
+                      key={turn.run.id}
+                      events={turn.events}
+                      userPrompt={turn.run.prompt}
+                      active={active && index === turns.length - 1}
+                      onOpenChanges={openChanges}
+                    />
+                  ))}
+                </ConversationContent>
+                <ConversationScrollButton />
+              </Conversation>
+            )}
+            {session && (
+              <div className="bg-background px-4 pb-5 pt-2 sm:px-6">
+                <div className="mx-auto max-w-3xl">
+                  <FollowUp
+                    sessionId={session.id}
+                    repo={session.repo}
+                    previousModel={latest?.model ?? session.model}
+                    previousModelConnectionId={
+                      latest?.modelConnectionId ?? session.modelConnectionId
+                    }
+                    previousThinkingLevel={latest?.thinkingLevel ?? "medium"}
+                    active={active}
+                    onQueued={refresh}
                   />
-                ))}
-              </ConversationContent>
-              <ConversationScrollButton />
-            </Conversation>
-          )}
-          {session && (
-            <div className="bg-background px-4 pb-5 pt-2 sm:px-6">
-              <div className="mx-auto max-w-3xl">
-                <FollowUp
-                  sessionId={session.id}
-                  repo={session.repo}
-                  previousModel={latest?.model ?? session.model}
-                  previousModelConnectionId={
-                    latest?.modelConnectionId ?? session.modelConnectionId
-                  }
-                  previousThinkingLevel={latest?.thinkingLevel ?? "medium"}
-                  active={active}
-                  onQueued={refresh}
-                />
+                </div>
               </div>
-            </div>
-          )}
-        </section>
-        {diffOpen ? (
-          <SessionDiffSidebar turns={turns} onClose={() => setDiffOpen(false)} />
-        ) : (
-          <SessionMeta session={session} run={latest} branch={branch} changes={changes} />
+            )}
+          </section>
+          <div
+            className={cn(
+              "hidden h-full shrink-0 overflow-hidden transition-[width,opacity] duration-200 ease-out motion-reduce:transition-none xl:block",
+              diffOpen ? "pointer-events-none w-0 opacity-0" : "w-60 opacity-100",
+            )}
+          >
+            <SessionMeta
+              session={session}
+              run={latest}
+              branch={branch}
+              changes={changes}
+              onOpenChanges={openChanges}
+            />
+          </div>
+        </div>
+      </div>
+      <div
+        className={cn(
+          "hidden h-full shrink-0 overflow-hidden transition-[width,opacity] duration-200 ease-out motion-reduce:transition-none xl:block",
+          diffOpen ? "w-[min(52vw,720px)] opacity-100" : "pointer-events-none w-0 opacity-0",
         )}
+      >
+        <SessionDiffSidebar
+          turns={turns}
+          open={diffOpen}
+          target={diffTarget}
+          onClose={() => {
+            setDiffOpen(false);
+            setDiffTarget(null);
+          }}
+        />
       </div>
     </div>
   );
@@ -174,9 +225,12 @@ function SessionHeader({
         onClick={onToggleDiff}
         aria-label={diffOpen ? "Hide changes" : "Show changes"}
         aria-pressed={diffOpen}
-        className={`hidden size-7 place-items-center rounded-md transition-colors hover:bg-accent hover:text-foreground xl:grid ${diffOpen ? "bg-accent text-foreground" : "text-muted-foreground"}`}
+        className={cn(
+          "hidden size-7 place-items-center rounded-md transition-colors duration-200 motion-reduce:transition-none hover:bg-accent hover:text-foreground xl:grid",
+          diffOpen ? "bg-accent text-foreground" : "text-muted-foreground",
+        )}
       >
-        <GitCompareArrowsIcon className="size-4" />
+        <PanelRightIcon className="size-3.5" />
       </button>
     </header>
   );
@@ -184,24 +238,26 @@ function SessionHeader({
 
 /**
  * Environment strip inside the chat window (not a page-level sidebar).
- * Auto-hides below xl so a future dedicated right rail can own that slot.
+ * Auto-hides below xl while the dedicated Changes rail owns the page-level right slot.
  */
 function SessionMeta({
   session,
   run,
   branch,
   changes,
+  onOpenChanges,
 }: {
   session: SessionDetail | null;
   run: RunDetail | null;
   branch: string | null;
   changes: { files: { path: string }[]; added: number; removed: number };
+  onOpenChanges: () => void;
 }) {
   const repo = run?.repo ?? session?.repo ?? null;
   const provider = run?.provider ?? session?.provider ?? null;
 
   return (
-    <div className="hidden w-60 shrink-0 overflow-y-auto px-4 pb-5 pt-4 xl:block">
+    <div className="h-full w-full overflow-y-auto px-4 pb-5 pt-4">
       <div className="flex flex-col gap-3 text-xs">
         {run ? <StatusBadge status={run.status} /> : null}
 
@@ -215,7 +271,11 @@ function SessionMeta({
           </p>
         ) : null}
 
-        <ChangesLine added={changes.added} removed={changes.removed} />
+        <ChangesLine
+          added={changes.added}
+          removed={changes.removed}
+          onOpenChanges={onOpenChanges}
+        />
 
         {run ? <p className="text-muted-foreground">{absoluteTime(run.createdAt)}</p> : null}
 
@@ -254,19 +314,36 @@ function ForgeIcon({ provider }: { provider: string | null }) {
   );
 }
 
-function ChangesLine({ added, removed }: { added: number; removed: number }) {
-  if (added === 0 && removed === 0) {
-    return <p className="text-muted-foreground">No edits yet</p>;
-  }
+function ChangesLine({
+  added,
+  removed,
+  onOpenChanges,
+}: {
+  added: number;
+  removed: number;
+  onOpenChanges: () => void;
+}) {
   return (
-    <p className="font-mono tabular-nums text-foreground">
-      <span className="text-muted-foreground">± Changes </span>
-      {added > 0 ? (
-        <span className="text-emerald-600 dark:text-emerald-400">+{added}</span>
-      ) : null}
-      {added > 0 && removed > 0 ? <span> </span> : null}
-      {removed > 0 ? <span className="text-red-600 dark:text-red-400">-{removed}</span> : null}
-    </p>
+    <button
+      type="button"
+      onClick={() => onOpenChanges()}
+      className="cursor-pointer text-left font-mono tabular-nums text-foreground transition-colors hover:text-foreground/75"
+    >
+      {added === 0 && removed === 0 ? (
+        <span className="text-muted-foreground">No edits yet</span>
+      ) : (
+        <>
+          <span className="text-muted-foreground">± Changes </span>
+          {added > 0 ? (
+            <span className="text-emerald-600 dark:text-emerald-400">+{added}</span>
+          ) : null}
+          {added > 0 && removed > 0 ? <span> </span> : null}
+          {removed > 0 ? (
+            <span className="text-red-600 dark:text-red-400">-{removed}</span>
+          ) : null}
+        </>
+      )}
+    </button>
   );
 }
 

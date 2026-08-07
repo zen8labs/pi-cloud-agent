@@ -3,9 +3,9 @@
 import type { RunEvent } from "@pi-cloud-agent/protocol";
 import type { CodeViewItem } from "@pierre/diffs";
 import { parsePatchFiles } from "@pierre/diffs";
-import { CodeView } from "@pierre/diffs/react";
+import { CodeView, type CodeViewHandle } from "@pierre/diffs/react";
 import { XIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { SessionTurn } from "@/lib/useSession";
 
 type TurnDiff = {
@@ -22,15 +22,23 @@ type DiffItem = CodeViewItem;
 
 export function SessionDiffSidebar({
   turns,
+  open,
+  target,
   onClose,
 }: {
   turns: SessionTurn[];
+  open: boolean;
+  target: { path: string; request: number } | null;
   onClose: () => void;
 }) {
   const diffs = useMemo(() => collectTurnDiffs(turns), [turns]);
   const latestDiff = diffs.at(-1);
   const items = useMemo(() => (latestDiff ? parseDiffItems(latestDiff) : []), [latestDiff]);
   const [dark, setDark] = useState(false);
+  const codeViewRef = useRef<CodeViewHandle<undefined>>(null);
+  const autoScrolledRequest = useRef<number | null>(null);
+  const targetPath = target?.path;
+  const targetRequest = target?.request;
 
   useEffect(() => {
     const root = document.documentElement;
@@ -41,11 +49,46 @@ export function SessionDiffSidebar({
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    if (
+      !open ||
+      targetPath === undefined ||
+      targetRequest === undefined ||
+      !items.length ||
+      autoScrolledRequest.current === targetRequest
+    )
+      return;
+    const normalizedTargetPath = normalizePath(targetPath);
+    const item = items.find((candidate) => {
+      if (candidate.type !== "diff") return false;
+      const file = candidate.fileDiff;
+      return [file.name, file.prevName].some(
+        (name) => name && normalizePath(name) === normalizedTargetPath,
+      );
+    });
+    if (!item) return;
+    const frame = requestAnimationFrame(() => {
+      const codeView = codeViewRef.current;
+      if (!codeView || autoScrolledRequest.current === targetRequest) return;
+      autoScrolledRequest.current = targetRequest;
+      codeView.scrollTo({
+        type: "item",
+        id: item.id,
+        align: "start",
+        behavior: "smooth",
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [items, open, targetPath, targetRequest]);
+
   const stats = latestDiff ?? { files: 0, added: 0, removed: 0 };
   const hasActiveTurn = turns.at(-1)?.run.status === "running";
 
   return (
-    <aside className="hidden h-full min-h-0 w-[min(52vw,720px)] shrink-0 flex-col border-l border-border bg-card xl:flex">
+    <aside
+      aria-label="Session code changes"
+      className="flex h-full min-h-0 w-full flex-col border-l border-border bg-background text-foreground"
+    >
       <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -86,7 +129,7 @@ export function SessionDiffSidebar({
         </div>
       ) : null}
       {items.length ? (
-        <div className="min-h-0 flex-1 overflow-hidden">
+        <div className="session-diff-view min-h-0 flex-1 overflow-hidden bg-background">
           <CodeView
             items={items}
             options={{
@@ -97,8 +140,11 @@ export function SessionDiffSidebar({
               themeType: dark ? "dark" : "light",
               overflow: "scroll",
               lineDiffType: "word-alt",
+              unsafeCSS:
+                ":host { --diffs-bg: var(--background) !important; --diffs-dark-bg: var(--background) !important; --diffs-light-bg: var(--background) !important; --diffs-dark: var(--foreground) !important; --diffs-light: var(--foreground) !important; background-color: var(--background) !important; color: var(--foreground) !important; }",
             }}
-            className="h-full"
+            className="h-full min-h-full w-full overflow-auto overscroll-contain"
+            ref={codeViewRef}
             renderHeaderMetadata={(item) => {
               const turn = item.id.split(":", 1)[0]?.replace("turn-", "");
               return <span className="text-[10px] opacity-60">turn {turn}</span>;
@@ -174,4 +220,12 @@ function stringValue(value: unknown): string {
 
 function numberValue(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function normalizePath(path: unknown): string {
+  if (typeof path === "string") return path.replace(/^([ab]\/)/, "");
+  if (path && typeof path === "object" && "path" in path) {
+    return normalizePath(path.path);
+  }
+  return "";
 }
