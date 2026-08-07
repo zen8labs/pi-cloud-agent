@@ -15,5 +15,6 @@ export * from "./run";
 export * from "./sandbox";
 export * from "./secret";
 export * from "./task";
+export * from "./timeline";
 export * from "./trigger";
 export * from "./vcs";

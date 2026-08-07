@@ -212,7 +212,48 @@ describe("durable observability delivery", () => {
     expect(spans.some((span) => span.name.startsWith("agent.event."))).toBe(false);
   });
 
-  it("finishes the tool's own step when a legacy completion has no turn number", async () => {
+  it("keeps sequential tools from one turn in a single step", async () => {
+    const run = await seedRun(database);
+    await appendEvent(database, run.id, "log", {
+      event: "agent.turn_end",
+      turnNumber: 1,
+      output: [
+        { type: "toolCall", name: "read", arguments: { path: "README.md" } },
+        { type: "toolCall", name: "read", arguments: { path: "package.json" } },
+      ],
+    });
+    for (const [callId, path] of [
+      ["read-1", "README.md"],
+      ["read-2", "package.json"],
+    ]) {
+      await appendEvent(database, run.id, "tool_call", {
+        callId,
+        tool: "read",
+        status: "running",
+        turnNumber: 1,
+        args: { path },
+      });
+      await appendEvent(database, run.id, "tool_call", {
+        callId,
+        tool: "read",
+        status: "completed",
+        turnNumber: 1,
+        output: path,
+      });
+    }
+
+    const spans = projectRun(run, await listEvents(database, run.id, 0), testConfig());
+    const steps = spans.filter((span) => span.name === "agent.step");
+    const tools = spans.filter((span) => span.name === "agent.tool.read");
+
+    expect(steps).toHaveLength(1);
+    expect(tools).toHaveLength(2);
+    expect(
+      tools.every((tool) => tool.parentSpanContext?.spanId === steps[0]?.spanContext().spanId),
+    ).toBe(true);
+  });
+
+  it("finishes the tool's own step when its completion omits the turn number", async () => {
     const run = await seedRun(database);
     const base = Date.UTC(2026, 0, 1);
     const at = (seconds: number) => new Date(base + seconds * 1000).toISOString();

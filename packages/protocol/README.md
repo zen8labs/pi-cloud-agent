@@ -14,6 +14,7 @@ Nothing here executes anything or touches the network.
 | `run.ts` | `RunStatus` and the six lifecycle states, plus terminal/active helpers |
 | `trigger.ts` | `Trigger`: the normalized reason a run exists, and `TriggerKind` |
 | `task.ts` | `TaskSpec`: the concrete request handed to infrastructure |
+| `timeline.ts` | pure interpretation of the run journal into shared turn and tool semantics |
 | `repo.ts` | `RepoRef`: everything needed to clone and address a repo at one revision |
 | `events.ts` | the two outbound channels: `RunEventInput` (telemetry) and `RunStatusReport` (terminal) |
 | `secret.ts` | `Secret`, `createRedactor`, `redactUrlCredentials` |
