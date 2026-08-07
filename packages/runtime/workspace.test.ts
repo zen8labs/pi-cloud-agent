@@ -43,6 +43,26 @@ const config: RuntimeConfig = {
   mcpConfig: null,
 };
 
+type MockChild = EventEmitter & { stdout: EventEmitter; stderr: EventEmitter };
+
+function addMockChild(
+  children: MockChild[],
+  output: string,
+  code: number,
+  stderr = "",
+): MockChild {
+  const child = new EventEmitter() as MockChild;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  children.push(child);
+  queueMicrotask(() => {
+    if (output) child.stdout.emit("data", Buffer.from(output));
+    if (stderr) child.stderr.emit("data", Buffer.from(stderr));
+    child.emit("close", code, null);
+  });
+  return child;
+}
+
 function fakeReporter(): Reporter {
   return {
     event: vi.fn(),
@@ -55,7 +75,7 @@ function fakeReporter(): Reporter {
 
 afterEach(() => {
   vi.useRealTimers();
-  vi.clearAllMocks();
+  vi.resetAllMocks();
 });
 
 describe("repository setup", () => {
@@ -122,28 +142,17 @@ describe("git snapshots", () => {
   });
 
   it("captures files when a repository has no baseline commit", async () => {
-    const children: Array<EventEmitter & { stdout: EventEmitter; stderr: EventEmitter }> = [];
-    const addChild = (output: string, code: number) => {
-      const child = new EventEmitter() as EventEmitter & {
-        stdout: EventEmitter;
-        stderr: EventEmitter;
-      };
-      child.stdout = new EventEmitter();
-      child.stderr = new EventEmitter();
-      children.push(child);
-      queueMicrotask(() => {
-        if (output) child.stdout.emit("data", Buffer.from(output));
-        child.emit("close", code, null);
-      });
-      return child;
-    };
+    const children: MockChild[] = [];
 
     vi.mocked(spawn)
-      .mockImplementationOnce(() => addChild("fatal: Needed a single revision", 128) as never)
-      .mockImplementationOnce(() => addChild("hello.ts\0", 0) as never)
+      .mockImplementationOnce(
+        () => addMockChild(children, "fatal: Needed a single revision", 128) as never,
+      )
+      .mockImplementationOnce(() => addMockChild(children, "hello.ts\0", 0) as never)
       .mockImplementationOnce(
         () =>
-          addChild(
+          addMockChild(
+            children,
             "diff --git a/hello.ts b/hello.ts\nnew file mode 100644\n--- /dev/null\n+++ b/hello.ts\n@@ -0,0 +1 @@\n+hello\n",
             1,
           ) as never,
@@ -159,26 +168,54 @@ describe("git snapshots", () => {
     expect(children).toHaveLength(3);
   });
 
-  it("keeps a valid prefix and marks an oversized tracked patch", async () => {
-    const addChild = (output: string, code: number) => {
-      const child = new EventEmitter() as EventEmitter & {
-        stdout: EventEmitter;
-        stderr: EventEmitter;
-      };
-      child.stdout = new EventEmitter();
-      child.stderr = new EventEmitter();
-      queueMicrotask(() => {
-        if (output) child.stdout.emit("data", Buffer.from(output));
-        child.emit("close", code, null);
-      });
-      return child;
-    };
+  it("drops an incomplete path when the untracked-file list is truncated", async () => {
+    const children: MockChild[] = [];
 
+    vi.mocked(spawn)
+      .mockImplementationOnce(
+        () => addMockChild(children, "fatal: Needed a single revision", 128) as never,
+      )
+      .mockImplementationOnce(
+        () => addMockChild(children, `good.ts\0${"partial-path".repeat(30_000)}`, 0) as never,
+      )
+      .mockImplementationOnce(() => addMockChild(children, "", 1) as never);
+
+    const snapshot = await gitDiff(config.repo.path, null);
+
+    expect(snapshot.truncated).toBe(true);
+    expect(children).toHaveLength(3);
+    expect(vi.mocked(spawn).mock.calls[2]?.[1]).toContain("good.ts");
+    expect(vi.mocked(spawn).mock.calls[2]?.[1]).not.toContain("partial-path");
+  });
+
+  it("bounds untracked diff processes and accumulated output", async () => {
+    const children: MockChild[] = [];
+    const files = `${Array.from({ length: 257 }, (_, index) => `file-${index}.txt`).join("\0")}\0`;
+    const patch = `diff --git a/file-0.txt b/file-0.txt\n${"x".repeat(2_100_000)}`;
+
+    vi.mocked(spawn)
+      .mockImplementationOnce(() => addMockChild(children, "head-sha\n", 0) as never)
+      .mockImplementationOnce(() => addMockChild(children, "", 0) as never)
+      .mockImplementationOnce(() => addMockChild(children, files, 0) as never);
+    for (let index = 0; index < 256; index += 1) {
+      vi.mocked(spawn).mockImplementationOnce(
+        () => addMockChild(children, index === 0 ? patch : "", 1) as never,
+      );
+    }
+
+    const snapshot = await gitDiff(config.repo.path, "base-sha");
+
+    expect(snapshot.truncated).toBe(true);
+    expect(children).toHaveLength(4);
+  });
+
+  it("keeps a valid prefix and marks an oversized tracked patch", async () => {
+    const children: MockChild[] = [];
     const oversizedPatch = `diff --git a/large.txt b/large.txt\n${"a".repeat(2_100_000)}`;
     vi.mocked(spawn)
-      .mockImplementationOnce(() => addChild("head-sha\n", 0) as never)
-      .mockImplementationOnce(() => addChild(oversizedPatch, 0) as never)
-      .mockImplementationOnce(() => addChild("", 0) as never);
+      .mockImplementationOnce(() => addMockChild(children, "head-sha\n", 0) as never)
+      .mockImplementationOnce(() => addMockChild(children, oversizedPatch, 0) as never)
+      .mockImplementationOnce(() => addMockChild(children, "", 0) as never);
 
     const snapshot = await gitDiff(config.repo.path, "base-sha");
 
@@ -188,29 +225,19 @@ describe("git snapshots", () => {
   });
 
   it("keeps git warnings out of the machine-readable patch", async () => {
-    const addChild = (stdout: string, stderr: string, code: number) => {
-      const child = new EventEmitter() as EventEmitter & {
-        stdout: EventEmitter;
-        stderr: EventEmitter;
-      };
-      child.stdout = new EventEmitter();
-      child.stderr = new EventEmitter();
-      queueMicrotask(() => {
-        if (stdout) child.stdout.emit("data", Buffer.from(stdout));
-        if (stderr) child.stderr.emit("data", Buffer.from(stderr));
-        child.emit("close", code, null);
-      });
-      return child;
-    };
-
+    const children: MockChild[] = [];
     const patch =
       "diff --git a/hello.ts b/hello.ts\n--- a/hello.ts\n+++ b/hello.ts\n@@ -1 +1 @@\n-old\n+new\n";
     vi.mocked(spawn)
       .mockImplementationOnce(
-        () => addChild("head-sha\n", "warning: safe.directory\n", 0) as never,
+        () => addMockChild(children, "head-sha\n", 0, "warning: safe.directory\n") as never,
       )
-      .mockImplementationOnce(() => addChild(patch, "warning: line ending\n", 0) as never)
-      .mockImplementationOnce(() => addChild("", "warning: unrelated\n", 0) as never);
+      .mockImplementationOnce(
+        () => addMockChild(children, patch, 0, "warning: line ending\n") as never,
+      )
+      .mockImplementationOnce(
+        () => addMockChild(children, "", 0, "warning: unrelated\n") as never,
+      );
 
     const snapshot = await gitDiff(config.repo.path, "base-sha");
 

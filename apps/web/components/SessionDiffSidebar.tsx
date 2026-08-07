@@ -5,7 +5,7 @@ import type { CodeViewItem } from "@pierre/diffs";
 import { parsePatchFiles } from "@pierre/diffs";
 import { CodeView, type CodeViewHandle } from "@pierre/diffs/react";
 import { XIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionTurn } from "@/lib/useSession";
 
 type TurnDiff = {
@@ -20,6 +20,8 @@ type TurnDiff = {
 
 type DiffItem = CodeViewItem;
 
+const MemoizedCodeView = memo(CodeView) as typeof CodeView;
+
 export function SessionDiffSidebar({
   turns,
   open,
@@ -33,12 +35,34 @@ export function SessionDiffSidebar({
 }) {
   const diffs = useMemo(() => collectTurnDiffs(turns), [turns]);
   const latestDiff = diffs.at(-1);
-  const items = useMemo(() => (latestDiff ? parseDiffItems(latestDiff) : []), [latestDiff]);
+  const stableLatestDiff = useStableTurnDiff(latestDiff);
+  const items = useMemo(
+    () => (open && stableLatestDiff ? parseDiffItems(stableLatestDiff) : []),
+    [open, stableLatestDiff],
+  );
   const [dark, setDark] = useState(false);
   const codeViewRef = useRef<CodeViewHandle<undefined>>(null);
   const autoScrolledRequest = useRef<number | null>(null);
   const targetPath = target?.path;
   const targetRequest = target?.request;
+  const codeViewOptions = useMemo(
+    () => ({
+      diffStyle: "unified" as const,
+      diffIndicators: "bars" as const,
+      hunkSeparators: "line-info" as const,
+      theme: dark ? "pierre-dark" : "pierre-light",
+      themeType: dark ? ("dark" as const) : ("light" as const),
+      overflow: "scroll" as const,
+      lineDiffType: "word-alt" as const,
+      unsafeCSS:
+        ":host { --diffs-bg: var(--background) !important; --diffs-dark-bg: var(--background) !important; --diffs-light-bg: var(--background) !important; --diffs-dark: var(--foreground) !important; --diffs-light: var(--foreground) !important; background-color: var(--background) !important; color: var(--foreground) !important; }",
+    }),
+    [dark],
+  );
+  const renderHeaderMetadata = useCallback((item: CodeViewItem) => {
+    const turn = item.id.split(":", 1)[0]?.replace("turn-", "");
+    return <span className="text-[10px] opacity-60">turn {turn}</span>;
+  }, []);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -130,25 +154,12 @@ export function SessionDiffSidebar({
       ) : null}
       {items.length ? (
         <div className="session-diff-view min-h-0 flex-1 overflow-hidden bg-background">
-          <CodeView
+          <MemoizedCodeView
             items={items}
-            options={{
-              diffStyle: "unified",
-              diffIndicators: "bars",
-              hunkSeparators: "line-info",
-              theme: dark ? "pierre-dark" : "pierre-light",
-              themeType: dark ? "dark" : "light",
-              overflow: "scroll",
-              lineDiffType: "word-alt",
-              unsafeCSS:
-                ":host { --diffs-bg: var(--background) !important; --diffs-dark-bg: var(--background) !important; --diffs-light-bg: var(--background) !important; --diffs-dark: var(--foreground) !important; --diffs-light: var(--foreground) !important; background-color: var(--background) !important; color: var(--foreground) !important; }",
-            }}
+            options={codeViewOptions}
             className="h-full min-h-full w-full overflow-auto overscroll-contain"
             ref={codeViewRef}
-            renderHeaderMetadata={(item) => {
-              const turn = item.id.split(":", 1)[0]?.replace("turn-", "");
-              return <span className="text-[10px] opacity-60">turn {turn}</span>;
-            }}
+            renderHeaderMetadata={renderHeaderMetadata}
           />
         </div>
       ) : (
@@ -184,6 +195,19 @@ function collectTurnDiffs(turns: SessionTurn[]): TurnDiff[] {
     if (!event) return [];
     return [diffFromEvent(turn, event)];
   });
+}
+
+function useStableTurnDiff(diff: TurnDiff | undefined): TurnDiff | undefined {
+  const stable = useRef<TurnDiff | undefined>(undefined);
+  const previous = stable.current;
+  if (
+    previous?.runId !== diff?.runId ||
+    previous?.turnNumber !== diff?.turnNumber ||
+    previous?.patch !== diff?.patch
+  ) {
+    stable.current = diff;
+  }
+  return stable.current;
 }
 
 function diffFromEvent(turn: SessionTurn, event: RunEvent): TurnDiff {

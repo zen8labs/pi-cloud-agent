@@ -206,15 +206,17 @@ export default function SessionPage() {
             onReset={() => resizeDiff(DEFAULT_DIFF_WIDTH)}
           />
         ) : null}
-        <SessionDiffSidebar
-          turns={turns}
-          open={diffOpen}
-          target={diffTarget}
-          onClose={() => {
-            setDiffOpen(false);
-            setDiffTarget(null);
-          }}
-        />
+        {diffOpen ? (
+          <SessionDiffSidebar
+            turns={turns}
+            open={diffOpen}
+            target={diffTarget}
+            onClose={() => {
+              setDiffOpen(false);
+              setDiffTarget(null);
+            }}
+          />
+        ) : null}
       </div>
     </div>
   );

@@ -121,6 +121,8 @@ function run(
 }
 
 const DIFF_MAX_OUTPUT_CHARS = 2_000_000;
+const UNTRACKED_FILE_LIST_MAX_CHARS = 200_000;
+const MAX_UNTRACKED_FILES = 256;
 
 /** Capture the revision at the start of a turn so committed edits are visible. */
 export async function gitRevision(path: string): Promise<string | null> {
@@ -173,7 +175,7 @@ export async function gitDiff(path: string, baseSha: string | null): Promise<Git
     {
       cwd: path,
       timeoutMs: 30_000,
-      maxOutputChars: 200_000,
+      maxOutputChars: UNTRACKED_FILE_LIST_MAX_CHARS,
       outputPosition: "head",
       includeStderr: false,
     },
@@ -181,29 +183,16 @@ export async function gitDiff(path: string, baseSha: string | null): Promise<Git
   if (untracked.code !== 0)
     throw new Error(`could not list untracked files: ${untracked.stderr || untracked.output}`);
 
-  const chunks = tracked ? [tracked.output] : [];
-  let sourceTruncated = Boolean(tracked?.outputTruncated || untracked.outputTruncated);
-  for (const file of untracked.output.split("\0").filter(Boolean)) {
-    const fileDiff = await run(
-      "git",
-      ["diff", "--no-index", "--no-ext-diff", "--binary", "--", "/dev/null", file],
-      {
-        cwd: path,
-        timeoutMs: 60_000,
-        maxOutputChars: DIFF_MAX_OUTPUT_CHARS,
-        outputPosition: "head",
-        includeStderr: false,
-      },
-    );
-    // `git diff --no-index` returns 1 when files differ, which is the success
-    // case here. Any other non-zero result is a genuine capture failure.
-    if (fileDiff.code > 1)
-      throw new Error(`could not capture ${file}: ${fileDiff.stderr || fileDiff.output}`);
-    chunks.push(fileDiff.output);
-    sourceTruncated ||= fileDiff.outputTruncated;
-  }
-
-  const limited = limitDiff(chunks.filter(Boolean).join("\n"), sourceTruncated);
+  const captured = await captureUntrackedDiff(
+    path,
+    untracked.output,
+    tracked ? [tracked.output] : [],
+    Boolean(tracked?.outputTruncated || untracked.outputTruncated),
+  );
+  const limited = limitDiff(
+    captured.chunks.filter(Boolean).join("\n"),
+    captured.sourceTruncated,
+  );
   return {
     patch: limited.patch,
     baseSha,
@@ -212,6 +201,59 @@ export async function gitDiff(path: string, baseSha: string | null): Promise<Git
     added: countDiffLines(limited.patch, "+"),
     removed: countDiffLines(limited.patch, "-"),
     truncated: limited.truncated,
+  };
+}
+
+async function captureUntrackedDiff(
+  path: string,
+  output: string,
+  chunks: string[],
+  sourceTruncated: boolean,
+): Promise<{ chunks: string[]; sourceTruncated: boolean }> {
+  const listedFiles = parseNulSeparatedPaths(output);
+  const files = listedFiles.paths.slice(0, MAX_UNTRACKED_FILES);
+  let capturedChars = chunks.reduce((total, chunk) => total + chunk.length, 0);
+  sourceTruncated ||= listedFiles.incomplete || listedFiles.paths.length > files.length;
+  for (const file of files) {
+    const remainingChars = DIFF_MAX_OUTPUT_CHARS - capturedChars;
+    if (remainingChars <= 0) {
+      sourceTruncated = true;
+      break;
+    }
+    const fileDiff = await run(
+      "git",
+      ["diff", "--no-index", "--no-ext-diff", "--binary", "--", "/dev/null", file],
+      {
+        cwd: path,
+        timeoutMs: 60_000,
+        maxOutputChars: remainingChars,
+        outputPosition: "head",
+        includeStderr: false,
+      },
+    );
+    // `git diff --no-index` returns 1 when files differ, which is the success
+    // case here. Any other non-zero result is a genuine capture failure.
+    if (fileDiff.code > 1) {
+      // A file can disappear between ls-files and diff (or be unreadable). Do
+      // not discard the complete session snapshot because one optional file
+      // could not be captured.
+      sourceTruncated = true;
+      continue;
+    }
+    chunks.push(fileDiff.output);
+    capturedChars += fileDiff.output.length;
+    sourceTruncated ||= fileDiff.outputTruncated;
+    if (fileDiff.outputTruncated) break;
+  }
+  return { chunks, sourceTruncated };
+}
+
+function parseNulSeparatedPaths(output: string): { paths: string[]; incomplete: boolean } {
+  const lastDelimiter = output.lastIndexOf("\0");
+  if (lastDelimiter < 0) return { paths: [], incomplete: output.length > 0 };
+  return {
+    paths: output.slice(0, lastDelimiter).split("\0").filter(Boolean),
+    incomplete: lastDelimiter !== output.length - 1,
   };
 }
 
