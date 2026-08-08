@@ -70,6 +70,30 @@ export const vcsConnections = pgTable(
   ],
 );
 
+export const repositoryEnvironments = pgTable(
+  "repository_environments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => appUsers.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    repoFullName: text("repo_full_name").notNull(),
+    /** App-managed setup script. Empty configurations are deleted. */
+    setupScript: text("setup_script").notNull(),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("repository_environments_user_repo_idx").on(
+      table.userId,
+      table.provider,
+      table.repoFullName,
+    ),
+    index("repository_environments_user_updated_idx").on(table.userId, table.updatedAt.desc()),
+  ],
+);
+
 export const oauthStates = pgTable(
   "oauth_states",
   {
@@ -428,6 +452,7 @@ export type SessionRow = typeof sessions.$inferSelect;
 export type RunEventRow = typeof runEvents.$inferSelect;
 export type ObservabilityExportRow = typeof observabilityExports.$inferSelect;
 export type VcsConnectionRow = typeof vcsConnections.$inferSelect;
+export type RepositoryEnvironmentRow = typeof repositoryEnvironments.$inferSelect;
 export type LlmConnectionRow = typeof llmConnections.$inferSelect;
 export type OAuthStateRow = typeof oauthStates.$inferSelect;
 export type AppUserRow = typeof appUsers.$inferSelect;

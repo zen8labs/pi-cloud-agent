@@ -1,13 +1,13 @@
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { existsSync } from "node:fs";
+import { SANDBOX_ENV } from "@pi-cloud-agent/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeConfig } from "./config";
 import type { Reporter } from "./reporter";
-import { gitDiff, gitRevision, runSetupScript, trimCommandOutput } from "./workspace";
+import { runSetupScript } from "./setup";
+import { gitDiff, gitRevision, trimCommandOutput } from "./workspace";
 
 vi.mock("node:child_process", () => ({ spawn: vi.fn() }));
-vi.mock("node:fs", () => ({ existsSync: vi.fn() }));
 
 const config: RuntimeConfig = {
   runId: "run-1",
@@ -18,6 +18,7 @@ const config: RuntimeConfig = {
   controlPlaneUrl: "https://controller.test",
   callbackToken: "callback-token-value-1234",
   prompt: "test",
+  appSetupScript: "",
   model: {
     provider: "test-provider",
     name: "test-model",
@@ -75,14 +76,82 @@ function fakeReporter(): Reporter {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllEnvs();
   vi.resetAllMocks();
 });
 
 describe("repository setup", () => {
-  it("reports a process killed at the timeout as failed, never complete", async () => {
-    vi.useFakeTimers();
-    vi.mocked(existsSync).mockReturnValue(true);
+  it("runs the app-managed setup script", async () => {
+    vi.mocked(spawn).mockImplementationOnce(
+      () => addMockChild([], "configured environment ready", 0) as never,
+    );
+    const reporter = fakeReporter();
 
+    await runSetupScript({ ...config, appSetupScript: "pnpm install" }, reporter);
+
+    expect(spawn).toHaveBeenCalledWith(
+      "bash",
+      ["-e", "-u", "-o", "pipefail", "-c", "pnpm install"],
+      expect.objectContaining({ cwd: config.repo.path }),
+    );
+    expect(reporter.log).toHaveBeenCalledWith("setup.started", {
+      script: "app environment setting",
+    });
+    expect(reporter.log).toHaveBeenCalledWith("setup.complete");
+  });
+
+  it("does nothing when no app-managed script is configured", async () => {
+    const reporter = fakeReporter();
+
+    await runSetupScript(config, reporter);
+
+    expect(spawn).not.toHaveBeenCalled();
+    expect(reporter.log).toHaveBeenCalledWith("setup.skipped", { reason: "no script" });
+  });
+
+  it("runs setup without model or callback credentials", async () => {
+    vi.stubEnv(SANDBOX_ENV.callbackToken, "callback-secret");
+    vi.stubEnv(SANDBOX_ENV.modelApiKey, "model-secret");
+    vi.stubEnv(SANDBOX_ENV.modelAuthJson, "model-oauth-secret");
+    vi.stubEnv(SANDBOX_ENV.mcpConfig, "plugin-secret");
+    vi.stubEnv(SANDBOX_ENV.scmToken, "forge-secret");
+    vi.mocked(spawn).mockImplementationOnce(
+      () => addMockChild([], "dependencies ready", 0) as never,
+    );
+    const reporter = fakeReporter();
+
+    await runSetupScript({ ...config, appSetupScript: "pnpm install" }, reporter);
+
+    const options = vi.mocked(spawn).mock.calls[0]?.[2];
+    expect(options?.env).not.toHaveProperty(SANDBOX_ENV.callbackToken);
+    expect(options?.env).not.toHaveProperty(SANDBOX_ENV.modelApiKey);
+    expect(options?.env).not.toHaveProperty(SANDBOX_ENV.modelAuthJson);
+    expect(options?.env).not.toHaveProperty(SANDBOX_ENV.mcpConfig);
+    expect(options?.env).toHaveProperty(SANDBOX_ENV.scmToken, "forge-secret");
+    expect(reporter.log).toHaveBeenCalledWith("setup.started", {
+      script: "app environment setting",
+    });
+    expect(reporter.log).toHaveBeenCalledWith("setup.complete");
+  });
+
+  it("fails the run when app-managed setup exits non-zero", async () => {
+    vi.mocked(spawn).mockImplementationOnce(
+      () => addMockChild([], "", 17, "dependency install failed") as never,
+    );
+    const reporter = fakeReporter();
+
+    await expect(
+      runSetupScript({ ...config, appSetupScript: "pnpm install" }, reporter),
+    ).rejects.toThrow("repository setup exited with code 17: dependency install failed");
+    expect(reporter.log).toHaveBeenCalledWith(
+      "setup.failed",
+      expect.objectContaining({ exitCode: 17, timedOut: false }),
+    );
+    expect(reporter.log).not.toHaveBeenCalledWith("setup.complete");
+  });
+
+  it("fails the run when app-managed setup reaches its timeout", async () => {
+    vi.useFakeTimers();
     const child = new EventEmitter() as EventEmitter & {
       stdout: EventEmitter;
       stderr: EventEmitter;
@@ -97,9 +166,12 @@ describe("repository setup", () => {
     vi.mocked(spawn).mockReturnValue(child as never);
 
     const reporter = fakeReporter();
-    const pending = runSetupScript(config, reporter);
+    const pending = runSetupScript({ ...config, appSetupScript: "pnpm install" }, reporter);
+    const assertion = expect(pending).rejects.toThrow(
+      "repository setup timed out after 300 seconds",
+    );
     await vi.advanceTimersByTimeAsync(300_000);
-    await pending;
+    await assertion;
 
     expect(reporter.log).not.toHaveBeenCalledWith("setup.complete");
     expect(reporter.log).toHaveBeenCalledWith(

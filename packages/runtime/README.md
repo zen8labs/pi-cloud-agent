@@ -2,7 +2,7 @@
 
 > **This is the untrusted zone.** Everything here runs inside the sandbox, alongside code cloned from a repository nobody has reviewed.
 
-One process per run: create or reuse the repository checkout, optionally run its setup hook on a fresh clone, open the durable Pi checkpoint, execute one turn, save the checkpoint, and report outward. The process always exits. Standalone compute is destroyed; a session filesystem may be suspended for a later process.
+One process per run: create or reuse the repository checkout, optionally run the app-managed setup script on a fresh clone, open the durable Pi checkpoint, execute one turn, save the checkpoint, and report outward. The process always exits. Standalone compute is destroyed; a session filesystem may be suspended for a later process.
 
 **Depends on:** `@pi-cloud-agent/protocol` and the agent harness. **Nothing else, ever.** No database client, no VCS client, no sandbox provider, no credential broker. `pnpm boundaries` fails CI if a dependency is added, and pnpm's isolated `node_modules` makes an undeclared import unresolvable in the first place.
 
@@ -14,13 +14,14 @@ It reaches exactly one thing: `CONTROL_PLANE_URL`, outbound only.
 |---|---|
 | `run.ts` | the entry point: four steps, exactly one terminal report |
 | `config.ts` | reads `SANDBOX_ENV` into a typed object; `secretValues()` for redaction |
-| `workspace.ts` | git credential helper, clone and checkout, the repo's setup hook |
+| `workspace.ts` | git credential helper, clone and checkout |
+| `setup.ts` | app-managed setup script for a fresh checkout |
 | `agent.ts` | one agent turn, relaying Pi's native events as telemetry |
 | `oauth-credential.ts` | persists Pi OAuth rotation before deleting run-local auth state |
 | `session-state.ts` | authenticated download/open/upload of the Pi JSONL checkpoint |
 | `reporter.ts` | the only outbound path: telemetry, OAuth rotation, and terminal status |
 | `build.ts` | bundles to `dist/run.js` and pins the harness version for the image |
-| `Dockerfile.sandbox` | the sandbox image: Node, `git`, `gh`, the bundle |
+| `Dockerfile.sandbox` | the sandbox image: Node/Python toolchains, coding CLIs, the bundle |
 
 ## Invariants
 
@@ -28,9 +29,26 @@ It reaches exactly one thing: `CONTROL_PLANE_URL`, outbound only.
 - **Telemetry is best-effort and must never fail a run.** Losing a token event costs a line in the feed. `reporter.ts` swallows those failures on purpose.
 - **Everything outbound passes through the redactor.** This is the only side that knows every secret in play, so it is the side that scrubs. Do not add a second send path. Credentials must be named `*_TOKEN`, `*_API_KEY`, `*_SECRET`, or `*_PASSWORD` so `secretValues()` catches them without being told.
 - **Never write a credential to parked workspace state.** The git credential helper prints from the environment on demand, precisely so no token lands in `.git/config` where the agent could later read or commit it. Pi OAuth may use a run-scoped temporary auth file. If Pi rotates it, the runtime sends the replacement to the authenticated controller callback before removing the file and before the session workspace can be suspended.
+- **Repository setup is explicit.** A per-repository setup script saved in the dashboard's Settings > Environments runs once after a fresh clone. The current setting is resolved when the run is provisioned; an empty setting skips custom setup and uses only the bundled image. A non-zero exit or five-minute timeout fails the run instead of handing the agent a known-broken checkout. The script does not receive model, callback, or plugin credentials; forge credentials remain available for private Git dependencies.
 - **No workflow code here.** The controller composes enabled plugin skills and the user request into one finished `TASK_PROMPT`, so the image ships no plugin package.
 - **MCP is opt-in via env.** When `MCP_CONFIG` is set, the runtime dynamically loads `pi-mcp-adapter` with that isolated snapshot. It never discovers `.mcp.json` from the cloned repository, and a run without MCP never imports the adapter. After `createAgentSession`, the runtime calls `bindExtensions` so Pi emits `session_start` — without that, the adapter registers tools but never initializes. The sandbox command uses `node --import tsx` so the adapter's TypeScript entry can load; the image pins the adapter's peers (`typebox`, `@earendil-works/pi-ai`, `@earendil-works/pi-tui`) at the top level because npm nests Pi's copies where the adapter cannot resolve them, and remaps `pi-ai`'s main entry to `/compat` so the adapter's `complete` import matches Pi 0.82.
 - **This is the one package with a build step.** Crossing into a container image is where "just run the TypeScript" stops being simpler.
+
+## Sandbox tools and repository setup
+
+The default image is a practical JavaScript/Python coding environment. It includes Node, npm, pnpm, Python, pip, venv, uv, `git`, `gh`, `git-lfs`, `jq`, `ripgrep`, archive utilities, and a native compiler toolchain. Heavier ecosystems such as Go, Rust, Java, browser binaries, and cloud CLIs belong in operator-selected custom images rather than every run.
+
+The normal path is Settings > Environments: choose a connected repository and enter its setup commands once. The current setting is resolved when a run is provisioned, then runs with `bash -e -u -o pipefail` as the unprivileged `node` user and is bounded to five minutes. Keep it non-interactive, idempotent, and version-pinned; for example:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+pnpm install --frozen-lockfile
+# or: uv sync --frozen
+```
+
+An empty setting uses only the bundled image tools. A resumed session keeps its filesystem and does not reinstall dependencies. Install project dependencies into the checkout or the unprivileged `node` user's home; runtime setup has no `sudo` access.
 
 ## Working on it
 

@@ -165,3 +165,24 @@ export interface BranchesResponse {
   branches: string[];
   default: string | null;
 }
+
+export const updateRepositoryEnvironmentRequestSchema = z.object({
+  provider: z.string().min(1),
+  repo: z.string().min(3),
+  setupScript: z.string().max(100_000),
+});
+
+export type UpdateRepositoryEnvironmentRequest = z.infer<
+  typeof updateRepositoryEnvironmentRequestSchema
+>;
+
+export interface RepositoryEnvironmentSummary {
+  provider: string;
+  repo: string;
+  setupScript: string;
+  updatedAt: string;
+}
+
+export interface RepositoryEnvironmentsResponse {
+  environments: RepositoryEnvironmentSummary[];
+}

@@ -8,6 +8,8 @@ import type {
   LlmConnectionsResponse,
   PluginCatalogEntry,
   PluginCatalogResponse,
+  RepositoryEnvironmentSummary,
+  RepositoryEnvironmentsResponse,
   RunDetail,
   RunEvent,
   RunEventsResponse,
@@ -134,6 +136,23 @@ export const api = {
   listBranches: (provider: string, repo: string): Promise<BranchesResponse> =>
     request<BranchesResponse>(
       `/repos/branches?provider=${encodeURIComponent(provider)}&repo=${encodeURIComponent(repo)}`,
+    ),
+
+  listRepositoryEnvironments: (): Promise<RepositoryEnvironmentSummary[]> =>
+    request<RepositoryEnvironmentsResponse>("/environments").then((r) => r.environments),
+
+  saveRepositoryEnvironment: (body: {
+    provider: string;
+    repo: string;
+    setupScript: string;
+  }): Promise<{
+    ok: boolean;
+    configured: boolean;
+    environment?: RepositoryEnvironmentSummary;
+  }> =>
+    request<{ ok: boolean; configured: boolean; environment?: RepositoryEnvironmentSummary }>(
+      "/environments",
+      { method: "PUT", body: JSON.stringify(body) },
     ),
 
   listConnections: (): Promise<VcsConnectionSummary[]> =>
