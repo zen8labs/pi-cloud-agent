@@ -17,6 +17,8 @@ export const SANDBOX_ENV = {
   debugEvents: "AGENT_DEBUG_EVENTS",
 
   taskPrompt: "TASK_PROMPT",
+  /** Optional app-managed setup script for a fresh repository checkout. */
+  setupScript: "REPO_SETUP_SCRIPT",
 
   /**
    * Optional JSON snapshot of resolved MCP server config for `createMcpAdapter`.
@@ -59,6 +61,4 @@ export const SANDBOX_PATHS = {
   workspace: "/workspace",
   state: "/workspace/.pi-cloud-agent",
   app: "/app",
-  /** Optional repo-provided hook, run after clone. */
-  setupScript: ".pi-cloud-agent/setup.sh",
 } as const;

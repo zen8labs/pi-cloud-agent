@@ -7,14 +7,36 @@
 FROM node:22-bookworm-slim
 
 ENV NODE_ENV=production \
-    DEBIAN_FRONTEND=noninteractive
+    DEBIAN_FRONTEND=noninteractive \
+    HOME=/home/node
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+        bash \
+        build-essential \
         ca-certificates \
         curl \
+        file \
         git \
-        bash \
+        git-lfs \
+        jq \
+        less \
+        openssh-client \
+        patch \
+        pkg-config \
+        procps \
+        python3 \
+        python3-dev \
+        python3-pip \
+        python3-venv \
+        python-is-python3 \
+        ripgrep \
+        unzip \
+        xz-utils \
+        zip \
+    && pip3 install --break-system-packages --no-cache-dir uv==0.11.20 \
+    && npm install --global --no-audit --no-fund pnpm@11.1.3 \
+    && git lfs install --system \
     && rm -rf /var/lib/apt/lists/*
 
 # The GitHub CLI is how the agent actuates outcomes — posting a review,
@@ -45,6 +67,10 @@ RUN mkdir -p /workspace/.pi-cloud-agent \
     && chmod 1777 /workspace \
     && chown node:node /workspace/.pi-cloud-agent \
     && chmod 700 /workspace/.pi-cloud-agent
+
+# Both providers execute repository code as this user. Toolchains belong in the
+# immutable image; repository setup installs project dependencies without root.
+USER node
 
 # E2B runs a template's start command at build time, so the real per-run command
 # is issued on create instead — it needs values that only exist then. See

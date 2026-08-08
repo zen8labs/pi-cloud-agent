@@ -134,6 +134,8 @@ pnpm sandbox:image
 
 For E2B, use `pnpm sandbox:template` instead.
 
+The image provides Node/npm/pnpm, Python/pip/venv/uv, Git/GitHub CLIs, common shell utilities, and native build tools. Repository-specific dependencies belong in the per-repository setup script in Settings > Environments; see [packages/runtime/README.md](packages/runtime/README.md#sandbox-tools-and-repository-setup).
+
 ## Troubleshooting
 
 | Symptom | Check |
