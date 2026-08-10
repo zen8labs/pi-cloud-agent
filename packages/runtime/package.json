@@ -19,7 +19,7 @@
     "pi-mcp-adapter": "2.18.0"
   },
   "devDependencies": {
-    "@e2b/cli": "2.16.0",
+    "@e2b/cli": "2.16.1",
     "@pi-cloud-agent/tsconfig": "workspace:*",
     "@types/node": "catalog:",
     "esbuild": "0.28.1",
