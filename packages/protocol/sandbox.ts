@@ -13,6 +13,8 @@ import type { Secret } from "./secret";
 export interface SandboxProvider {
   readonly name: string;
   create(spec: SandboxSpec): Promise<SandboxRef>;
+  /** Run a disposable command and return its output; used for preflight checks. */
+  execute?(spec: SandboxSpec): Promise<SandboxExecutionResult>;
   /** Restore a session workspace and start exactly one new runtime command. */
   resume(ref: WorkspaceRef, spec: SandboxSpec): Promise<SandboxRef>;
   /** Persist the filesystem without retaining process memory or credentials. */
@@ -21,6 +23,12 @@ export interface SandboxProvider {
   deleteWorkspace(ref: WorkspaceRef): Promise<void>;
   /** Must be idempotent: the reconciler may call it for an already-dead box. */
   stop(ref: SandboxRef): Promise<void>;
+}
+
+export interface SandboxExecutionResult {
+  code: number;
+  stdout: string;
+  stderr: string;
 }
 
 export interface SandboxSpec {

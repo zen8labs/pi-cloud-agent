@@ -17,7 +17,17 @@ import { getVcsProvider } from "../vcs/connections";
  * contract; see docs/secrets.md.
  */
 export interface CredentialBroker {
+  mintForRepository(input: {
+    userId: string;
+    provider: string;
+    repoFullName: string;
+  }): Promise<RepositoryCredentials>;
   mintForRun(input: MintInput): Promise<RunCredentials>;
+}
+
+interface RepositoryCredentials {
+  secrets: Record<string, Secret>;
+  env: Record<string, string>;
 }
 
 interface MintInput {
@@ -54,6 +64,29 @@ export function createCredentialBroker(
   log: Logger,
 ): CredentialBroker {
   return {
+    async mintForRepository({
+      userId,
+      provider,
+      repoFullName,
+    }): Promise<RepositoryCredentials> {
+      const secrets: Record<string, Secret> = {};
+      const env: Record<string, string> = {};
+      try {
+        const vcs = await getVcsProvider(database, config, provider, userId);
+        const token = await vcs.mintRepoToken(repoFullName);
+        secrets[SANDBOX_ENV.scmToken] = token;
+        for (const alias of CLI_TOKEN_ALIASES[provider] ?? []) secrets[alias] = token;
+        env[SANDBOX_ENV.scmTokenUsername] = GIT_USERNAMES[provider] ?? "x-access-token";
+      } catch (error) {
+        log.warn("no forge credential for repository environment test", {
+          provider,
+          repo: repoFullName,
+          error,
+        });
+      }
+      return { secrets, env };
+    },
+
     async mintForRun({
       userId,
       provider,
@@ -83,21 +116,9 @@ export function createCredentialBroker(
 
       // Public repositories remain usable when no identity is connected. A
       // credential failure is reported by the agent only if the run needs it.
-      try {
-        const vcs = await getVcsProvider(database, config, provider, userId);
-        const token = await vcs.mintRepoToken(repoFullName);
-        secrets[SANDBOX_ENV.scmToken] = token;
-        for (const alias of CLI_TOKEN_ALIASES[provider] ?? []) {
-          secrets[alias] = token;
-        }
-        env[SANDBOX_ENV.scmTokenUsername] = GIT_USERNAMES[provider] ?? "x-access-token";
-      } catch (error) {
-        log.warn("no forge credential for this run; continuing unauthenticated", {
-          provider,
-          repo: repoFullName,
-          error,
-        });
-      }
+      const repository = await this.mintForRepository({ userId, provider, repoFullName });
+      Object.assign(secrets, repository.secrets);
+      Object.assign(env, repository.env);
 
       env[SANDBOX_ENV.modelAuthType] = model.authType;
       return { secrets, env, model };

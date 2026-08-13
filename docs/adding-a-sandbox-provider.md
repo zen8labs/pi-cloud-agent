@@ -6,6 +6,7 @@ A sandbox provider answers two questions: *where does this turn's compute come f
 export interface SandboxProvider {
   readonly name: string;
   create(spec: SandboxSpec): Promise<SandboxRef>;
+  execute?(spec: SandboxSpec): Promise<SandboxExecutionResult>;
   resume(ref: WorkspaceRef, spec: SandboxSpec): Promise<SandboxRef>;
   suspend(ref: SandboxRef): Promise<WorkspaceRef>;
   deleteWorkspace(ref: WorkspaceRef): Promise<void>;
@@ -13,7 +14,7 @@ export interface SandboxProvider {
 }
 ```
 
-`create`/`stop` are the standalone lifecycle. `suspend`/`resume`/`deleteWorkspace` are the durable-session lifecycle. A backend may implement the latter with a filesystem-only pause, snapshot, archive, or detached volume. The opaque `WorkspaceRef` is the only provider-specific state stored by the controller.
+`create`/`stop` are the standalone lifecycle. `suspend`/`resume`/`deleteWorkspace` are the durable-session lifecycle. A backend may implement the latter with a filesystem-only pause, snapshot, archive, or detached volume. The optional `execute` method powers the Settings setup preflight and must run a disposable foreground command, return its output, and reclaim the machine before returning. The opaque `WorkspaceRef` is the only provider-specific state stored by the controller.
 
 ## 1. Write it
 

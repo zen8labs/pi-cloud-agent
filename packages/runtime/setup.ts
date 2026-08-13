@@ -16,7 +16,7 @@ export async function runSetupScript(config: RuntimeConfig, reporter: Reporter):
   reporter.log("setup.started", { script: "app environment setting" });
   const result = await run(
     "bash",
-    ["-e", "-u", "-o", "pipefail", "-c", config.appSetupScript],
+    ["--noprofile", "--norc", "-e", "-u", "-o", "pipefail", "-c", config.appSetupScript],
     {
       cwd: config.repo.path,
       env: setupEnvironment(),
@@ -60,6 +60,8 @@ function throwSetupFailure(
 function setupEnvironment(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const name of [
+    "BASH_ENV",
+    "ENV",
     SANDBOX_ENV.callbackToken,
     SANDBOX_ENV.modelApiKey,
     SANDBOX_ENV.modelAuthJson,

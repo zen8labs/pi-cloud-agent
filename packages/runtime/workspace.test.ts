@@ -91,7 +91,7 @@ describe("repository setup", () => {
 
     expect(spawn).toHaveBeenCalledWith(
       "bash",
-      ["-e", "-u", "-o", "pipefail", "-c", "pnpm install"],
+      ["--noprofile", "--norc", "-e", "-u", "-o", "pipefail", "-c", "pnpm install"],
       expect.objectContaining({ cwd: config.repo.path }),
     );
     expect(reporter.log).toHaveBeenCalledWith("setup.started", {
@@ -110,6 +110,8 @@ describe("repository setup", () => {
   });
 
   it("runs setup without model or callback credentials", async () => {
+    vi.stubEnv("BASH_ENV", "/etc/bash.bashrc");
+    vi.stubEnv("ENV", "/etc/profile");
     vi.stubEnv(SANDBOX_ENV.callbackToken, "callback-secret");
     vi.stubEnv(SANDBOX_ENV.modelApiKey, "model-secret");
     vi.stubEnv(SANDBOX_ENV.modelAuthJson, "model-oauth-secret");
@@ -127,6 +129,8 @@ describe("repository setup", () => {
     expect(options?.env).not.toHaveProperty(SANDBOX_ENV.modelApiKey);
     expect(options?.env).not.toHaveProperty(SANDBOX_ENV.modelAuthJson);
     expect(options?.env).not.toHaveProperty(SANDBOX_ENV.mcpConfig);
+    expect(options?.env).not.toHaveProperty("BASH_ENV");
+    expect(options?.env).not.toHaveProperty("ENV");
     expect(options?.env).toHaveProperty(SANDBOX_ENV.scmToken, "forge-secret");
     expect(reporter.log).toHaveBeenCalledWith("setup.started", {
       script: "app environment setting",

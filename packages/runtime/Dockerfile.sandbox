@@ -8,7 +8,10 @@ FROM node:22-bookworm-slim
 
 ENV NODE_ENV=production \
     DEBIAN_FRONTEND=noninteractive \
-    HOME=/home/node
+    HOME=/home/node \
+    VIRTUAL_ENV=/home/node/.venv
+
+ENV PATH=/home/node/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -36,6 +39,8 @@ RUN apt-get update \
         zip \
     && pip3 install --break-system-packages --no-cache-dir uv==0.11.20 \
     && npm install --global --no-audit --no-fund pnpm@11.1.3 \
+    && python3 -m venv /home/node/.venv \
+    && chown -R node:node /home/node \
     && git lfs install --system \
     && rm -rf /var/lib/apt/lists/*
 
@@ -58,7 +63,8 @@ COPY dist/package.json /app/package.json
 COPY dist/patch-pi-ai-exports.mjs /app/patch-pi-ai-exports.mjs
 RUN npm install --omit=dev --no-audit --no-fund \
     && node /app/patch-pi-ai-exports.mjs \
-    && rm /app/patch-pi-ai-exports.mjs
+    && rm /app/patch-pi-ai-exports.mjs \
+    && chown -R node:node /home/node
 
 COPY dist/run.js /app/run.js
 

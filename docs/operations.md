@@ -65,9 +65,11 @@ docker run --rm --entrypoint bash pi-cloud-agent:local -lc \
 
 ## Repository setup
 
-Configure setup commands per connected repository in Settings > Environments. The current app-managed script is resolved when a run is provisioned and runs after checkout, before the model starts. Leaving it empty skips custom setup and uses only the bundled image. The script runs as the unprivileged sandbox user, with a five-minute limit, and a non-zero exit or timeout fails the run with a `repository setup` error. Resumed session workspaces skip setup because their filesystem is retained. Keep the script non-interactive, idempotent, and free of embedded credentials. Forge credentials remain available for private Git dependencies, but the sandbox boundary currently allows repository code to read those credentials; see [secrets.md](secrets.md).
+Configure setup commands per connected repository in Settings > Environments. Use **Test setup** to run the unsaved script in a disposable fresh sandbox before saving it. The current app-managed script is resolved when a run is provisioned and runs after checkout, before the model starts. Leaving it empty skips custom setup and uses only the bundled image. The script runs as the unprivileged sandbox user, with a five-minute limit, and a non-zero exit or timeout fails the run with a `repository setup` error. Resumed session workspaces skip setup because their filesystem is retained. Keep the script non-interactive, idempotent, and free of embedded credentials. Forge credentials remain available for private Git dependencies, but the sandbox boundary currently allows repository code to read those credentials; see [secrets.md](secrets.md).
 
 Model credentials, the run callback token, and plugin configuration are withheld from the setup process. Forge credentials remain available so private submodules and Git dependencies can be installed; they are still subject to the sandbox token-exposure limitation in [secrets.md](secrets.md).
+
+The default image includes Node/npm/pnpm and Python/pip/venv/uv. Python's `VIRTUAL_ENV` is `/home/node/.venv`, so use `python -m pip install ...` rather than `pip install --user` or `--break-system-packages`. Go, Rust, Java, browser runtimes, and cloud CLIs require a future image profile or custom image.
 
 ## Watching a run
 

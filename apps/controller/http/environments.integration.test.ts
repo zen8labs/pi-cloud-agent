@@ -1,17 +1,49 @@
-import type { RepositoryEnvironmentsResponse } from "@pi-cloud-agent/protocol";
+import type {
+  RepositoryEnvironmentsResponse,
+  SandboxProvider,
+  SandboxSpec,
+} from "@pi-cloud-agent/protocol";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Database } from "../db/client";
 import { getRepositoryEnvironment, saveRepositoryEnvironment } from "../db/environments";
-import { bindTestApp, seedTestUser, testConfig } from "../test-support";
+import { createCredentialBroker } from "../secrets/broker";
+import { bindTestDatabase, seedTestUser, silentLogger, testConfig } from "../test-support";
 import type { createApp } from "./app";
+import { createApp as buildApp } from "./app";
 
 let database: Database;
 let app: ReturnType<typeof createApp>;
 const auth = { cookie: "", userId: "" };
 
-bindTestApp((deps) => {
-  database = deps.database;
-  app = deps.app;
+let executedSpec: SandboxSpec | null = null;
+const sandbox: SandboxProvider = {
+  name: "fake",
+  async execute(spec) {
+    executedSpec = spec;
+    return { code: 0, stdout: "node v22.23.2\nPython 3.11.2", stderr: "" };
+  },
+  async create() {
+    return { provider: "fake", id: "unused" };
+  },
+  async resume(ref) {
+    return ref;
+  },
+  async suspend(ref) {
+    return ref;
+  },
+  async deleteWorkspace() {},
+  async stop() {},
+};
+
+bindTestDatabase((value) => {
+  database = value;
+  app = buildApp({
+    config: testConfig(),
+    database,
+    log: silentLogger(),
+    broker: createCredentialBroker(testConfig(), database, silentLogger()),
+    sandbox,
+  });
 });
 
 beforeEach(async () => Object.assign(auth, await seedTestUser(database, testConfig())));
@@ -24,6 +56,10 @@ function requestHeaders() {
 }
 
 describe("repository environments", () => {
+  beforeEach(() => {
+    executedSpec = null;
+  });
+
   it("saves and lists a per-repository setup script", async () => {
     const response = await app.request("/environments", {
       method: "PUT",
@@ -64,5 +100,25 @@ describe("repository environments", () => {
     await expect(
       getRepositoryEnvironment(database, auth.userId, "github", "acme/widgets"),
     ).resolves.toBeNull();
+  });
+
+  it("tests an unsaved setup script in a disposable sandbox", async () => {
+    const response = await app.request("/environments/test", {
+      method: "POST",
+      headers: requestHeaders(),
+      body: JSON.stringify({
+        provider: "github",
+        repo: "acme/widgets",
+        setupScript: "python -V\nnode --version",
+      }),
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      output: "node v22.23.2\nPython 3.11.2",
+    });
+    expect(executedSpec?.env.REPO_CLONE_URL).toBe("https://github.com/acme/widgets.git");
+    expect(executedSpec?.command).toContain("git clone --depth 1");
+    expect(executedSpec?.command).toContain("bash --noprofile --norc -e -u -o pipefail");
   });
 });

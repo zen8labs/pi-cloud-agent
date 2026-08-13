@@ -78,6 +78,9 @@ function fakeProvider(
 }
 
 const broker: CredentialBroker = {
+  async mintForRepository() {
+    return { secrets: {}, env: {} };
+  },
   async mintForRun() {
     return {
       model: {

@@ -38,17 +38,29 @@ It reaches exactly one thing: `CONTROL_PLANE_URL`, outbound only.
 
 The default image is a practical JavaScript/Python coding environment. It includes Node, npm, pnpm, Python, pip, venv, uv, `git`, `gh`, `git-lfs`, `jq`, `ripgrep`, archive utilities, and a native compiler toolchain. Heavier ecosystems such as Go, Rust, Java, browser binaries, and cloud CLIs belong in operator-selected custom images rather than every run.
 
-The normal path is Settings > Environments: choose a connected repository and enter its setup commands once. The current setting is resolved when a run is provisioned, then runs with `bash -e -u -o pipefail` as the unprivileged `node` user and is bounded to five minutes. Keep it non-interactive, idempotent, and version-pinned; for example:
+The normal path is Settings > Environments: choose a connected repository, enter its setup commands, and use **Test setup** before saving. The test clones a fresh checkout into a disposable sandbox and runs the unsaved script with the same image and credential boundary as a real run. The current setting is resolved when a run is provisioned, then runs with `bash --noprofile --norc -e -u -o pipefail` as the unprivileged `node` user and is bounded to five minutes. Keep it non-interactive, idempotent, and version-pinned; for example:
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 
 pnpm install --frozen-lockfile
+# or: python -m pip install -r requirements.txt
 # or: uv sync --frozen
 ```
 
-An empty setting uses only the bundled image tools. A resumed session keeps its filesystem and does not reinstall dependencies. Install project dependencies into the checkout or the unprivileged `node` user's home; runtime setup has no `sudo` access.
+For a Node/TypeScript smoke test, use the bundled Node runtime and install the
+compiler into the checkout rather than globally:
+
+```bash
+npm install --no-save --no-audit --no-fund typescript@5.8.3
+node -e 'console.log(`node ${process.version}`)'
+./node_modules/.bin/tsc --version
+```
+
+The image provides Node/npm/pnpm plus Python/pip/venv/uv. Python commands use a writable default virtual environment at `/home/node/.venv`, already first on `PATH`, so `python -m pip install ...` does not modify Debian's system interpreter. An empty setting uses only the bundled image tools. A resumed session keeps its filesystem and does not reinstall dependencies. Install project dependencies into the checkout or the unprivileged `node` user's home; runtime setup has no `sudo` access.
+
+Go, Rust, Java, browser runtimes, and cloud CLIs are not in the default image. A setup script can install dependencies for a runtime that is already present, but it cannot reliably bootstrap a missing language toolchain as the unprivileged user. Add image profiles or operator-selected custom images before supporting those ecosystems broadly.
 
 ## Working on it
 

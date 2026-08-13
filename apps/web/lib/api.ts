@@ -155,6 +155,16 @@ export const api = {
       { method: "PUT", body: JSON.stringify(body) },
     ),
 
+  testRepositoryEnvironment: (body: {
+    provider: string;
+    repo: string;
+    setupScript: string;
+  }): Promise<{ ok: boolean; code: number; output: string }> =>
+    request<{ ok: boolean; code: number; output: string }>("/environments/test", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
   listConnections: (): Promise<VcsConnectionSummary[]> =>
     request<VcsConnectionsResponse>("/vcs/connections").then((r) => r.connections),
 
