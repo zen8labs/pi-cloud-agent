@@ -1,6 +1,6 @@
 # pi-cloud-agent
 
-[![CI](https://github.com/zen8labs/pi-cloud-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/zen8labs/pi-cloud-agent/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Node](https://img.shields.io/badge/node-%3E%3D22.19-3c873a.svg)](package.json) [![Wiki](https://img.shields.io/badge/wiki-DeepWiki-blue.svg)](https://deepwiki.com/zen8labs/pi-cloud-agent)
+[![CI](https://github.com/zen8labs/pi-cloud-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/zen8labs/pi-cloud-agent/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![Node](https://img.shields.io/badge/node-%3E%3D22.19-3c873a.svg)](package.json) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/zen8labs/pi-cloud-agent)
 
 **Background agents, without the backend.**
 
