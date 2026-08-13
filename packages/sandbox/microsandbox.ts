@@ -17,8 +17,9 @@ import { z } from "zod";
 
 const envSchema = z.object({
   MICROSANDBOX_IMAGE: z.string().default("pi-cloud-agent:local"),
-  MICROSANDBOX_CPUS: z.coerce.number().int().positive().default(4),
+  MICROSANDBOX_CPUS: z.coerce.number().int().positive().default(2),
   MICROSANDBOX_MEMORY_MB: z.coerce.number().int().positive().default(4096),
+  MICROSANDBOX_ROOT_DISK_MIB: z.coerce.number().int().positive().default(8192),
   MICROSANDBOX_ALLOW_HOST: z
     .enum(["true", "false"])
     .default("true")
@@ -40,6 +41,7 @@ export function createMicroSandboxProvider(
     MICROSANDBOX_IMAGE: defaultImage,
     MICROSANDBOX_CPUS: cpus,
     MICROSANDBOX_MEMORY_MB: memoryMb,
+    MICROSANDBOX_ROOT_DISK_MIB: rootDiskMib,
     MICROSANDBOX_ALLOW_HOST: allowHost,
   } = envSchema.parse(env);
 
@@ -54,6 +56,7 @@ export function createMicroSandboxProvider(
       try {
         sandbox = await Sandbox.builder(id)
           .image(image)
+          .rootDisk(rootDiskMib)
           .entrypoint(["sleep", "infinity"])
           .cpus(cpus)
           .memory(memoryMb)
