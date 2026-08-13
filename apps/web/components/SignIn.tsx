@@ -1,4 +1,4 @@
-import { AsteriskIcon } from "lucide-react";
+import Image from "next/image";
 import { IsoMachine } from "@/components/IsoMachine";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -7,11 +7,16 @@ export function SignIn() {
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
       <section className="flex flex-col p-8 sm:p-12 lg:p-16">
-        <header className="sign-in-rise flex items-center gap-2.5">
-          <AsteriskIcon className="size-5" style={{ color: "var(--brand)" }} />
-          <span className="font-mono text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-            ZEN8LABS AGENT
-          </span>
+        <header className="sign-in-rise flex items-center gap-3">
+          <Image
+            src="/assets/z8l-logo.png"
+            alt=""
+            width={40}
+            height={40}
+            className="rounded-md"
+            priority
+          />
+          <span className="text-2xl font-semibold tracking-[-0.02em]">zen8agent</span>
         </header>
 
         <div

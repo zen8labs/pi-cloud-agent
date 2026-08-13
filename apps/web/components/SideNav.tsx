@@ -144,11 +144,11 @@ function sessionLabel(session: SessionSummary): string {
 
 function Brand() {
   return (
-    <Link href="/chat" className="flex items-center gap-2 px-0.5" aria-label="Cloud Agent home">
+    <Link href="/chat" className="flex items-center gap-2 px-0.5" aria-label="zen8agent home">
       <span className="flex size-[26px] items-center justify-center rounded-lg border border-border bg-white">
         <Image src="/assets/z8l-logo.png" alt="" width={16} height={16} priority />
       </span>
-      <span className="text-[13px] font-semibold tracking-[-0.01em]">Cloud Agent</span>
+      <span className="text-[13px] font-semibold tracking-[-0.01em]">zen8agent</span>
     </Link>
   );
 }
