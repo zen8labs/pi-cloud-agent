@@ -20,6 +20,8 @@ import {
 } from "../db/runs";
 import type { RunRow } from "../db/schema";
 import { clearSessionWorkspace, getSessionForRun } from "../db/sessions";
+import type { IntegrationRegistry } from "../integrations";
+import { reportRunLifecycle } from "../integrations";
 import type { Logger } from "../logger";
 import { buildTaskPrompt, resolvePluginsForRun } from "../plugins/catalog";
 import type { CredentialBroker } from "../secrets/broker";
@@ -42,6 +44,7 @@ export interface ProvisionDeps {
   broker: CredentialBroker;
   sandbox: SandboxProvider;
   log: Logger;
+  integrations: IntegrationRegistry;
 }
 
 /** How many times a retryable provisioning failure is worth another attempt. */
@@ -122,6 +125,7 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
     }
 
     await markRunning(database, run.id);
+    await reportRunLifecycle(deps.integrations, log, run, "running");
     log.info("sandbox running", {
       sandboxId: ref.id,
       wallClockSeconds,
@@ -181,6 +185,7 @@ async function handleFailure(
 
   log.error("provisioning failed", { attempt: run.attempt, error });
   await completeRun(deps.database, run.id, "failed", message);
+  await reportRunLifecycle(deps.integrations, log, run, "failed", message);
 }
 
 function buildTask(run: RunRow): TaskSpec {

@@ -20,6 +20,8 @@ import {
   getSession,
   parkSession,
 } from "../db/sessions";
+import type { IntegrationRegistry } from "../integrations";
+import { reportRunLifecycle } from "../integrations";
 import type { Logger } from "../logger";
 import type { CredentialBroker } from "../secrets/broker";
 import { type ProvisionDeps, provisionRun } from "./provision";
@@ -59,6 +61,7 @@ export interface ReconcilerOptions {
   maxConcurrentProvisions?: number;
   /** Fallback poll interval. NOTIFY makes the common case immediate. */
   pollIntervalMs?: number;
+  integrations: IntegrationRegistry;
 }
 
 export interface Reconciler {
@@ -90,10 +93,18 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
     maxConcurrentProvisions = 4,
     pollIntervalMs = 2000,
     createProvider = (name: string) => createSandboxProvider(name, config.env),
+    integrations,
   } = options;
 
   const sandbox = createProvider(config.sandbox.provider);
-  const provisionDeps: ProvisionDeps = { config, database, broker, sandbox, log };
+  const provisionDeps: ProvisionDeps = {
+    config,
+    database,
+    broker,
+    sandbox,
+    log,
+    integrations,
+  };
 
   let running = false;
   let timer: NodeJS.Timeout | null = null;
@@ -198,6 +209,7 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
       if (!run) return;
       claimed.add(run.id);
       available -= 1;
+      await reportRunLifecycle(integrations, log, run, "provisioning");
       // Detached on purpose: provisioning talks to a sandbox API and must not
       // hold up timeouts or teardown for other runs. `drain` waits for these.
       const pending = provisionRun(run, provisionDeps)
@@ -217,7 +229,10 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
   ): Promise<void> {
     for (const run of runs) {
       const changed = await completeRun(database, run.id, "failed", message);
-      if (changed) log.warn("run failed by the reconciler", { runId: run.id, reason });
+      if (changed) {
+        log.warn("run failed by the reconciler", { runId: run.id, reason });
+        await reportRunLifecycle(integrations, log, run, "failed", message);
+      }
       await park(run, reason);
     }
   }

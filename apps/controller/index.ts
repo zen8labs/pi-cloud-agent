@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import { getConfig } from "./config";
 import { db } from "./db/client";
 import { createApp } from "./http/app";
+import { createWebhookRegistry } from "./integrations";
 import { createLogger } from "./logger";
 import { createReconciler } from "./reconcile/loop";
 import { createCredentialBroker } from "./secrets/broker";
@@ -19,7 +20,8 @@ const config = getConfig();
 const log = createLogger("controller", { level: config.logLevel });
 const database = db();
 
-const app = createApp({ config, database, log });
+const integrations = createWebhookRegistry(config);
+const app = createApp({ config, database, log, integrations });
 const reconciler = createReconciler({
   config,
   database,
@@ -29,6 +31,7 @@ const reconciler = createReconciler({
     createLogger("secrets", { level: config.logLevel }),
   ),
   log: createLogger("reconciler", { level: config.logLevel }),
+  integrations,
 });
 
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {

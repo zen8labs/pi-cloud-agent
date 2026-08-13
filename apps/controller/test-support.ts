@@ -9,6 +9,7 @@ import { createRun } from "./db/runs";
 import type { RunRow, SessionRow } from "./db/schema";
 import { createSessionWithRun } from "./db/sessions";
 import { createApp } from "./http/app";
+import { createWebhookRegistry } from "./integrations";
 import { saveApiKeyConnection } from "./llm/connections";
 import { createLogger, type Logger } from "./logger";
 
@@ -55,7 +56,7 @@ export function bindTestApp(
   bindTestDatabase((database) => {
     assign({
       database,
-      app: createApp({ config: testConfig(), database, log: silentLogger() }),
+      app: createApp(testAppDeps(database)),
     });
   });
 }
@@ -128,6 +129,20 @@ export function withTestModel(body: unknown, modelConnectionId: string): unknown
  */
 export function silentLogger(): Logger {
   return createLogger("test", { level: "silent" });
+}
+
+/** Config + silent log + webhook registry for `createApp` in tests. */
+export function testAppDeps(
+  database: Database,
+  env: Record<string, string> = {},
+): Parameters<typeof createApp>[0] {
+  const config = testConfig(env);
+  return {
+    config,
+    database,
+    log: silentLogger(),
+    integrations: createWebhookRegistry(config),
+  };
 }
 
 export function manualTrigger(overrides: Partial<Trigger["repo"]> = {}): Trigger {

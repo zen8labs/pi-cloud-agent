@@ -12,6 +12,7 @@ import { pluginRoutes } from "./plugins";
 import { runRoutes } from "./runs";
 import { sessionRoutes } from "./sessions";
 import { vcsRoutes } from "./vcs";
+import { webhookRoutes } from "./webhook";
 
 const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
@@ -33,6 +34,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     c.set("config", deps.config);
     c.set("database", deps.database);
     c.set("log", deps.log);
+    c.set("integrations", deps.integrations);
     c.set(
       "user",
       await getAppUserForSession(
@@ -55,7 +57,8 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     const publicPath =
       c.req.path === "/healthz" ||
       c.req.path.startsWith("/auth/") ||
-      c.req.path.startsWith("/internal/");
+      c.req.path.startsWith("/internal/") ||
+      c.req.path.startsWith("/integrations/");
     if (deps.config.auth.requireUser && !c.get("user") && !publicPath) {
       return c.json({ error: "authentication required" }, 401);
     }
@@ -90,6 +93,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   app.route("/sessions", sessionRoutes());
   app.route("/plugins", pluginRoutes());
   app.route("/internal", internalRoutes());
+  app.route("/integrations/webhook", webhookRoutes());
   app.route("/llm", llmRoutes(new OAuthFlowManager(deps.database, deps.config)));
   app.route("/vcs", vcsRoutes());
   app.route("/", metaRoutes());

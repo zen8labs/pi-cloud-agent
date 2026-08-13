@@ -10,6 +10,7 @@ import type { Database } from "../db/client";
 import { appendEvent, completeRun, getRunByCallbackToken } from "../db/runs";
 import type { RunRow } from "../db/schema";
 import { getSessionForRun, saveSessionCheckpoint } from "../db/sessions";
+import { reportRunLifecycle } from "../integrations";
 import type { AppEnv } from "./deps";
 
 /**
@@ -55,28 +56,7 @@ export function internalRoutes(): Hono<AppEnv> {
     const parsed = runStatusReportSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "unrecognized status" }, 422);
 
-    let { status, detail } = parsed.data;
-    const database = c.get("database");
-
-    const session = await getSessionForRun(database, run);
-    if (status === "done" && session && !session.agentCheckpoint) {
-      status = "error";
-      detail = "the turn completed without a durable Pi session checkpoint";
-    }
-
-    // Recorded as an event first, so the reason survives even if the transition
-    // below loses a race with the reconciler.
-    await appendEvent(database, run.id, "status", { status, detail: detail ?? null });
-
-    // The agent's own completion is authoritative. Telemetry never implies it.
-    const applied = await completeRun(
-      database,
-      run.id,
-      status === "done" ? "succeeded" : "failed",
-      status === "done" ? null : (detail ?? "the agent reported an error"),
-    );
-
-    c.get("log").info("terminal status from sandbox", { runId: run.id, status, applied });
+    await applySandboxStatus(c, run, parsed.data.status, parsed.data.detail);
     return c.json({ ok: true });
   });
 
@@ -107,6 +87,34 @@ export function internalRoutes(): Hono<AppEnv> {
 async function requireRun(c: Context<AppEnv>, runId: string): Promise<RunRow | Response> {
   const run = await authenticate(c.get("database"), runId, c.req.header("authorization"));
   return run ?? c.json({ error: "invalid run token" }, 403);
+}
+
+async function applySandboxStatus(
+  c: Context<AppEnv>,
+  run: RunRow,
+  reported: "done" | "error",
+  reportedDetail: string | null | undefined,
+): Promise<void> {
+  let status = reported;
+  let detail = reportedDetail;
+  const database = c.get("database");
+  const session = await getSessionForRun(database, run);
+  if (status === "done" && session && !session.agentCheckpoint) {
+    status = "error";
+    detail = "the turn completed without a durable Pi session checkpoint";
+  }
+
+  // Recorded as an event first, so the reason survives even if the transition
+  // below loses a race with the reconciler.
+  await appendEvent(database, run.id, "status", { status, detail: detail ?? null });
+
+  const outcome = status === "done" ? "succeeded" : "failed";
+  const error = status === "done" ? null : (detail ?? "the agent reported an error");
+  const applied = await completeRun(database, run.id, outcome, error);
+  if (applied) {
+    await reportRunLifecycle(c.get("integrations"), c.get("log"), run, outcome, error);
+  }
+  c.get("log").info("terminal status from sandbox", { runId: run.id, status, applied });
 }
 
 async function authenticate(

@@ -11,6 +11,7 @@ import type { Database } from "../db/client";
 import { appendEvent, attachSandbox, claimNextRun, completeRun, getRun } from "../db/runs";
 import { runs } from "../db/schema";
 import { createSessionTurn, getSession } from "../db/sessions";
+import { createWebhookRegistry } from "../integrations";
 import type { CredentialBroker } from "../secrets/broker";
 import {
   bindTestDatabase,
@@ -109,6 +110,7 @@ function reconciler(
     broker,
     log: silentLogger(),
     createProvider: () => provider,
+    integrations: createWebhookRegistry(testConfig()),
     ...options,
   });
 }
@@ -429,6 +431,7 @@ describe("concurrency", () => {
       log: silentLogger(),
       createProvider: () => provider,
       maxConcurrentProvisions: 2,
+      integrations: createWebhookRegistry(testConfig()),
     });
 
     await tick(loop);

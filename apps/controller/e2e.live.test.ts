@@ -12,6 +12,7 @@ import {
   createSessionWithRun,
   getSession,
 } from "./db/sessions";
+import { createWebhookRegistry } from "./integrations";
 import { createLogger } from "./logger";
 import { createReconciler, type Reconciler } from "./reconcile/loop";
 import { createCredentialBroker } from "./secrets/broker";
@@ -161,6 +162,7 @@ function newReconciler(): Reconciler {
     database,
     broker: createCredentialBroker(config, database, log),
     log,
+    integrations: createWebhookRegistry(config),
   });
 }
 

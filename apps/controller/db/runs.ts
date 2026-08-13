@@ -51,6 +51,7 @@ export interface CreateRunInput {
   thinkingLevel?: ThinkingLevel;
   modelConnectionId?: string | null;
   callbackToken: string;
+  surfaceRef?: { kind: string; payload: Record<string, unknown> } | null;
 }
 
 export async function createRun(database: Database, input: CreateRunInput): Promise<RunRow> {

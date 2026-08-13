@@ -19,6 +19,7 @@ import {
   seedRun,
   seedTestUser,
   silentLogger,
+  testAppDeps,
   testConfig,
   withTestModel,
 } from "../test-support";
@@ -306,11 +307,7 @@ describe("dashboard support", () => {
 
 describe("model connections", () => {
   it("stores credentials per user and snapshots the selected connection on a run", async () => {
-    const secureApp = createApp({
-      config: testConfig({ APP_AUTH_REQUIRED: "true" }),
-      database,
-      log: silentLogger(),
-    });
+    const secureApp = createApp(testAppDeps(database, { APP_AUTH_REQUIRED: "true" }));
     const user = await upsertAppUser(database, {
       githubUserId: "model-user",
       login: "model-user",
@@ -385,11 +382,7 @@ describe("model connections", () => {
   });
 
   it("lets a resumed session explicitly switch away from a deleted connection", async () => {
-    const secureApp = createApp({
-      config: testConfig({ APP_AUTH_REQUIRED: "true" }),
-      database,
-      log: silentLogger(),
-    });
+    const secureApp = createApp(testAppDeps(database, { APP_AUTH_REQUIRED: "true" }));
     const user = await upsertAppUser(database, {
       githubUserId: "session-model-user",
       login: "session-model-user",

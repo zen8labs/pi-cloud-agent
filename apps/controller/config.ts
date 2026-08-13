@@ -74,6 +74,11 @@ const schema = z.object({
   PLUGIN_OAUTH_REDIRECT_URI: z.string().default(""),
   /** Comma-separated authorization-server hostnames allowed for plugin OAuth. */
   PLUGIN_OAUTH_ISSUER_ALLOWLIST: z.string().default("auth.exa.ai"),
+
+  /** Empty disables POST /integrations/webhook. */
+  WEBHOOK_BEARER_TOKEN: z.string().default(""),
+  /** app_users.id whose VCS + LLM connections the webhook uses. Empty = unset. */
+  WEBHOOK_USER_ID: z.union([z.literal(""), z.string().uuid()]).default(""),
 });
 
 export type Env = Readonly<Record<string, string | undefined>>;
@@ -106,6 +111,10 @@ export interface Config {
     mcpCommandAllowlist: string[];
     oauthRedirectUri: string;
     oauthIssuerAllowlist: string[];
+  };
+  webhook: {
+    bearerToken: string | null;
+    userId: string | null;
   };
   /** Handed to provider factories so they can read their own variables. */
   env: Env;
@@ -177,6 +186,10 @@ function build(env: Env): Config {
       oauthIssuerAllowlist: value.PLUGIN_OAUTH_ISSUER_ALLOWLIST.split(",")
         .map((host) => host.trim().toLowerCase())
         .filter((host) => host.length > 0),
+    },
+    webhook: {
+      bearerToken: value.WEBHOOK_BEARER_TOKEN.trim() || null,
+      userId: value.WEBHOOK_USER_ID.trim() || null,
     },
     env,
   };

@@ -35,9 +35,7 @@ type FetchLike = (
 /**
  * Authenticated JSON ingress for CI/cron/internal tools.
  *
- * TODO(wire): HTTP route should resolve `repo` via VCS (like `http/manual.ts`)
- * before `createRun` — `provisionalRepoRef` is only enough for the scaffold.
- * TODO(config): load the bearer secret from `config.ts` (only place that reads env).
+ * The HTTP route resolves `repo` via VCS and loads the bearer token from config.
  */
 export class RestWebhookIngressAdapter implements IngressAdapter {
   readonly kind = REST_WEBHOOK_SURFACE_KIND;

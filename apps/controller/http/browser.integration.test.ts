@@ -12,7 +12,7 @@ import {
   resetTables,
   seedSession,
   setupTestDatabase,
-  silentLogger,
+  testAppDeps,
   testConfig,
 } from "../test-support";
 import { createApp } from "./app";
@@ -22,7 +22,7 @@ let app: ReturnType<typeof createApp>;
 
 beforeAll(() => {
   database = setupTestDatabase();
-  app = createApp({ config: testConfig(), database, log: silentLogger() });
+  app = createApp(testAppDeps(database));
 });
 beforeEach(async () => resetTables(database));
 afterAll(async () => closeDatabase(database));
@@ -43,11 +43,7 @@ describe("browser boundary", () => {
   });
 
   it("requires a session and scopes runs to the signed-in user", async () => {
-    const secureApp = createApp({
-      config: testConfig({ APP_AUTH_REQUIRED: "true" }),
-      database,
-      log: silentLogger(),
-    });
+    const secureApp = createApp(testAppDeps(database, { APP_AUTH_REQUIRED: "true" }));
     const first = await upsertAppUser(database, {
       githubUserId: "github-1",
       login: "first",
@@ -155,11 +151,7 @@ describe("browser boundary", () => {
   });
 
   it("returns a validation error when a selected model is stale or foreign", async () => {
-    const secureApp = createApp({
-      config: testConfig({ APP_AUTH_REQUIRED: "true" }),
-      database,
-      log: silentLogger(),
-    });
+    const secureApp = createApp(testAppDeps(database, { APP_AUTH_REQUIRED: "true" }));
     const user = await upsertAppUser(database, {
       githubUserId: "stale-model-user",
       login: "stale-model-user",

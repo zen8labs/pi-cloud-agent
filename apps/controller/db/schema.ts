@@ -169,6 +169,15 @@ export const runs = pgTable(
     /** The normalized request/event, verbatim, for replay and diagnosis. */
     trigger: jsonb("trigger").notNull().$type<Trigger>(),
 
+    /**
+     * Return address for an ingress-started run (ZEN-93). Null for dashboard runs.
+     * Shape is the controller-local SurfaceRef envelope until protocol consult.
+     */
+    surfaceRef: jsonb("surface_ref").$type<{
+      kind: string;
+      payload: Record<string, unknown>;
+    } | null>(),
+
     /** Resolved at creation so a run is reproducible even if config changes. */
     model: text("model").notNull(),
     thinkingLevel: text("thinking_level").notNull().default("medium").$type<ThinkingLevel>(),

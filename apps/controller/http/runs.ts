@@ -10,6 +10,7 @@ import { streamSSE } from "hono/streaming";
 import type { Database } from "../db/client";
 import { completeRun, createRun, getRun, listEvents, listRuns } from "../db/runs";
 import type { RunRow } from "../db/schema";
+import { reportRunLifecycle } from "../integrations";
 import { requireAuthenticatedUser, userOwns } from "./auth";
 import type { AppEnv } from "./deps";
 import { readManualRouteRequest } from "./manual";
@@ -99,6 +100,13 @@ export function runRoutes(): Hono<AppEnv> {
     // for crashes and timeouts — cancelling is the same shape, so it reuses the
     // same path instead of duplicating teardown.
     await completeRun(database, runId, "cancelled", "cancelled by an operator");
+    await reportRunLifecycle(
+      c.get("integrations"),
+      c.get("log"),
+      run,
+      "cancelled",
+      "cancelled by an operator",
+    );
     c.get("log").info("run cancelled", { runId });
     return c.json({ status: "cancelled" satisfies RunStatus });
   });
