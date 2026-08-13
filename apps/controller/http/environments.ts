@@ -165,7 +165,7 @@ function repositorySetupTestCommand(): string {
     "unset BASH_ENV ENV NODE_ENV",
     "rm -rf /workspace/repository-environment-test",
     "mkdir -p /workspace/repository-environment-test",
-    String.raw`if [ -n "\${SCM_TOKEN:-}" ]; then`,
+    `if [ -n "\${SCM_TOKEN:-}" ]; then`,
     '  git -c \'credential.helper=!f() { printf "username=%s\\npassword=%s\\n" "$SCM_TOKEN_USERNAME" "$SCM_TOKEN"; }; f\' clone --depth 1 "$REPO_CLONE_URL" /workspace/repository-environment-test',
     "else",
     '  git clone --depth 1 "$REPO_CLONE_URL" /workspace/repository-environment-test',

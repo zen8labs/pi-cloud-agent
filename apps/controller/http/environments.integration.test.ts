@@ -119,6 +119,7 @@ describe("repository environments", () => {
     });
     expect(executedSpec?.env.REPO_CLONE_URL).toBe("https://github.com/acme/widgets.git");
     expect(executedSpec?.command).toContain("git clone --depth 1");
+    expect(executedSpec?.command).toContain(`if [ -n "\${SCM_TOKEN:-}" ]; then`);
     expect(executedSpec?.command).toContain("unset BASH_ENV ENV NODE_ENV");
     expect(executedSpec?.command).toContain("bash --noprofile --norc -e -u -o pipefail");
   });

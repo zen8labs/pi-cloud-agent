@@ -99,19 +99,17 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
         "mcp config",
       );
     }
-    if (!workspaceResumed) {
-      const environment = await getRepositoryEnvironment(
-        database,
-        run.userId,
-        run.provider,
-        run.repoFullName,
+    const environment = await getRepositoryEnvironment(
+      database,
+      run.userId,
+      run.provider,
+      run.repoFullName,
+    );
+    if (environment?.setupScript) {
+      secrets[SANDBOX_ENV.setupScript] = new Secret(
+        environment.setupScript,
+        "app-managed repository setup script",
       );
-      if (environment?.setupScript) {
-        secrets[SANDBOX_ENV.setupScript] = new Secret(
-          environment.setupScript,
-          "app-managed repository setup script",
-        );
-      }
     }
 
     const spec = {

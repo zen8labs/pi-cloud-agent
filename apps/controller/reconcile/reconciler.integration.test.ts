@@ -8,6 +8,7 @@ import {
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import type { Database } from "../db/client";
+import { saveRepositoryEnvironment } from "../db/environments";
 import { appendEvent, attachSandbox, claimNextRun, completeRun, getRun } from "../db/runs";
 import { runs } from "../db/schema";
 import { createSessionTurn, getSession } from "../db/sessions";
@@ -16,6 +17,7 @@ import {
   bindTestDatabase,
   seedRun,
   seedSession,
+  seedTestUser,
   silentLogger,
   testConfig,
 } from "../test-support";
@@ -241,7 +243,14 @@ describe("completion and teardown", () => {
   });
 
   it("cold-starts from the durable checkpoint when a parked workspace disappeared", async () => {
-    const { session, run } = await seedSession(database);
+    const user = await seedTestUser(database, testConfig());
+    const { session, run } = await seedSession(database, user.userId);
+    await saveRepositoryEnvironment(database, {
+      userId: user.userId,
+      provider: "github",
+      repoFullName: "acme/widgets",
+      setupScript: "pnpm install",
+    });
     const healthy = fakeProvider();
     const firstLoop = reconciler(healthy);
     await tick(firstLoop);
@@ -264,6 +273,7 @@ describe("completion and teardown", () => {
 
     expect(missing.created).toHaveLength(1);
     expect(missing.created[0]?.env[SANDBOX_ENV.workspaceResumed]).toBe("false");
+    expect(missing.created[0]?.secrets[SANDBOX_ENV.setupScript]?.expose()).toBe("pnpm install");
     expect((await getRun(database, followUp.id))?.status).toBe("running");
     expect((await getSession(database, session.id))?.sandboxId).toBeNull();
   });
