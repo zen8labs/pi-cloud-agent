@@ -22,6 +22,8 @@ export function SessionFollowUp({
   previousModelConnectionId,
   previousThinkingLevel,
   active,
+  stopping,
+  onStop,
   onQueued,
 }: {
   sessionId: string;
@@ -30,6 +32,8 @@ export function SessionFollowUp({
   previousModelConnectionId: string | null;
   previousThinkingLevel: ThinkingLevel;
   active: boolean;
+  stopping: boolean;
+  onStop: () => void | Promise<void>;
   onQueued: () => Promise<void>;
 }) {
   const [prompt, setPrompt] = useState("");
@@ -41,7 +45,6 @@ export function SessionFollowUp({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (active) return;
     let alive = true;
     setModelsLoading(true);
     api
@@ -68,10 +71,10 @@ export function SessionFollowUp({
     return () => {
       alive = false;
     };
-  }, [active, previousModel, previousModelConnectionId, previousThinkingLevel]);
+  }, [previousModel, previousModelConnectionId, previousThinkingLevel]);
 
   const selected = parseModelSelection(modelSelection);
-  const canSubmit = !active && !submitting && Boolean(prompt.trim()) && Boolean(selected);
+  const canSubmit = !submitting && Boolean(prompt.trim()) && Boolean(selected);
 
   const submit = async () => {
     if (!canSubmit || !selected) return;
@@ -106,11 +109,14 @@ export function SessionFollowUp({
         value={prompt}
         onChange={setPrompt}
         onSubmit={submit}
-        placeholder={active ? "Pi is still working…" : `Follow up on ${repo}…`}
+        placeholder={active ? "Queue a message for Pi…" : `Follow up on ${repo}…`}
         submitLabel="Send"
         submitEnabled={canSubmit}
         submitting={submitting}
-        disabled={active || modelsLoading || modelConnections.length === 0}
+        disabled={modelsLoading || modelConnections.length === 0}
+        active={active}
+        stopping={stopping}
+        onStop={onStop}
         compact
         tools={
           <div className="flex min-w-0 items-center text-muted-foreground">

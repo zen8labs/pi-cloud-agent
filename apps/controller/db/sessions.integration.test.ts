@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { bindTestDatabase, seedSession } from "../test-support";
 import type { Database } from "./client";
-import { completeRun } from "./runs";
+import { claimNextRun, completeRun } from "./runs";
 import {
   createSessionTurn,
   getSession,
   listSessionRuns,
   parkSession,
-  SessionBusyError,
   saveSessionCheckpoint,
   saveSessionDiffBaseSha,
 } from "./sessions";
@@ -18,7 +17,7 @@ bindTestDatabase((value) => {
 });
 
 describe("durable sessions", () => {
-  it("allows only one active turn against a workspace", async () => {
+  it("queues concurrent turns while preserving one active workspace owner", async () => {
     const { session, run } = await seedSession(database);
     await completeRun(database, run.id, "succeeded", null);
     await parkSession(database, run, null, null);
@@ -34,12 +33,32 @@ describe("durable sessions", () => {
       }),
     ]);
 
-    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
-    const rejected = results.find((result) => result.status === "rejected");
-    expect(rejected?.status === "rejected" ? rejected.reason : null).toBeInstanceOf(
-      SessionBusyError,
-    );
-    expect(await listSessionRuns(database, session.id)).toHaveLength(2);
+    expect(results.every((result) => result.status === "fulfilled")).toBe(true);
+    const turns = await listSessionRuns(database, session.id);
+    expect(turns.map((turn) => turn.turnNumber)).toEqual([1, 2, 3]);
+    expect((await getSession(database, session.id))?.activeRunId).toBe(turns[1]?.id);
+  });
+
+  it("promotes the oldest queued turn only after the active workspace is parked", async () => {
+    const { session, run } = await seedSession(database);
+    const second = await createSessionTurn(database, session.id, "Second", "token-2", null, {
+      model: session.model,
+      modelConnectionId: session.modelConnectionId,
+    });
+    const third = await createSessionTurn(database, session.id, "Third", "token-3", null, {
+      model: session.model,
+      modelConnectionId: session.modelConnectionId,
+    });
+
+    expect((await getSession(database, session.id))?.activeRunId).toBe(run.id);
+    const claimed = await claimNextRun(database, 30);
+    expect(claimed?.id).toBe(run.id);
+    expect(claimed?.id).not.toBe(second.id);
+    await completeRun(database, run.id, "succeeded", null);
+    await parkSession(database, run, { provider: "fake", id: "workspace-1" }, new Date());
+
+    expect((await getSession(database, session.id))?.activeRunId).toBe(second.id);
+    expect((await getSession(database, session.id))?.activeRunId).not.toBe(third.id);
   });
 
   it("persists checkpoints only from the active session head", async () => {

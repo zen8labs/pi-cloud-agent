@@ -16,16 +16,16 @@ export function useSession(id: string) {
   const [error, setError] = useState<string | null>(null);
   const historyRef = useRef<Record<string, RunEvent[]>>({});
   const refreshingRef = useRef(false);
-  const latest = useRun(session?.latestRunId ?? "");
+  const active = useRun(session?.activeRunId ?? "");
 
   const refresh = useCallback(async () => {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
     try {
       const detail = await api.getSession(id);
-      const older = detail.runs.filter((run) => run.id !== detail.latestRunId);
+      const inactive = detail.runs.filter((run) => run.id !== detail.activeRunId);
       const entries = await Promise.all(
-        older.map(async (run) => {
+        inactive.map(async (run) => {
           const existing = historyRef.current[run.id] ?? [];
           const afterSeq = existing.at(-1)?.seq ?? 0;
           const incoming = await api.getEvents(run.id, afterSeq);
@@ -53,13 +53,13 @@ export function useSession(id: string) {
   const turns = useMemo<SessionTurn[]>(() => {
     if (!session) return [];
     return session.runs.map((run) =>
-      run.id === session.latestRunId
-        ? { run: latest.run ?? run, events: latest.events }
+      run.id === session.activeRunId
+        ? { run: active.run ?? run, events: active.events }
         : { run, events: history[run.id] ?? [] },
     );
-  }, [history, latest.events, latest.run, session]);
+  }, [active.events, active.run, history, session]);
 
-  return { session, turns, error: error ?? latest.error, refresh };
+  return { session, turns, error: error ?? active.error, refresh };
 }
 
 export function mergeEvents(existing: RunEvent[], incoming: RunEvent[]): RunEvent[] {

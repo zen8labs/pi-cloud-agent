@@ -46,9 +46,16 @@ queued → provisioning → running ── persist Pi checkpoint
                     resume workspace + new run
 ```
 
-Only one run may be active for a session. Creating a turn and claiming the
-session happen in one database transaction. A concurrent follow-up is rejected
-rather than racing two agents against one checkout.
+Only one run may own a session workspace. Follow-ups submitted while that run is
+active are durable ordinary `runs` rows in `queued` state. The reconciler may
+claim only the queued run named by `active_run_id`; later rows remain inert even
+when several controller replicas are claiming work concurrently.
+
+After a turn becomes terminal, parking the workspace and promoting the oldest
+surviving queued turn happen as one transaction. The promoted run then resumes
+the parked filesystem. A queued turn may be cancelled before promotion, and the
+promotion query skips it. This keeps message ordering and workspace exclusion in
+Postgres rather than browser or controller memory.
 
 Every turn explicitly selects a model from the user's current connection
 catalog. The run snapshots that resolved selection, while the session keeps the
@@ -126,6 +133,9 @@ conversation head.
   cold-starts from the durable checkpoint, never as an unexplained new session.
 - Cancellation changes run state only; the reconciler owns suspension or
   destruction exactly as it owns teardown for standalone runs.
+- Cancelling a queued run removes it from promotion without affecting the active
+  turn. Interrupt-and-send cancels the active run; its workspace is parked before
+  the already queued successor becomes eligible to provision.
 
 ## What remains ephemeral
 

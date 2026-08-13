@@ -28,6 +28,7 @@ import {
   type RunRow,
   runEvents,
   runs,
+  sessions,
 } from "./schema";
 
 /**
@@ -79,9 +80,16 @@ export async function claimNextRun(
       .select({ id: runs.id })
       .from(runs)
       .where(
-        excludeIds.length > 0
-          ? and(eq(runs.status, "queued"), notInArray(runs.id, excludeIds))
-          : eq(runs.status, "queued"),
+        and(
+          eq(runs.status, "queued"),
+          // Session turns may be created ahead of time, but only the turn that
+          // owns activeRunId is eligible to provision against the workspace.
+          or(
+            isNull(runs.sessionId),
+            sql`exists (select 1 from ${sessions} where ${sessions.id} = ${runs.sessionId} and ${sessions.activeRunId} = ${runs.id})`,
+          ),
+          ...(excludeIds.length > 0 ? [notInArray(runs.id, excludeIds)] : []),
+        ),
       )
       .orderBy(asc(runs.createdAt))
       .limit(1)
@@ -98,7 +106,7 @@ export async function claimNextRun(
         attempt: sql`${runs.attempt} + 1`,
         updatedAt: new Date(),
       })
-      .where(eq(runs.id, candidate.id))
+      .where(and(eq(runs.id, candidate.id), eq(runs.status, "queued")))
       .returning();
 
     return claimed ?? null;
