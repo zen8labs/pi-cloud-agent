@@ -1,7 +1,9 @@
+import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { bindTestDatabase, seedSession } from "../test-support";
 import type { Database } from "./client";
 import { claimNextRun, completeRun } from "./runs";
+import { sessions } from "./schema";
 import {
   createSessionTurn,
   findSessionRunsToPark,
@@ -16,6 +18,28 @@ let database: Database;
 bindTestDatabase((value) => {
   database = value;
 });
+
+function deferred() {
+  let resolve: () => void = () => undefined;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+async function waitForSessionLockWaiters(count: number): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const rows = await database.$client<{ count: number }[]>`
+      select count(*)::int as count
+      from pg_stat_activity
+      where datname = current_database()
+        and wait_event_type = 'Lock'
+        and query like '%"sessions"%'
+    `;
+    if ((rows[0]?.count ?? 0) >= count) return;
+  }
+  throw new Error(`expected ${count} session lock waiters`);
+}
 
 describe("durable sessions", () => {
   it("queues concurrent turns while preserving one active workspace owner", async () => {
@@ -60,6 +84,45 @@ describe("durable sessions", () => {
 
     expect((await getSession(database, session.id))?.activeRunId).toBe(second.id);
     expect((await getSession(database, session.id))?.activeRunId).not.toBe(third.id);
+  });
+
+  it("cannot orphan a follow-up queued while the active turn is parking", async () => {
+    const { session, run } = await seedSession(database);
+    await completeRun(database, run.id, "succeeded", null);
+    const lockAcquired = deferred();
+    const releaseLock = deferred();
+    const blocker = database.transaction(async (tx) => {
+      await tx
+        .select({ id: sessions.id })
+        .from(sessions)
+        .where(eq(sessions.id, session.id))
+        .for("update");
+      lockAcquired.resolve();
+      await releaseLock.promise;
+    });
+
+    await lockAcquired.promise;
+    const creating = createSessionTurn(
+      database,
+      session.id,
+      "Do not lose me",
+      "token-2",
+      null,
+      {
+        model: session.model,
+        modelConnectionId: session.modelConnectionId,
+      },
+    );
+    await waitForSessionLockWaiters(1);
+    const parking = parkSession(database, run, null, null);
+    await waitForSessionLockWaiters(2);
+    releaseLock.resolve();
+
+    const [created, parked] = await Promise.all([creating, parking]);
+    await blocker;
+    expect(parked).toBe(true);
+    expect((await getSession(database, session.id))?.activeRunId).toBe(created.id);
+    expect((await claimNextRun(database, 30))?.id).toBe(created.id);
   });
 
   it("does not park a queued turn that was cancelled before it owned the workspace", async () => {

@@ -226,6 +226,14 @@ export async function parkSession(
   const sessionId = run.sessionId;
   if (!sessionId) return false;
   const result = await database.transaction(async (tx) => {
+    const [owner] = await tx
+      .select({ activeRunId: sessions.activeRunId })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .limit(1)
+      .for("update");
+    if (owner?.activeRunId !== run.id) return { parked: false, nextRunId: null };
+
     const [next] = await tx
       .select({ id: runs.id })
       .from(runs)
