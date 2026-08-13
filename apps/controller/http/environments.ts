@@ -160,6 +160,8 @@ async function executeEnvironmentTest(
 
 class SetupTestInputError extends Error {}
 
+const SETUP_TEST_TIMEOUT_SECONDS = 300;
+
 function repositorySetupTestCommand(): string {
   return [
     "unset BASH_ENV ENV NODE_ENV",
@@ -173,7 +175,7 @@ function repositorySetupTestCommand(): string {
     "cd /workspace/repository-environment-test",
     'setup_script="$REPO_SETUP_SCRIPT"',
     "unset REPO_SETUP_SCRIPT",
-    'bash --noprofile --norc -e -u -o pipefail -c "$setup_script"',
+    `timeout --signal=KILL ${SETUP_TEST_TIMEOUT_SECONDS}s bash --noprofile --norc -e -u -o pipefail -c "$setup_script"`,
   ].join("\n");
 }
 

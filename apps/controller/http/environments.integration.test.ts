@@ -121,6 +121,8 @@ describe("repository environments", () => {
     expect(executedSpec?.command).toContain("git clone --depth 1");
     expect(executedSpec?.command).toContain(`if [ -n "\${SCM_TOKEN:-}" ]; then`);
     expect(executedSpec?.command).toContain("unset BASH_ENV ENV NODE_ENV");
-    expect(executedSpec?.command).toContain("bash --noprofile --norc -e -u -o pipefail");
+    expect(executedSpec?.command).toContain(
+      "timeout --signal=KILL 300s bash --noprofile --norc -e -u -o pipefail",
+    );
   });
 });
