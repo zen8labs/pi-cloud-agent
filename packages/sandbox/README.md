@@ -5,9 +5,12 @@ Where a run's compute comes from. The default backend is local microSandbox; hos
 ```ts
 create(spec: SandboxSpec): Promise<SandboxRef>
 stop(ref: SandboxRef): Promise<void>
+execute?(spec: SandboxSpec): Promise<SandboxExecutionResult>
 ```
 
 It stays this small because of one constraint: **the sandbox is outbound-only.** The controller never dials in, so no backend has to expose port forwarding, tunnels, or reachability. Snapshots and warm pools are optimizations *behind* these two methods, not additions to them.
+
+`execute` is optional and is used only by the Settings preflight test. It creates a disposable sandbox, runs one foreground command, returns bounded output, and destroys the machine. It is not a general controller-side shell or an inbound channel into agent workspaces.
 
 Durable chat sessions additionally use `resume`, `suspend`, and
 `deleteWorkspace`. These remain provider control-plane operations; they do not

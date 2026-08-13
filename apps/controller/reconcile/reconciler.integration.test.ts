@@ -1,13 +1,8 @@
-import {
-  SANDBOX_ENV,
-  SandboxError,
-  type SandboxProvider,
-  type SandboxSpec,
-  WorkspaceNotFoundError,
-} from "@pi-cloud-agent/protocol";
+import { SANDBOX_ENV, SandboxError, type SandboxProvider } from "@pi-cloud-agent/protocol";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import type { Database } from "../db/client";
+import { saveRepositoryEnvironment } from "../db/environments";
 import { appendEvent, attachSandbox, claimNextRun, completeRun, getRun } from "../db/runs";
 import { runs } from "../db/schema";
 import { createSessionTurn, getSession, parkSession } from "../db/sessions";
@@ -16,9 +11,11 @@ import {
   bindTestDatabase,
   seedRun,
   seedSession,
+  seedTestUser,
   silentLogger,
   testConfig,
 } from "../test-support";
+import { fakeProvider } from "./fake-sandbox-provider";
 import { createReconciler, type Reconciler } from "./loop";
 
 /** The reconciler, driven one tick at a time against real durable state. */
@@ -28,56 +25,10 @@ bindTestDatabase((value) => {
   database = value;
 });
 
-/** A sandbox provider that records what it was asked to do. */
-function fakeProvider(
-  behavior: { failWith?: SandboxError; resumeMissing?: boolean } = {},
-): SandboxProvider & {
-  created: SandboxSpec[];
-  resumeSpecs: SandboxSpec[];
-  stopped: string[];
-  resumed: string[];
-  suspended: string[];
-  deleted: string[];
-} {
-  const created: SandboxSpec[] = [];
-  const resumeSpecs: SandboxSpec[] = [];
-  const stopped: string[] = [];
-  const resumed: string[] = [];
-  const suspended: string[] = [];
-  const deleted: string[] = [];
-  return {
-    name: "fake",
-    created,
-    resumeSpecs,
-    stopped,
-    resumed,
-    suspended,
-    deleted,
-    async create(spec) {
-      if (behavior.failWith) throw behavior.failWith;
-      created.push(spec);
-      return { provider: "fake", id: `sb-${created.length}` };
-    },
-    async resume(ref, spec) {
-      if (behavior.resumeMissing) throw new WorkspaceNotFoundError("workspace expired");
-      resumed.push(ref.id);
-      resumeSpecs.push(spec);
-      return { provider: "fake", id: ref.id };
-    },
-    async suspend(ref) {
-      suspended.push(ref.id);
-      return { provider: "fake", id: ref.id };
-    },
-    async deleteWorkspace(ref) {
-      deleted.push(ref.id);
-    },
-    async stop(ref) {
-      stopped.push(ref.id);
-    },
-  };
-}
-
 const broker: CredentialBroker = {
+  async mintForRepository() {
+    return { secrets: {}, env: {} };
+  },
   async mintForRun() {
     return {
       model: {
@@ -238,7 +189,14 @@ describe("completion and teardown", () => {
   });
 
   it("cold-starts from the durable checkpoint when a parked workspace disappeared", async () => {
-    const { session, run } = await seedSession(database);
+    const user = await seedTestUser(database, testConfig());
+    const { session, run } = await seedSession(database, user.userId);
+    await saveRepositoryEnvironment(database, {
+      userId: user.userId,
+      provider: "github",
+      repoFullName: "acme/widgets",
+      setupScript: "pnpm install",
+    });
     const healthy = fakeProvider();
     const firstLoop = reconciler(healthy);
     await tick(firstLoop);
@@ -261,6 +219,7 @@ describe("completion and teardown", () => {
 
     expect(missing.created).toHaveLength(1);
     expect(missing.created[0]?.env[SANDBOX_ENV.workspaceResumed]).toBe("false");
+    expect(missing.created[0]?.secrets[SANDBOX_ENV.setupScript]?.expose()).toBe("pnpm install");
     expect((await getRun(database, followUp.id))?.status).toBe("running");
     expect((await getSession(database, session.id))?.sandboxId).toBeNull();
   });

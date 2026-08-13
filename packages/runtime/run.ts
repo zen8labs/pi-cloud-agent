@@ -1,13 +1,8 @@
 import { runAgentSession } from "./agent";
 import { createRuntimeRedactor, readConfig } from "./config";
 import { createReporter } from "./reporter";
-import {
-  configureGitCredentials,
-  gitDiff,
-  gitRevision,
-  prepareCheckout,
-  runSetupScript,
-} from "./workspace";
+import { runSetupScript } from "./setup";
+import { configureGitCredentials, gitDiff, gitRevision, prepareCheckout } from "./workspace";
 
 const clean = createRuntimeRedactor();
 

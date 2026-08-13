@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   SandboxError,
+  type SandboxExecutionResult,
   type SandboxProvider,
   type SandboxRef,
   type SandboxSpec,
@@ -14,11 +15,13 @@ import {
   SandboxStillRunningError,
 } from "microsandbox";
 import { z } from "zod";
+import { flattenSecrets } from "./environment.js";
 
 const envSchema = z.object({
   MICROSANDBOX_IMAGE: z.string().default("pi-cloud-agent:local"),
-  MICROSANDBOX_CPUS: z.coerce.number().int().positive().default(4),
+  MICROSANDBOX_CPUS: z.coerce.number().int().positive().default(2),
   MICROSANDBOX_MEMORY_MB: z.coerce.number().int().positive().default(4096),
+  MICROSANDBOX_ROOT_DISK_MIB: z.coerce.number().int().positive().default(8192),
   MICROSANDBOX_ALLOW_HOST: z
     .enum(["true", "false"])
     .default("true")
@@ -40,11 +43,42 @@ export function createMicroSandboxProvider(
     MICROSANDBOX_IMAGE: defaultImage,
     MICROSANDBOX_CPUS: cpus,
     MICROSANDBOX_MEMORY_MB: memoryMb,
+    MICROSANDBOX_ROOT_DISK_MIB: rootDiskMib,
     MICROSANDBOX_ALLOW_HOST: allowHost,
   } = envSchema.parse(env);
 
   return {
     name: "microsandbox",
+
+    async execute(spec: SandboxSpec): Promise<SandboxExecutionResult> {
+      const id = `pi-test-${randomUUID().slice(0, 12)}`;
+      let sandbox: Sandbox | undefined;
+      try {
+        sandbox = await Sandbox.builder(id)
+          .image(spec.image || defaultImage)
+          .rootDisk(rootDiskMib)
+          .entrypoint(["sleep", "infinity"])
+          .cpus(cpus)
+          .memory(memoryMb)
+          .network((network) => network.policy(buildNetworkPolicy(spec, allowHost)))
+          .maxDuration(spec.timeoutSeconds)
+          .create();
+        const output = await sandbox.execWith("bash", (exec) =>
+          exec
+            .args(["--noprofile", "--norc", "-e", "-u", "-o", "pipefail", "-c", spec.command])
+            .envs(flattenSecrets(spec))
+            .timeout(spec.timeoutSeconds * 1000),
+        );
+        return { code: output.code, stdout: output.stdout(), stderr: output.stderr() };
+      } catch (cause) {
+        throw new SandboxError("microsandbox: environment test failed", {
+          retryable: isRetryable(cause),
+          cause,
+        });
+      } finally {
+        if (sandbox) await cleanupCreatedSandbox(id, sandbox);
+      }
+    },
 
     async create(spec: SandboxSpec): Promise<SandboxRef> {
       const id = `pi-${spec.runId}-${randomUUID().slice(0, 8)}`;
@@ -54,6 +88,7 @@ export function createMicroSandboxProvider(
       try {
         sandbox = await Sandbox.builder(id)
           .image(image)
+          .rootDisk(rootDiskMib)
           .entrypoint(["sleep", "infinity"])
           .cpus(cpus)
           .memory(memoryMb)
@@ -176,12 +211,7 @@ async function removePersistedSandbox(id: string): Promise<void> {
 }
 
 async function startRuntime(sandbox: Sandbox, spec: SandboxSpec): Promise<void> {
-  const envs = { ...spec.env };
-  for (const [key, secret] of Object.entries(spec.secrets)) {
-    // Secrets are opened only at the provider boundary, matching the E2B
-    // provider and the existing SandboxProvider contract.
-    envs[key] = secret.expose();
-  }
+  const envs = flattenSecrets(spec);
 
   const output = await sandbox.execWith("sh", (exec) =>
     exec

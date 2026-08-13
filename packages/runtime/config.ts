@@ -26,6 +26,8 @@ export interface RuntimeConfig {
   debugEvents: boolean;
 
   prompt: string;
+  /** Optional setup script saved in the app's repository environment setting. */
+  appSetupScript: string;
 
   model: {
     provider: string;
@@ -56,6 +58,8 @@ export interface RuntimeConfig {
   mcpConfig: unknown | null;
 }
 
+const DEFAULT_VIRTUAL_ENV = "/home/node/.venv";
+
 function required(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required`);
@@ -75,6 +79,7 @@ function positiveInteger(name: string): number {
 }
 
 export function readConfig(): RuntimeConfig {
+  configurePythonEnvironment();
   const modelRef = required(SANDBOX_ENV.model);
   const separator = modelRef.indexOf("/");
   if (separator <= 0 || separator === modelRef.length - 1) {
@@ -82,6 +87,11 @@ export function readConfig(): RuntimeConfig {
   }
 
   const repoName = optional(SANDBOX_ENV.repoName, "repo");
+  const appSetupScript = optional(SANDBOX_ENV.setupScript);
+  // The app-managed script is setup-only material. Keep its value in the typed
+  // config, but remove the injected environment variable before the agent starts
+  // so repository code cannot read it from the inherited process environment.
+  delete process.env[SANDBOX_ENV.setupScript];
 
   return {
     runId: required(SANDBOX_ENV.runId),
@@ -93,6 +103,7 @@ export function readConfig(): RuntimeConfig {
     debugEvents: optional(SANDBOX_ENV.debugEvents) === "true",
 
     prompt: required(SANDBOX_ENV.taskPrompt),
+    appSetupScript,
 
     model: {
       provider: modelRef.slice(0, separator),
@@ -124,6 +135,13 @@ export function readConfig(): RuntimeConfig {
 
     mcpConfig: parseMcpConfig(optional(SANDBOX_ENV.mcpConfig)),
   };
+}
+
+function configurePythonEnvironment(): void {
+  const venvBin = `${DEFAULT_VIRTUAL_ENV}/bin`;
+  const path = process.env.PATH ?? "";
+  if (!path.split(":").includes(venvBin)) process.env.PATH = `${venvBin}:${path}`;
+  process.env.VIRTUAL_ENV = DEFAULT_VIRTUAL_ENV;
 }
 
 function parseMcpConfig(raw: string): unknown | null {

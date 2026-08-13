@@ -8,6 +8,8 @@ Users authenticate through the configured GitHub App. The controller creates a l
 
 The current broker injects the token into the sandbox as `SCM_TOKEN` and provider-specific aliases. This is intentionally temporary: repository code and the agent run in the same untrusted machine, so a malicious repository can read or exfiltrate a token visible to its process.
 
+The optional per-repository setup script in Settings runs in that same untrusted checkout. The Settings **Test setup** action uses a disposable sandbox with the same boundary, then destroys it. It can use the forge credential for private dependencies, but the runtime withholds model credentials, the run callback token, and plugin configuration before invoking it. Do not put any additional credentials in the script or its output.
+
 ## Security concerns
 
 These are known limitations, not solved problems:

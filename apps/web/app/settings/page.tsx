@@ -9,9 +9,10 @@ import {
   XIcon,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { LlmConnectionSection } from "@/components/LlmConnectionSection";
 import { AzureDevOpsMarkIcon, GithubMarkIcon } from "@/components/ProviderIcons";
+import { RepositoryEnvironmentSection } from "@/components/RepositoryEnvironmentSection";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api } from "@/lib/api";
@@ -47,11 +48,11 @@ function SettingsContent() {
     : (actionNotice?.kind ?? (result === "connected" ? "success" : "error"));
   const [dismissedNotice, setDismissedNotice] = useState(false);
 
-  const notify = (message: string, kind: "success" | "error") => {
+  const notify = useCallback((message: string, kind: "success" | "error") => {
     setError(null);
     setActionNotice({ message, kind });
     setDismissedNotice(false);
-  };
+  }, []);
 
   useEffect(() => {
     void Promise.all([api.listConnections(), api.listLlmConnections()])
@@ -109,6 +110,15 @@ function SettingsContent() {
             />
           ))}
         </div>
+
+        <div className="mb-8 mt-12">
+          <h2 className="text-xl font-medium tracking-[-0.02em]">Environments</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Prepare each connected repository before an agent starts working.
+          </p>
+        </div>
+
+        <RepositoryEnvironmentSection onNotice={notify} />
 
         <div className="mb-8 mt-12">
           <h2 className="text-xl font-medium tracking-[-0.02em]">Models</h2>

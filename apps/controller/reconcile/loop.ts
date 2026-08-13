@@ -51,6 +51,8 @@ export interface ReconcilerOptions {
    * machine without booting real machines.
    */
   createProvider?: (name: string) => SandboxProvider;
+  /** Optional shared provider instance for dashboard preflight commands. */
+  sandbox?: SandboxProvider;
   /** How long a claim is valid before another worker may take the run. */
   claimLeaseSeconds?: number;
   /** Silence from a live sandbox that means it is never coming back. */
@@ -90,9 +92,10 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
     maxConcurrentProvisions = 4,
     pollIntervalMs = 2000,
     createProvider = (name: string) => createSandboxProvider(name, config.env),
+    sandbox: providedSandbox,
   } = options;
 
-  const sandbox = createProvider(config.sandbox.provider);
+  const sandbox = providedSandbox ?? createProvider(config.sandbox.provider);
   const provisionDeps: ProvisionDeps = { config, database, broker, sandbox, log };
 
   let running = false;

@@ -56,6 +56,21 @@ pnpm sandbox:template
 
 Controller-only changes need a restart, not a rebuild. The build bundles the runtime to a single file and writes `dist/package.json` pinning the harness to the version the bundle was typechecked against, so the image cannot drift from the workspace.
 
+The default image runs as the unprivileged `node` user and includes Node/npm/pnpm, Python/pip/venv/uv, Git/GitHub CLIs, `jq`, `ripgrep`, archive utilities, and native build tools. Inspect a built image without starting an agent:
+
+```bash
+docker run --rm --entrypoint bash pi-cloud-agent:local -lc \
+  'id -un; node --version; pnpm --version; python --version; uv --version; rg --version'
+```
+
+## Repository setup
+
+Configure setup commands per connected repository in Settings > Environments. Use **Test setup** to run the unsaved script in a disposable fresh sandbox before saving it. The current app-managed script is resolved when a run is provisioned and runs after checkout, before the model starts. Leaving it empty skips custom setup and uses only the bundled image. The script runs as the unprivileged sandbox user, with a five-minute limit, and a non-zero exit or timeout fails the run with a `repository setup` error. Resumed session workspaces skip setup because their filesystem is retained. Keep the script non-interactive, idempotent, and free of embedded credentials. Forge credentials remain available for private Git dependencies, but the sandbox boundary currently allows repository code to read those credentials; see [secrets.md](secrets.md).
+
+Model credentials, the run callback token, and plugin configuration are withheld from the setup process. Forge credentials remain available so private submodules and Git dependencies can be installed; they are still subject to the sandbox token-exposure limitation in [secrets.md](secrets.md).
+
+The default image includes Node/npm/pnpm and Python/pip/venv/uv. Setup unsets the image's `NODE_ENV=production` so npm and pnpm can install development dependencies; a script may set it explicitly when production-only behavior is intended. Python's `VIRTUAL_ENV` is `/home/node/.venv`, so use `python -m pip install ...` rather than `pip install --user` or `--break-system-packages`. Go, Rust, Java, browser runtimes, and cloud CLIs require a future image profile or custom image.
+
 ## Watching a run
 
 ```bash
@@ -133,6 +148,7 @@ The terminal evidence is a `status` event followed by the run row reaching `succ
 | stuck in `queued` | reconciler not running, or `SANDBOX_PROVIDER` misconfigured | controller logs at startup |
 | `failed` immediately, "could not create a sandbox" | bad provider configuration, missing local image, or missing E2B template | `pnpm sandbox:image` or `pnpm sandbox:template` |
 | `running`, no events, fails with "stopped reporting" | `CONTROL_PLANE_URL` is unreachable from the sandbox, or the detached runtime failed before it could report | the controller log, `msb logs <sandbox-id>`, `msb exec <sandbox-id> -- cat /tmp/pi-cloud-agent-runtime.log` while the microSandbox is running, and the selected provider's network path |
+| `repository setup` failure before the agent starts | app-managed setup exited non-zero or exceeded five minutes | the `setup.failed` event and the script's last output lines |
 | events stop mid-run, then "wall-clock budget" | the agent genuinely ran long | `RUN_WALL_CLOCK_SECONDS` |
 | `git.clone_branch_failed` then a successful clone | the named branch is gone; fell back to the default | benign |
 | `attempt` climbing | retryable provisioning failures | the provider's error in the logs |

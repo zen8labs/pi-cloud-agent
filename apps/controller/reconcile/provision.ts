@@ -10,6 +10,7 @@ import {
 } from "@pi-cloud-agent/protocol";
 import type { Config } from "../config";
 import type { Database } from "../db/client";
+import { getRepositoryEnvironment } from "../db/environments";
 import {
   appendEvent,
   attachSandbox,
@@ -96,6 +97,18 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
       secrets[SANDBOX_ENV.mcpConfig] = new Secret(
         JSON.stringify(resolved.mcpConfig),
         "mcp config",
+      );
+    }
+    const environment = await getRepositoryEnvironment(
+      database,
+      run.userId,
+      run.provider,
+      run.repoFullName,
+    );
+    if (environment?.setupScript) {
+      secrets[SANDBOX_ENV.setupScript] = new Secret(
+        environment.setupScript,
+        "app-managed repository setup script",
       );
     }
 

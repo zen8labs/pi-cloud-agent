@@ -1,4 +1,5 @@
 import { serve } from "@hono/node-server";
+import { createSandboxProvider } from "@pi-cloud-agent/sandbox";
 import { getConfig } from "./config";
 import { db } from "./db/client";
 import { createApp } from "./http/app";
@@ -19,21 +20,24 @@ import { createCredentialBroker } from "./secrets/broker";
 const config = getConfig();
 const log = createLogger("controller", { level: config.logLevel });
 const database = db();
+const broker = createCredentialBroker(
+  config,
+  database,
+  createLogger("secrets", { level: config.logLevel }),
+);
+const sandbox = createSandboxProvider(config.sandbox.provider, config.env);
 const observability = createObservability({
   config,
   database,
   log: createLogger("observability", { level: config.logLevel }),
 });
 
-const app = createApp({ config, database, log, observability });
+const app = createApp({ config, database, log, observability, broker, sandbox });
 const reconciler = createReconciler({
   config,
   database,
-  broker: createCredentialBroker(
-    config,
-    database,
-    createLogger("secrets", { level: config.logLevel }),
-  ),
+  broker,
+  sandbox,
   log: createLogger("reconciler", { level: config.logLevel }),
 });
 

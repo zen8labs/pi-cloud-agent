@@ -33,6 +33,8 @@ Integration tests share one database and truncate between tests, so they run in 
 | `packages/protocol/secret.test.ts` | a credential cannot reach output by accident |
 | `packages/sandbox/registry.test.ts` | a misconfigured provider fails at startup, naming the variable and the alternatives |
 | `packages/runtime/reporter.test.ts` | secrets do not leave the sandbox; telemetry loss cannot fail a run; the terminal status retries |
+| `packages/runtime/workspace.test.ts` | required setup fails early, sensitive runtime credentials stay out of setup, and Git diff capture stays bounded |
+| `apps/controller/http/environments.integration.test.ts` | per-repository setup settings are scoped and can be cleared |
 | `apps/controller/db/runs.integration.test.ts` | the SQL properties: exclusive claim, guarded transitions, gapless sequences under concurrency |
 | `apps/controller/db/sessions.integration.test.ts` | one workspace owner, ordered queued turns, promotion, checkpoint ownership, and workspace parking |
 | `apps/controller/reconcile/reconciler.integration.test.ts` | restart safety plus workspace suspend/resume and cold fallback |

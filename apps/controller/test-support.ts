@@ -57,7 +57,7 @@ export function bindTestApp(
 
 export async function resetTables(database: Database): Promise<void> {
   await database.execute(
-    sql`truncate table plugin_audit_log, plugin_oauth_tokens, plugin_oauth_clients, plugin_user_variables, plugin_user_state, plugin_settings, plugin_versions, plugins, llm_connections, web_sessions, oauth_states, vcs_connections, observability_exports, run_events, runs, sessions, app_users cascade`,
+    sql`truncate table plugin_audit_log, plugin_oauth_tokens, plugin_oauth_clients, plugin_user_variables, plugin_user_state, plugin_settings, plugin_versions, plugins, llm_connections, web_sessions, oauth_states, vcs_connections, repository_environments, observability_exports, run_events, runs, sessions, app_users cascade`,
   );
 }
 

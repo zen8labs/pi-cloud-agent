@@ -18,7 +18,7 @@ Nothing here executes anything or touches the network.
 | `events.ts` | the two outbound channels: `RunEventInput` (telemetry) and `RunStatusReport` (terminal) |
 | `secret.ts` | `Secret`, `createRedactor`, `redactUrlCredentials` |
 | `env.ts` | `SANDBOX_ENV` and `SANDBOX_PATHS`: the controller/sandbox environment contract |
-| `sandbox.ts` | `SandboxProvider` lifecycle, `SandboxSpec`, `SandboxRef`, `WorkspaceRef`, `SandboxError` |
+| `sandbox.ts` | `SandboxProvider` lifecycle and disposable preflight execution, `SandboxSpec`, `SandboxRef`, `WorkspaceRef`, `SandboxError` |
 | `vcs.ts` | `VCSProvider` |
 | `api.ts` | the controller's HTTP request/response shapes, shared with the dashboard |
 

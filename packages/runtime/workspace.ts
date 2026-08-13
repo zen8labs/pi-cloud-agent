@@ -2,14 +2,13 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { redactUrlCredentials, SANDBOX_ENV, SANDBOX_PATHS } from "@pi-cloud-agent/protocol";
+import { redactUrlCredentials, SANDBOX_ENV } from "@pi-cloud-agent/protocol";
 import type { RuntimeConfig } from "./config";
 import type { Reporter } from "./reporter";
 
 /** Prepare the checkout the agent will work in. */
 
 const CLONE_DEPTH = 100;
-const SETUP_TIMEOUT_MS = 300_000;
 const MAX_OUTPUT_CHARS = 1_000_000;
 
 interface CommandResult {
@@ -36,11 +35,12 @@ export function trimCommandOutput(
   };
 }
 
-function run(
+export function run(
   command: string,
   args: string[],
   options: {
     cwd?: string;
+    env?: NodeJS.ProcessEnv;
     timeoutMs?: number;
     maxOutputChars?: number;
     outputPosition?: OutputPosition;
@@ -48,7 +48,7 @@ function run(
   } = {},
 ): Promise<CommandResult> {
   return new Promise((resolve) => {
-    const child = spawn(command, args, { cwd: options.cwd, env: process.env });
+    const child = spawn(command, args, { cwd: options.cwd, env: options.env ?? process.env });
     const stdoutDecoder = new StringDecoder("utf8");
     const stderrDecoder = new StringDecoder("utf8");
     let stdout = "";
@@ -415,36 +415,4 @@ async function reuseCheckout(path: string, reporter: Reporter): Promise<boolean>
   if (origin.code !== 0) throw new Error(`could not verify resumed checkout: ${origin.output}`);
   reporter.log("git.workspace_resumed", { path });
   return true;
-}
-
-/**
- * Run the repository's own setup hook, if it has one.
- *
- * Failure and timeout are both non-fatal. This is repository-provided code that
- * usually installs dependencies; the agent can still read and reason about a
- * checkout whose `npm install` failed, and refusing to start would be a worse
- * outcome than starting without it.
- */
-export async function runSetupScript(config: RuntimeConfig, reporter: Reporter): Promise<void> {
-  const script = join(config.repo.path, SANDBOX_PATHS.setupScript);
-  if (!existsSync(script)) {
-    reporter.log("setup.skipped", { reason: "no script" });
-    return;
-  }
-
-  const result = await run("bash", [script], {
-    cwd: config.repo.path,
-    timeoutMs: SETUP_TIMEOUT_MS,
-  });
-
-  if (result.code === 0) {
-    reporter.log("setup.complete");
-    return;
-  }
-  reporter.log("setup.failed", {
-    exitCode: result.code,
-    signal: result.signal,
-    timedOut: result.timedOut,
-    output: result.output.split("\n").slice(-50).join("\n"),
-  });
 }

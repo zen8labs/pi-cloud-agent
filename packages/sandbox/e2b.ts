@@ -1,5 +1,6 @@
 import {
   SandboxError,
+  type SandboxExecutionResult,
   type SandboxProvider,
   type SandboxRef,
   type SandboxSpec,
@@ -7,6 +8,7 @@ import {
 } from "@pi-cloud-agent/protocol";
 import { Sandbox, SandboxNotFoundError } from "e2b";
 import { z } from "zod";
+import { flattenSecrets } from "./environment.js";
 
 /**
  * E2B: a hosted microVM per run.
@@ -37,8 +39,31 @@ export function createE2BProvider(
   return {
     name: "e2b",
 
+    async execute(spec: SandboxSpec): Promise<SandboxExecutionResult> {
+      const envs = flattenSecrets(spec);
+      const template = spec.image || defaultTemplate;
+      const timeoutMs = spec.timeoutSeconds * 1000;
+      let sandbox: Sandbox | undefined;
+      try {
+        sandbox = await Sandbox.create(template, { apiKey, envs, timeoutMs });
+        const result = await sandbox.commands.run(spec.command, {
+          envs,
+          timeoutMs,
+          user: "node",
+        });
+        return { code: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+      } catch (cause) {
+        throw new SandboxError("e2b: environment test failed", {
+          retryable: isRetryable(cause),
+          cause,
+        });
+      } finally {
+        if (sandbox) await Sandbox.kill(sandbox.sandboxId, { apiKey }).catch(() => undefined);
+      }
+    },
+
     async create(spec: SandboxSpec): Promise<SandboxRef> {
-      const envs = flatten(spec);
+      const envs = flattenSecrets(spec);
       const template = spec.image || defaultTemplate;
       const timeoutMs = spec.timeoutSeconds * 1000;
 
@@ -73,7 +98,7 @@ export function createE2BProvider(
     },
 
     async resume(ref, spec): Promise<SandboxRef> {
-      const envs = flatten(spec);
+      const envs = flattenSecrets(spec);
       const timeoutMs = spec.timeoutSeconds * 1000;
       let sandbox: Sandbox;
       try {
@@ -122,20 +147,6 @@ export function createE2BProvider(
       await Sandbox.kill(ref.id, { apiKey });
     },
   };
-}
-
-/**
- * Flatten config and credentials into one environment map.
- *
- * Secrets are opened here — the last possible moment, at the boundary where
- * they have to become plain strings to cross into the sandbox.
- */
-function flatten(spec: SandboxSpec): Record<string, string> {
-  const envs: Record<string, string> = { ...spec.env };
-  for (const [key, secret] of Object.entries(spec.secrets)) {
-    envs[key] = secret.expose();
-  }
-  return envs;
 }
 
 const RETRYABLE_PATTERNS = [
