@@ -10,22 +10,46 @@ export interface SessionTurn {
   events: RunEvent[];
 }
 
+export function sessionRunView(turns: SessionTurn[], activeRunId: string | null | undefined) {
+  const latest = turns.at(-1)?.run ?? null;
+  const activeRun = turns.find((turn) => turn.run.id === activeRunId)?.run ?? null;
+  const queuedRuns = turns
+    .map((turn) => turn.run)
+    .filter((run) => run.status === "queued" && run.id !== activeRunId);
+  const visibleTurns = turns.filter((turn) => {
+    if (turn.run.id === activeRunId) return true;
+    if (turn.run.status === "queued") return false;
+    const deletedBeforeStart =
+      turn.run.status === "cancelled" &&
+      turn.run.sandboxStoppedAt === null &&
+      turn.events.length === 0;
+    return !deletedBeforeStart;
+  });
+  return {
+    activeRun,
+    queuedRuns,
+    visibleTurns,
+    displayRun: activeRun ?? visibleTurns.at(-1)?.run ?? latest,
+    latest,
+  };
+}
+
 export function useSession(id: string) {
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [history, setHistory] = useState<Record<string, RunEvent[]>>({});
   const [error, setError] = useState<string | null>(null);
   const historyRef = useRef<Record<string, RunEvent[]>>({});
   const refreshingRef = useRef(false);
-  const latest = useRun(session?.latestRunId ?? "");
+  const active = useRun(session?.activeRunId ?? "");
 
   const refresh = useCallback(async () => {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
     try {
       const detail = await api.getSession(id);
-      const older = detail.runs.filter((run) => run.id !== detail.latestRunId);
+      const inactive = detail.runs.filter((run) => run.id !== detail.activeRunId);
       const entries = await Promise.all(
-        older.map(async (run) => {
+        inactive.map(async (run) => {
           const existing = historyRef.current[run.id] ?? [];
           const afterSeq = existing.at(-1)?.seq ?? 0;
           const incoming = await api.getEvents(run.id, afterSeq);
@@ -53,13 +77,13 @@ export function useSession(id: string) {
   const turns = useMemo<SessionTurn[]>(() => {
     if (!session) return [];
     return session.runs.map((run) =>
-      run.id === session.latestRunId
-        ? { run: latest.run ?? run, events: latest.events }
+      run.id === session.activeRunId
+        ? { run: active.run ?? run, events: active.events }
         : { run, events: history[run.id] ?? [] },
     );
-  }, [history, latest.events, latest.run, session]);
+  }, [active.events, active.run, history, session]);
 
-  return { session, turns, error: error ?? latest.error, refresh };
+  return { session, turns, error: error ?? active.error, refresh };
 }
 
 export function mergeEvents(existing: RunEvent[], incoming: RunEvent[]): RunEvent[] {

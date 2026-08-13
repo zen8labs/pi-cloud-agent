@@ -23,13 +23,6 @@ export interface CreateSessionInput {
   callbackToken: string;
 }
 
-export class SessionBusyError extends Error {
-  constructor() {
-    super("the session already has an active turn");
-    this.name = "SessionBusyError";
-  }
-}
-
 export class SessionNotFoundError extends Error {
   constructor() {
     super("session not found");
@@ -95,40 +88,28 @@ export async function createSessionTurn(
   },
 ): Promise<RunRow> {
   const runId = randomUUID();
-  const run = await database.transaction(async (tx) => {
-    const [claimed] = await tx
-      .update(sessions)
-      .set(sessionTurnUpdate(runId, modelSelection))
-      .where(
-        and(
-          eq(sessions.id, sessionId),
-          isNull(sessions.activeRunId),
-          ...(userId ? [eq(sessions.userId, userId)] : []),
-        ),
-      )
-      .returning();
+  const result = await database.transaction(async (tx) => {
+    const [session] = await tx
+      .select()
+      .from(sessions)
+      .where(and(eq(sessions.id, sessionId), ...(userId ? [eq(sessions.userId, userId)] : [])))
+      .limit(1)
+      .for("update");
+    if (!session) throw new SessionNotFoundError();
 
-    if (!claimed) {
-      const [existing] = await tx
-        .select({ id: sessions.id })
-        .from(sessions)
-        .where(
-          and(eq(sessions.id, sessionId), ...(userId ? [eq(sessions.userId, userId)] : [])),
-        );
-      if (!existing) throw new SessionNotFoundError();
-      throw new SessionBusyError();
-    }
+    const turnNumber = session.turnCount + 1;
+    const startsImmediately = session.activeRunId === null;
 
-    const trigger: Trigger = { kind: "manual", repo: claimed.repo, prompt };
+    const trigger: Trigger = { kind: "manual", repo: session.repo, prompt };
     const [created] = await tx
       .insert(runs)
       .values({
         id: runId,
-        userId: claimed.userId,
+        userId: session.userId,
         sessionId,
-        turnNumber: claimed.turnCount,
-        provider: claimed.provider,
-        repoFullName: claimed.repoFullName,
+        turnNumber,
+        provider: session.provider,
+        repoFullName: session.repoFullName,
         trigger,
         model: modelSelection.model,
         modelConnectionId: modelSelection.modelConnectionId,
@@ -137,24 +118,21 @@ export async function createSessionTurn(
       })
       .returning();
     if (!created) throw new Error("could not create session turn");
-    return created;
+    await tx
+      .update(sessions)
+      .set({
+        activeRunId: startsImmediately ? runId : session.activeRunId,
+        latestRunId: runId,
+        turnCount: turnNumber,
+        model: modelSelection.model,
+        modelConnectionId: modelSelection.modelConnectionId,
+        updatedAt: new Date(),
+      })
+      .where(eq(sessions.id, sessionId));
+    return { run: created, startsImmediately };
   });
-  await notify(database, CHANNELS.runQueued, run.id);
-  return run;
-}
-
-function sessionTurnUpdate(
-  runId: string,
-  modelSelection: { model: string; modelConnectionId: string | null },
-) {
-  return {
-    activeRunId: runId,
-    latestRunId: runId,
-    turnCount: sql`${sessions.turnCount} + 1`,
-    model: modelSelection.model,
-    modelConnectionId: modelSelection.modelConnectionId,
-    updatedAt: new Date(),
-  };
+  if (result.startsImmediately) await notify(database, CHANNELS.runQueued, result.run.id);
+  return result.run;
 }
 
 export async function getSession(
@@ -242,30 +220,59 @@ export async function saveSessionDiffBaseSha(
 export async function parkSession(
   database: Database,
   run: RunRow,
-  workspace: WorkspaceRef | null,
+  workspace: WorkspaceRef | null | undefined,
   expiresAt: Date | null,
 ): Promise<boolean> {
   const sessionId = run.sessionId;
   if (!sessionId) return false;
-  return database.transaction(async (tx) => {
+  const result = await database.transaction(async (tx) => {
+    const [owner] = await tx
+      .select({ activeRunId: sessions.activeRunId })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .limit(1)
+      .for("update");
+    if (owner?.activeRunId !== run.id) return { parked: false, nextRunId: null };
+
+    const [next] = await tx
+      .select({ id: runs.id })
+      .from(runs)
+      .where(
+        and(
+          eq(runs.sessionId, sessionId),
+          eq(runs.status, "queued"),
+          sql`${runs.turnNumber} > ${run.turnNumber ?? 0}`,
+        ),
+      )
+      .orderBy(runs.turnNumber)
+      .limit(1)
+      .for("update");
+    const workspaceUpdate =
+      workspace === undefined
+        ? {}
+        : {
+            sandboxProvider: workspace?.provider ?? null,
+            sandboxId: workspace?.id ?? null,
+            workspaceExpiresAt: expiresAt,
+          };
     const updated = await tx
       .update(sessions)
       .set({
-        activeRunId: null,
-        sandboxProvider: workspace?.provider ?? null,
-        sandboxId: workspace?.id ?? null,
-        workspaceExpiresAt: expiresAt,
+        activeRunId: next?.id ?? null,
+        ...workspaceUpdate,
         updatedAt: new Date(),
       })
       .where(and(eq(sessions.id, sessionId), eq(sessions.activeRunId, run.id)))
       .returning({ id: sessions.id });
-    if (updated.length === 0) return false;
+    if (updated.length === 0) return { parked: false, nextRunId: null };
     await tx
       .update(runs)
       .set({ sandboxStoppedAt: new Date(), updatedAt: new Date() })
       .where(and(eq(runs.id, run.id), isNull(runs.sandboxStoppedAt)));
-    return true;
+    return { parked: true, nextRunId: next?.id ?? null };
   });
+  if (result.nextRunId) await notify(database, CHANNELS.runQueued, result.nextRunId);
+  return result.parked;
 }
 
 export async function findExpiredSessionWorkspaces(
@@ -299,6 +306,7 @@ export async function findSessionRunsToPark(
         isNotNull(runs.sessionId),
         inArray(runs.status, [...TERMINAL_STATUSES]),
         isNull(runs.sandboxStoppedAt),
+        sql`exists (select 1 from ${sessions} where ${sessions.id} = ${runs.sessionId} and ${sessions.activeRunId} = ${runs.id})`,
       ),
     )
     .limit(limit);

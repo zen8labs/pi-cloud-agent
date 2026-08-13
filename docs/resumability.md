@@ -96,7 +96,7 @@ Adding Redis or a broker would mean holding work in a second system when it is a
 
 ## Resumable turns are a separate layer
 
-Controller restart safety and conversation continuation solve different failures. A `sessions` row is the durable parent of ordered runs. It holds the active run guard, latest Pi JSONL checkpoint, and optional provider workspace reference. Creating a follow-up is one guarded transaction: it succeeds only when `active_run_id is null`, increments the turn number, and queues an ordinary run.
+Controller restart safety and conversation continuation solve different failures. A `sessions` row is the durable parent of ordered runs. It holds the active run guard, latest Pi JSONL checkpoint, and optional provider workspace reference. Creating a follow-up locks the session row, assigns the next turn number, and inserts an ordinary queued run. Only the queued run named by `active_run_id` may be claimed; later messages wait durably. Parking the current turn atomically promotes the oldest queued successor before waking the reconciler.
 
 The runtime downloads the checkpoint before invoking Pi and uploads the updated checkpoint before reporting `done`. The controller refuses successful completion without that checkpoint. After the run is terminal, the reconciler suspends the filesystem; a later turn resumes it and skips clone/setup. If it has expired, the run creates a fresh sandbox and clone but still restores the Pi checkpoint.
 

@@ -39,6 +39,7 @@ Next.js App Router, React, Tailwind 4, Base UI, and local-source [AI Elements](h
 - **Dedupe stream events by `seq`.** Frames carry the event log's sequence number; `EventSource` can overlap during a reconnect and React strict mode double-invokes effects. `seq` makes dedupe exact rather than heuristic.
 - **A bare SSE `error` event means "reconnecting", not "failed".** Only a frame *with* data is a real server-side error. Treating both the same makes the UI flap on every network hiccup.
 - **The composer is not the harness.** A follow-up creates a new run under the same durable session. Pi history and the repository workspace are restored below the API boundary; the browser never reconstructs or replays conversation text.
+- **The visible queue mirrors durable runs.** Messages submitted during an active turn already exist on the controller as queued session runs. Removing one cancels that run; interrupt-and-send cancels only the active predecessor. The browser never owns queue ordering or promotion.
 
 ## Working on it
 

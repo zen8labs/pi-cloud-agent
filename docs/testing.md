@@ -34,7 +34,7 @@ Integration tests share one database and truncate between tests, so they run in 
 | `packages/sandbox/registry.test.ts` | a misconfigured provider fails at startup, naming the variable and the alternatives |
 | `packages/runtime/reporter.test.ts` | secrets do not leave the sandbox; telemetry loss cannot fail a run; the terminal status retries |
 | `apps/controller/db/runs.integration.test.ts` | the SQL properties: exclusive claim, guarded transitions, gapless sequences under concurrency |
-| `apps/controller/db/sessions.integration.test.ts` | one active turn, ordered runs, checkpoint ownership, and workspace parking |
+| `apps/controller/db/sessions.integration.test.ts` | one workspace owner, ordered queued turns, promotion, checkpoint ownership, and workspace parking |
 | `apps/controller/reconcile/reconciler.integration.test.ts` | restart safety plus workspace suspend/resume and cold fallback |
 | `apps/controller/http/api.integration.test.ts` | the HTTP contract, including authenticated checkpoint callbacks and session turns |
 | `apps/web/lib/foldActivityEvents.test.ts` | completed-turn thinking renders as one Thought block, including legacy per-word logs |

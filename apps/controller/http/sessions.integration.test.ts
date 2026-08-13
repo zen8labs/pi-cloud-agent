@@ -6,8 +6,8 @@ import type {
 } from "@pi-cloud-agent/protocol";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Database } from "../db/client";
-import { getRun } from "../db/runs";
-import { parkSession } from "../db/sessions";
+import { completeRun, getRun } from "../db/runs";
+import { getSession, parkSession } from "../db/sessions";
 import { bindTestApp, seedTestUser, testConfig, withTestModel } from "../test-support";
 import type { createApp } from "./app";
 
@@ -74,11 +74,13 @@ describe("durable session HTTP contract", () => {
       }),
     );
     expect(listing.sessions.map((item) => item.id)).toContain(session.id);
-    expect(
-      (await send("POST", `/sessions/${session.id}/turns`, { prompt: "too soon" })).status,
-    ).toBe(409);
+    const queued = await send("POST", `/sessions/${session.id}/turns`, {
+      prompt: "Wait until the first turn finishes",
+    });
+    expect(queued.status).toBe(201);
+    expect((await json<RunDetail>(queued)).status).toBe("queued");
 
-    const firstRun = await getRun(database, session.latestRunId);
+    const firstRun = await getRun(database, session.activeRunId ?? "");
     expect(firstRun).not.toBeNull();
     const token = firstRun?.callbackToken;
     const checkpoint = '{"type":"session","id":"pi-session-one"}\n';
@@ -106,6 +108,12 @@ describe("durable session HTTP contract", () => {
     ).toBe(200);
     expect(await parkSession(database, firstRun!, null, null)).toBe(true);
 
+    const promoted = await getSession(database, session.id);
+    expect(promoted?.activeRunId).not.toBe(firstRun?.id);
+    const promotedRun = await getRun(database, promoted?.activeRunId ?? "");
+    await completeRun(database, promotedRun?.id ?? "", "succeeded");
+    expect(await parkSession(database, promotedRun!, null, null)).toBe(true);
+
     expect(
       (
         await app.request(`/sessions/${session.id}/turns`, {
@@ -125,7 +133,7 @@ describe("durable session HTTP contract", () => {
     expect(response.status).toBe(201);
     const followUp = await json<RunDetail>(response);
     expect(followUp.sessionId).toBe(session.id);
-    expect(followUp.turnNumber).toBe(2);
+    expect(followUp.turnNumber).toBe(3);
     expect(followUp.prompt).toBe("Read the note from the previous turn");
   });
 
