@@ -164,6 +164,7 @@ const SETUP_TEST_TIMEOUT_SECONDS = 300;
 
 function repositorySetupTestCommand(): string {
   return [
+    "set -eu",
     "unset BASH_ENV ENV NODE_ENV",
     "rm -rf /workspace/repository-environment-test",
     "mkdir -p /workspace/repository-environment-test",
