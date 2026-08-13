@@ -129,7 +129,10 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
       return;
     }
     if (!run.sandboxId || !run.sandboxProvider) {
-      await parkSession(database, run, null, null);
+      // A promoted turn can be cancelled before it resumes the session's
+      // parked workspace. It owns no sandbox to suspend, so preserve the
+      // existing workspace reference for the next queued turn.
+      await parkSession(database, run, undefined, null);
       return;
     }
 

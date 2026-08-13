@@ -220,7 +220,7 @@ export async function saveSessionDiffBaseSha(
 export async function parkSession(
   database: Database,
   run: RunRow,
-  workspace: WorkspaceRef | null,
+  workspace: WorkspaceRef | null | undefined,
   expiresAt: Date | null,
 ): Promise<boolean> {
   const sessionId = run.sessionId;
@@ -247,13 +247,19 @@ export async function parkSession(
       .orderBy(runs.turnNumber)
       .limit(1)
       .for("update");
+    const workspaceUpdate =
+      workspace === undefined
+        ? {}
+        : {
+            sandboxProvider: workspace?.provider ?? null,
+            sandboxId: workspace?.id ?? null,
+            workspaceExpiresAt: expiresAt,
+          };
     const updated = await tx
       .update(sessions)
       .set({
         activeRunId: next?.id ?? null,
-        sandboxProvider: workspace?.provider ?? null,
-        sandboxId: workspace?.id ?? null,
-        workspaceExpiresAt: expiresAt,
+        ...workspaceUpdate,
         updatedAt: new Date(),
       })
       .where(and(eq(sessions.id, sessionId), eq(sessions.activeRunId, run.id)))

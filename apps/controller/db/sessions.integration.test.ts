@@ -139,6 +139,32 @@ describe("durable sessions", () => {
     ).toEqual([run.id]);
   });
 
+  it("preserves the parked workspace when a promoted turn stops before provisioning", async () => {
+    const { session, run } = await seedSession(database);
+    const promoted = await createSessionTurn(
+      database,
+      session.id,
+      "Stop me early",
+      "token-2",
+      null,
+      {
+        model: session.model,
+        modelConnectionId: session.modelConnectionId,
+      },
+    );
+    const expiresAt = new Date(Date.now() + 60_000);
+    await completeRun(database, run.id, "succeeded", null);
+    await parkSession(database, run, { provider: "fake", id: "workspace-1" }, expiresAt);
+    await completeRun(database, promoted.id, "cancelled", "cancelled before provisioning");
+
+    expect(await parkSession(database, promoted, undefined, null)).toBe(true);
+    const stored = await getSession(database, session.id);
+    expect(stored?.activeRunId).toBeNull();
+    expect(stored?.sandboxProvider).toBe("fake");
+    expect(stored?.sandboxId).toBe("workspace-1");
+    expect(stored?.workspaceExpiresAt).toEqual(expiresAt);
+  });
+
   it("persists checkpoints only from the active session head", async () => {
     const { session, run } = await seedSession(database);
     expect(await saveSessionCheckpoint(database, run, '{"type":"session"}\n')).toBe(true);
