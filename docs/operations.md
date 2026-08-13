@@ -69,7 +69,7 @@ Configure setup commands per connected repository in Settings > Environments. Us
 
 Model credentials, the run callback token, and plugin configuration are withheld from the setup process. Forge credentials remain available so private submodules and Git dependencies can be installed; they are still subject to the sandbox token-exposure limitation in [secrets.md](secrets.md).
 
-The default image includes Node/npm/pnpm and Python/pip/venv/uv. Python's `VIRTUAL_ENV` is `/home/node/.venv`, so use `python -m pip install ...` rather than `pip install --user` or `--break-system-packages`. Go, Rust, Java, browser runtimes, and cloud CLIs require a future image profile or custom image.
+The default image includes Node/npm/pnpm and Python/pip/venv/uv. Setup unsets the image's `NODE_ENV=production` so npm and pnpm can install development dependencies; a script may set it explicitly when production-only behavior is intended. Python's `VIRTUAL_ENV` is `/home/node/.venv`, so use `python -m pip install ...` rather than `pip install --user` or `--break-system-packages`. Go, Rust, Java, browser runtimes, and cloud CLIs require a future image profile or custom image.
 
 ## Watching a run
 

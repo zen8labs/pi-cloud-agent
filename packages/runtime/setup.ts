@@ -62,6 +62,9 @@ function setupEnvironment(): NodeJS.ProcessEnv {
   for (const name of [
     "BASH_ENV",
     "ENV",
+    // The image is production-oriented, but repository setup must be able to
+    // install devDependencies (for example TypeScript) before the agent runs.
+    "NODE_ENV",
     SANDBOX_ENV.callbackToken,
     SANDBOX_ENV.modelApiKey,
     SANDBOX_ENV.modelAuthJson,

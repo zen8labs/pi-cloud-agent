@@ -53,12 +53,13 @@ For a Node/TypeScript smoke test, use the bundled Node runtime and install the
 compiler into the checkout rather than globally:
 
 ```bash
-npm install --no-save --no-audit --no-fund typescript@5.8.3
+npm install --include=dev --no-save --no-audit --no-fund typescript@5.8.3
 node -e 'console.log(`node ${process.version}`)'
+node -e 'console.log(`typescript ${require("typescript").version}`)'
 ./node_modules/.bin/tsc --version
 ```
 
-The image provides Node/npm/pnpm plus Python/pip/venv/uv. Python commands use a writable default virtual environment at `/home/node/.venv`, already first on `PATH`, so `python -m pip install ...` does not modify Debian's system interpreter. An empty setting uses only the bundled image tools. A resumed session keeps its filesystem and does not reinstall dependencies. Install project dependencies into the checkout or the unprivileged `node` user's home; runtime setup has no `sudo` access.
+The image provides Node/npm/pnpm plus Python/pip/venv/uv. Setup deliberately unsets the image's `NODE_ENV=production` so npm and pnpm can install development dependencies; set it explicitly in a script only when production-only behavior is intended. Python commands use a writable default virtual environment at `/home/node/.venv`, already first on `PATH`, so `python -m pip install ...` does not modify Debian's system interpreter. An empty setting uses only the bundled image tools. A resumed session keeps its filesystem and does not reinstall dependencies. Install project dependencies into the checkout or the unprivileged `node` user's home; runtime setup has no `sudo` access.
 
 Go, Rust, Java, browser runtimes, and cloud CLIs are not in the default image. A setup script can install dependencies for a runtime that is already present, but it cannot reliably bootstrap a missing language toolchain as the unprivileged user. Add image profiles or operator-selected custom images before supporting those ecosystems broadly.
 
