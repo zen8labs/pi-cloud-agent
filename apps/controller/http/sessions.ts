@@ -14,7 +14,6 @@ import {
   getSession,
   listSessionRuns,
   listSessions,
-  SessionBusyError,
   SessionNotFoundError,
 } from "../db/sessions";
 import type { resolveLlmModel } from "../llm/connections";
@@ -122,7 +121,7 @@ export function sessionRoutes(): Hono<AppEnv> {
 
 type SessionTurnResult =
   | { ok: true; run: RunRow }
-  | { ok: false; error: string; status: 404 | 409 | 422 };
+  | { ok: false; error: string; status: 404 | 422 };
 
 async function queueSessionTurn(
   database: Parameters<typeof getRun>[0],
@@ -163,9 +162,6 @@ async function queueSessionTurn(
   } catch (error) {
     if (error instanceof SessionNotFoundError) {
       return { ok: false, error: error.message, status: 404 };
-    }
-    if (error instanceof SessionBusyError) {
-      return { ok: false, error: error.message, status: 409 };
     }
     throw error;
   }

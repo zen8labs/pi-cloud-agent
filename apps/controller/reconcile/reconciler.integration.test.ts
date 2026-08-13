@@ -11,7 +11,7 @@ import type { Database } from "../db/client";
 import { saveRepositoryEnvironment } from "../db/environments";
 import { appendEvent, attachSandbox, claimNextRun, completeRun, getRun } from "../db/runs";
 import { runs } from "../db/schema";
-import { createSessionTurn, getSession } from "../db/sessions";
+import { createSessionTurn, getSession, parkSession } from "../db/sessions";
 import type { CredentialBroker } from "../secrets/broker";
 import {
   bindTestDatabase,
@@ -276,6 +276,46 @@ describe("completion and teardown", () => {
     expect(missing.created[0]?.secrets[SANDBOX_ENV.setupScript]?.expose()).toBe("pnpm install");
     expect((await getRun(database, followUp.id))?.status).toBe("running");
     expect((await getSession(database, session.id))?.sandboxId).toBeNull();
+  });
+
+  it("keeps a parked workspace when a promoted turn is cancelled before provisioning", async () => {
+    const { session, run } = await seedSession(database);
+    const cancelled = await createSessionTurn(
+      database,
+      session.id,
+      "Cancel before resume.",
+      "cancel-token",
+      null,
+      { model: session.model, modelConnectionId: session.modelConnectionId },
+    );
+    await completeRun(database, run.id, "succeeded");
+    await parkSession(
+      database,
+      run,
+      { provider: "fake", id: "workspace-1" },
+      new Date(Date.now() + 60_000),
+    );
+    await completeRun(database, cancelled.id, "cancelled", "cancelled by an operator");
+    const provider = fakeProvider();
+    const loop = reconciler(provider);
+
+    await tick(loop);
+
+    expect((await getSession(database, session.id))?.sandboxId).toBe("workspace-1");
+    const next = await createSessionTurn(
+      database,
+      session.id,
+      "Continue warm.",
+      "next-token",
+      null,
+      {
+        model: session.model,
+        modelConnectionId: session.modelConnectionId,
+      },
+    );
+    await tick(loop);
+    expect(provider.resumed).toEqual(["workspace-1"]);
+    expect((await getRun(database, next.id))?.sandboxId).toBe("workspace-1");
   });
 
   it("reclaims the machine of a run that has finished", async () => {

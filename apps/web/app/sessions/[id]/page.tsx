@@ -1,7 +1,7 @@
 "use client";
 
 import type { RunDetail, SessionDetail } from "@pi-cloud-agent/protocol";
-import { ArrowLeftIcon, GitBranchIcon, PanelRightIcon, SquareIcon } from "lucide-react";
+import { ArrowLeftIcon, GitBranchIcon, PanelRightIcon } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -14,12 +14,13 @@ import {
 } from "@/components/ai-elements/conversation";
 import { AzureDevOpsMarkIcon, GithubMarkIcon } from "@/components/ProviderIcons";
 import { SessionFollowUp } from "@/components/SessionFollowUp";
+import { SessionQueue } from "@/components/SessionQueue";
 import { SidebarResizeHandle } from "@/components/SidebarResizeHandle";
 import { StatusBadge } from "@/components/StatusBadge";
 import { api } from "@/lib/api";
 import { absoluteTime } from "@/lib/format";
 import { resolveBranch, summarizeChanges } from "@/lib/session-meta";
-import { useSession } from "@/lib/useSession";
+import { sessionRunView, useSession } from "@/lib/useSession";
 import { cn } from "@/lib/utils";
 
 const SessionDiffSidebar = dynamic(
@@ -64,14 +65,17 @@ export default function SessionPage() {
   );
   const diffRequest = useRef(0);
   const [diffTarget, setDiffTarget] = useState<{ path: string; request: number } | null>(null);
-  const latest = turns.at(-1)?.run ?? null;
+  const { activeRun, queuedRuns, visibleTurns, displayRun, latest } = sessionRunView(
+    turns,
+    session?.activeRunId,
+  );
   const active = session ? session.status !== "idle" : false;
   const allEvents = useMemo(() => turns.flatMap((turn) => turn.events), [turns]);
   const changes = useMemo(() => summarizeChanges(allEvents), [allEvents]);
   const maxDiffWidth = getMaxDiffWidth();
   const branch = useMemo(
-    () => resolveBranch(latest?.branch ?? null, allEvents),
-    [allEvents, latest?.branch],
+    () => resolveBranch(displayRun?.branch ?? null, allEvents),
+    [allEvents, displayRun?.branch],
   );
   const openChanges = useCallback((path?: string) => {
     setDiffOpen(true);
@@ -100,10 +104,10 @@ export default function SessionPage() {
   };
 
   const cancel = async () => {
-    if (!latest) return;
+    if (!activeRun) return;
     setCancelling(true);
     try {
-      await api.cancelRun(latest.id);
+      await api.cancelRun(activeRun.id);
     } catch {
       /* The stream reports the durable outcome. */
     } finally {
@@ -116,9 +120,6 @@ export default function SessionPage() {
       <div className="flex min-w-0 flex-1 flex-col">
         <SessionHeader
           session={session}
-          active={active}
-          cancelling={cancelling}
-          onCancel={cancel}
           diffOpen={diffOpen}
           onToggleDiff={() => {
             if (diffOpen) {
@@ -143,12 +144,12 @@ export default function SessionPage() {
             ) : (
               <Conversation className="min-h-0 flex-1">
                 <ConversationContent className="mx-auto w-full max-w-3xl gap-8 px-5 py-10 sm:px-8">
-                  {turns.map((turn, index) => (
+                  {visibleTurns.map((turn) => (
                     <ActivityFeed
                       key={turn.run.id}
                       events={turn.events}
                       userPrompt={turn.run.prompt}
-                      active={active && index === turns.length - 1}
+                      active={active && turn.run.id === session?.activeRunId}
                       onOpenChanges={openChanges}
                     />
                   ))}
@@ -159,6 +160,11 @@ export default function SessionPage() {
             {session && (
               <div className="bg-background px-4 pb-5 pt-2 sm:px-6">
                 <div className="mx-auto max-w-3xl">
+                  <SessionQueue
+                    runs={queuedRuns}
+                    activeRunId={session.activeRunId}
+                    onChanged={refresh}
+                  />
                   <SessionFollowUp
                     sessionId={session.id}
                     repo={session.repo}
@@ -168,6 +174,8 @@ export default function SessionPage() {
                     }
                     previousThinkingLevel={latest?.thinkingLevel ?? "medium"}
                     active={active}
+                    stopping={cancelling}
+                    onStop={cancel}
                     onQueued={refresh}
                   />
                 </div>
@@ -182,7 +190,7 @@ export default function SessionPage() {
           >
             <SessionMeta
               session={session}
-              run={latest}
+              run={displayRun}
               branch={branch}
               changes={changes}
               onOpenChanges={openChanges}
@@ -227,16 +235,10 @@ export default function SessionPage() {
 
 function SessionHeader({
   session,
-  active,
-  cancelling,
-  onCancel,
   diffOpen,
   onToggleDiff,
 }: {
   session: SessionDetail | null;
-  active: boolean;
-  cancelling: boolean;
-  onCancel: () => void;
   diffOpen: boolean;
   onToggleDiff: () => void;
 }) {
@@ -255,16 +257,6 @@ function SessionHeader({
           <p className="mt-px truncate text-[11px] text-muted-foreground">{session.repo}</p>
         ) : null}
       </div>
-      {active && (
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={cancelling}
-          className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
-        >
-          <SquareIcon className="size-2.5" /> {cancelling ? "Stopping…" : "Cancel"}
-        </button>
-      )}
       <button
         type="button"
         onClick={onToggleDiff}

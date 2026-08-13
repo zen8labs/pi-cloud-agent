@@ -17,6 +17,9 @@ type ChatComposerProps = {
   submitEnabled?: boolean;
   submitting?: boolean;
   disabled?: boolean;
+  active?: boolean;
+  stopping?: boolean;
+  onStop?: () => void | Promise<void>;
   autoFocus?: boolean;
   tools?: React.ReactNode;
   compact?: boolean;
@@ -31,11 +34,15 @@ export function ChatComposer({
   submitEnabled,
   submitting = false,
   disabled = false,
+  active = false,
+  stopping = false,
+  onStop,
   autoFocus = false,
   tools,
   compact = false,
 }: ChatComposerProps) {
   const canSubmit = !disabled && !submitting && (submitEnabled ?? value.trim().length > 0);
+  const stopsActiveRun = active && value.trim().length === 0;
 
   return (
     <PromptInput
@@ -56,9 +63,12 @@ export function ChatComposer({
         <PromptInputTools className="min-w-0 flex-1">{tools}</PromptInputTools>
         <div className="ml-auto flex shrink-0 items-center">
           <PromptInputSubmit
-            aria-label={submitLabel}
-            disabled={!canSubmit}
-            status={submitting ? "submitted" : "ready"}
+            aria-label={
+              stopsActiveRun ? (stopping ? "Stopping agent" : "Stop agent") : submitLabel
+            }
+            disabled={stopsActiveRun ? stopping || !onStop : !canSubmit}
+            status={stopsActiveRun ? "streaming" : submitting ? "submitted" : "ready"}
+            onStop={onStop}
           />
         </div>
       </PromptInputFooter>
