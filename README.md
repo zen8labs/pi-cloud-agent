@@ -77,9 +77,9 @@ Skills/plugins, sandbox backends, and forges are the surfaces this project wants
 
 [DEVELOPMENT.md](DEVELOPMENT.md) covers environment setup and validation. [CONTRIBUTING.md](CONTRIBUTING.md) covers the rules CI enforces and the short list of changes worth discussing before you write code. By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-## Open-source foundations
+## Credits
 
-We are proud to build on the open-source community. Some selected projects that we integrated:
+We are proud to build on the open-source community. We'd like to highlight a few that do particularly heavy lifting:
 
 - [Pi coding agent](https://github.com/earendil-works/pi) - the agent harness inside the sandbox (`@earendil-works/pi-coding-agent`).
 - [microSandbox](https://github.com/superradcompany/microsandbox) - the default local microVM sandbox backend.
