@@ -4,6 +4,7 @@ import type { Database } from "./client";
 import { claimNextRun, completeRun } from "./runs";
 import {
   createSessionTurn,
+  findSessionRunsToPark,
   getSession,
   listSessionRuns,
   parkSession,
@@ -59,6 +60,20 @@ describe("durable sessions", () => {
 
     expect((await getSession(database, session.id))?.activeRunId).toBe(second.id);
     expect((await getSession(database, session.id))?.activeRunId).not.toBe(third.id);
+  });
+
+  it("does not park a queued turn that was cancelled before it owned the workspace", async () => {
+    const { session, run } = await seedSession(database);
+    const queued = await createSessionTurn(database, session.id, "Delete me", "token-2", null, {
+      model: session.model,
+      modelConnectionId: session.modelConnectionId,
+    });
+    await completeRun(database, run.id, "succeeded", null);
+    await completeRun(database, queued.id, "cancelled", "removed from queue");
+
+    expect(
+      (await findSessionRunsToPark(database, 10)).map((candidate) => candidate.id),
+    ).toEqual([run.id]);
   });
 
   it("persists checkpoints only from the active session head", async () => {

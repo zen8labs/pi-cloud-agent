@@ -292,6 +292,7 @@ export async function findSessionRunsToPark(
         isNotNull(runs.sessionId),
         inArray(runs.status, [...TERMINAL_STATUSES]),
         isNull(runs.sandboxStoppedAt),
+        sql`exists (select 1 from ${sessions} where ${sessions.id} = ${runs.sessionId} and ${sessions.activeRunId} = ${runs.id})`,
       ),
     )
     .limit(limit);

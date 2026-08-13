@@ -10,6 +10,30 @@ export interface SessionTurn {
   events: RunEvent[];
 }
 
+export function sessionRunView(turns: SessionTurn[], activeRunId: string | null | undefined) {
+  const latest = turns.at(-1)?.run ?? null;
+  const activeRun = turns.find((turn) => turn.run.id === activeRunId)?.run ?? null;
+  const queuedRuns = turns
+    .map((turn) => turn.run)
+    .filter((run) => run.status === "queued" && run.id !== activeRunId);
+  const visibleTurns = turns.filter((turn) => {
+    if (turn.run.id === activeRunId) return true;
+    if (turn.run.status === "queued") return false;
+    const deletedBeforeStart =
+      turn.run.status === "cancelled" &&
+      turn.run.sandboxStoppedAt === null &&
+      turn.events.length === 0;
+    return !deletedBeforeStart;
+  });
+  return {
+    activeRun,
+    queuedRuns,
+    visibleTurns,
+    displayRun: activeRun ?? visibleTurns.at(-1)?.run ?? latest,
+    latest,
+  };
+}
+
 export function useSession(id: string) {
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [history, setHistory] = useState<Record<string, RunEvent[]>>({});

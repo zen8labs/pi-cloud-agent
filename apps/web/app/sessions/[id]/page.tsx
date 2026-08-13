@@ -20,7 +20,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { api } from "@/lib/api";
 import { absoluteTime } from "@/lib/format";
 import { resolveBranch, summarizeChanges } from "@/lib/session-meta";
-import { type SessionTurn, useSession } from "@/lib/useSession";
+import { sessionRunView, useSession } from "@/lib/useSession";
 import { cn } from "@/lib/utils";
 
 const SessionDiffSidebar = dynamic(
@@ -52,24 +52,6 @@ function getMaxDiffWidth(): number {
 
 function clampDiffWidth(width: number, maxWidth = MAX_DIFF_WIDTH): number {
   return Math.min(maxWidth, Math.max(MIN_DIFF_WIDTH, Math.round(width)));
-}
-
-function sessionRunView(turns: SessionTurn[], activeRunId: string | null | undefined) {
-  const latest = turns.at(-1)?.run ?? null;
-  const activeRun = turns.find((turn) => turn.run.id === activeRunId)?.run ?? null;
-  const queuedRuns = turns
-    .map((turn) => turn.run)
-    .filter((run) => run.status === "queued" && run.id !== activeRunId);
-  const visibleTurns = turns.filter(
-    (turn) => turn.run.status !== "queued" || turn.run.id === activeRunId,
-  );
-  return {
-    activeRun,
-    queuedRuns,
-    visibleTurns,
-    displayRun: activeRun ?? visibleTurns.at(-1)?.run ?? latest,
-    latest,
-  };
 }
 
 export default function SessionPage() {
