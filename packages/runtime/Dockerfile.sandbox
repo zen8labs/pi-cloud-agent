@@ -44,6 +44,11 @@ RUN apt-get update \
     && git lfs install --system \
     && rm -rf /var/lib/apt/lists/*
 
+# Keep large package downloads off microSandbox's separate 512 MiB /tmp tmpfs.
+RUN mkdir -p /workspace/.tmp && chmod 1777 /workspace/.tmp
+
+ENV TMPDIR=/workspace/.tmp
+
 # The GitHub CLI is how the agent actuates outcomes — posting a review,
 # opening a pull request — with the token it was given.
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -69,9 +74,10 @@ RUN npm install --omit=dev --no-audit --no-fund \
 COPY dist/run.js /app/run.js
 
 # Where the repository is cloned and the agent works.
-RUN mkdir -p /workspace/.pi-cloud-agent \
+RUN mkdir -p /workspace/.pi-cloud-agent /workspace/.tmp \
     && chmod 1777 /workspace \
     && chown node:node /workspace/.pi-cloud-agent \
+    && chown node:node /workspace/.tmp \
     && chmod 700 /workspace/.pi-cloud-agent
 
 # Both providers execute repository code as this user. Toolchains belong in the
