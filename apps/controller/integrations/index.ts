@@ -1,5 +1,9 @@
 export { createWebhookRegistry } from "./factory";
 export {
+  GITHUB_ISSUE_SURFACE_KIND,
+  GitHubIssueCommentAdapter,
+} from "./github-issue-comment";
+export {
   MEMORY_SURFACE_KIND,
   MemoryIngressAdapter,
   MemoryReportSink,

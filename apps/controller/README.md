@@ -21,7 +21,7 @@ Decides what runs and when, resolves connected identities, mints run credentials
 | `http/app.ts` | route composition, CORS, error handling |
 | `http/manual.ts` | request parsing shared by the run and session routes |
 | `http/webhook.ts` | machine-to-machine REST trigger (ZEN-93) |
-| `integrations/` | ingress + report-back substrate (memory + REST webhook) |
+| `integrations/` | ingress + report-back (memory, REST webhook, GitHub issue-comment adapter) |
 | `http/runs.ts` | the operator API, including the resumable SSE stream |
 | `http/sessions.ts` | durable chat sessions and guarded follow-up turns |
 | `http/plugins.ts` | marketplace catalog, install, configure, OAuth connect/callback, operator publish/review |
