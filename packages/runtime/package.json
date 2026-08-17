@@ -16,7 +16,7 @@
   "dependencies": {
     "@earendil-works/pi-coding-agent": "catalog:",
     "@pi-cloud-agent/protocol": "workspace:*",
-    "pi-mcp-adapter": "2.18.0"
+    "pi-mcp-adapter": "2.21.2"
   },
   "devDependencies": {
     "@e2b/cli": "2.16.0",

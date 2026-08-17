@@ -53,13 +53,13 @@
     "verify": "pnpm lint && pnpm boundaries && pnpm docs:check && pnpm files:check && pnpm deadcode && pnpm dupes && pnpm typecheck && pnpm test && pnpm test:integration"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.6",
+    "@biomejs/biome": "2.5.7",
     "@types/node": "catalog:",
     "husky": "9.1.7",
     "jscpd": "5.0.14",
     "knip": "6.29.0",
     "tsx": "catalog:",
-    "turbo": "2.10.7",
+    "turbo": "2.10.9",
     "typescript": "catalog:",
     "vitest": "3.2.7"
   }
