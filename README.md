@@ -75,7 +75,7 @@ The split is by **substitutability and trust**, not by feature. `packages/runtim
 
 Skills/plugins, sandbox backends, and forges are the surfaces this project wants to grow, and none of them require touching the controller. Bug fixes, corrected docs, and deletions are equally welcome.
 
-[DEVELOPMENT.md](DEVELOPMENT.md) covers environment setup and validation. [CONTRIBUTING.md](CONTRIBUTING.md) covers the rules CI enforces and the short list of changes worth discussing before you write code. By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+[DEVELOPMENT.md](DEVELOPMENT.md) covers environment setup and validation. [CONTRIBUTING.md](CONTRIBUTING.md) covers the rules CI enforces and the short list of changes worth discussing before you write code.
 
 ## Credits
 
