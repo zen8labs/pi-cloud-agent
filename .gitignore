@@ -22,6 +22,9 @@ e2b.toml
 # Published plugin artifacts (local marketplace store).
 .pi-plugin-artifacts/
 
+# Local microSandbox session checkpoints.
+.pi-cloud-agent-snapshots/
+
 # AIHub auto-generated history
 .specstory/
 # Reference code consulted during architecture design, not part of the project

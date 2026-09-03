@@ -127,8 +127,18 @@ function SessionGroup({
             <span className="truncate">
               {titles[session.id] || session.title || sessionLabel(session)}
             </span>
+            {session.retentionStatus === "inactive" && (
+              <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
+                inactive
+              </span>
+            )}
             {session.status !== "idle" && (
-              <span className="ml-auto size-1.5 shrink-0 animate-pulse-dot rounded-full bg-emerald-500" />
+              <span
+                className={cn(
+                  "size-1.5 shrink-0 animate-pulse-dot rounded-full bg-emerald-500",
+                  session.retentionStatus === "inactive" ? "ml-1.5" : "ml-auto",
+                )}
+              />
             )}
           </Link>
         ))}

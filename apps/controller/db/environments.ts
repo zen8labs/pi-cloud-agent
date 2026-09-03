@@ -1,70 +1,70 @@
 import { and, asc, eq } from "drizzle-orm";
 import type { Database } from "./client";
-import { type RepositoryEnvironmentRow, repositoryEnvironments } from "./schema";
+import { type RepositorySandboxImageRow, repositorySandboxImages } from "./schema";
 
-export async function listRepositoryEnvironments(
+export async function listRepositorySandboxImages(
   database: Database,
   userId: string,
-): Promise<RepositoryEnvironmentRow[]> {
+): Promise<RepositorySandboxImageRow[]> {
   return database
     .select()
-    .from(repositoryEnvironments)
-    .where(eq(repositoryEnvironments.userId, userId))
-    .orderBy(asc(repositoryEnvironments.repoFullName));
+    .from(repositorySandboxImages)
+    .where(eq(repositorySandboxImages.userId, userId))
+    .orderBy(asc(repositorySandboxImages.repoFullName));
 }
 
-export async function getRepositoryEnvironment(
+export async function getRepositorySandboxImage(
   database: Database,
   userId: string | null,
   provider: string,
   repoFullName: string,
-): Promise<RepositoryEnvironmentRow | null> {
+): Promise<RepositorySandboxImageRow | null> {
   if (!userId) return null;
   const [row] = await database
     .select()
-    .from(repositoryEnvironments)
+    .from(repositorySandboxImages)
     .where(
       and(
-        eq(repositoryEnvironments.userId, userId),
-        eq(repositoryEnvironments.provider, provider),
-        eq(repositoryEnvironments.repoFullName, repoFullName),
+        eq(repositorySandboxImages.userId, userId),
+        eq(repositorySandboxImages.provider, provider),
+        eq(repositorySandboxImages.repoFullName, repoFullName),
       ),
     )
     .limit(1);
   return row ?? null;
 }
 
-export async function saveRepositoryEnvironment(
+export async function saveRepositorySandboxImage(
   database: Database,
-  input: { userId: string; provider: string; repoFullName: string; setupScript: string },
-): Promise<RepositoryEnvironmentRow> {
+  input: { userId: string; provider: string; repoFullName: string; imageRef: string },
+): Promise<RepositorySandboxImageRow> {
   const [row] = await database
-    .insert(repositoryEnvironments)
+    .insert(repositorySandboxImages)
     .values(input)
     .onConflictDoUpdate({
       target: [
-        repositoryEnvironments.userId,
-        repositoryEnvironments.provider,
-        repositoryEnvironments.repoFullName,
+        repositorySandboxImages.userId,
+        repositorySandboxImages.provider,
+        repositorySandboxImages.repoFullName,
       ],
-      set: { setupScript: input.setupScript, updatedAt: new Date() },
+      set: { imageRef: input.imageRef, updatedAt: new Date() },
     })
     .returning();
   if (!row) throw new Error("could not save repository environment");
   return row;
 }
 
-export async function deleteRepositoryEnvironment(
+export async function deleteRepositorySandboxImage(
   database: Database,
   input: { userId: string; provider: string; repoFullName: string },
 ): Promise<void> {
   await database
-    .delete(repositoryEnvironments)
+    .delete(repositorySandboxImages)
     .where(
       and(
-        eq(repositoryEnvironments.userId, input.userId),
-        eq(repositoryEnvironments.provider, input.provider),
-        eq(repositoryEnvironments.repoFullName, input.repoFullName),
+        eq(repositorySandboxImages.userId, input.userId),
+        eq(repositorySandboxImages.provider, input.provider),
+        eq(repositorySandboxImages.repoFullName, input.repoFullName),
       ),
     );
 }

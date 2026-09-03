@@ -126,6 +126,8 @@ export async function createSessionTurn(
         turnCount: turnNumber,
         model: modelSelection.model,
         modelConnectionId: modelSelection.modelConnectionId,
+        retentionStatus: "active",
+        lastActivityAt: new Date(),
         updatedAt: new Date(),
       })
       .where(eq(sessions.id, sessionId));
@@ -189,8 +191,22 @@ export async function saveSessionCheckpoint(
   if (!sessionId) return false;
   const updated = await database
     .update(sessions)
-    .set({ agentCheckpoint: content, updatedAt: new Date() })
+    .set({ agentCheckpoint: content, lastActivityAt: new Date(), updatedAt: new Date() })
     .where(and(eq(sessions.id, sessionId), eq(sessions.activeRunId, run.id)))
+    .returning({ id: sessions.id });
+  return updated.length > 0;
+}
+
+/** Pin the repository image used if this session later needs a cold start. */
+export async function pinSessionSandboxImage(
+  database: Database,
+  sessionId: string,
+  imageRef: string,
+): Promise<boolean> {
+  const updated = await database
+    .update(sessions)
+    .set({ sandboxImageRef: imageRef, updatedAt: new Date() })
+    .where(and(eq(sessions.id, sessionId), isNull(sessions.sandboxImageRef)))
     .returning({ id: sessions.id });
   return updated.length > 0;
 }
@@ -254,6 +270,8 @@ export async function parkSession(
             sandboxProvider: workspace?.provider ?? null,
             sandboxId: workspace?.id ?? null,
             workspaceExpiresAt: expiresAt,
+            retentionStatus: workspace ? ("active" as const) : ("inactive" as const),
+            checkpointSizeBytes: workspace?.sizeBytes ?? null,
           };
     const updated = await tx
       .update(sessions)
@@ -316,16 +334,59 @@ export async function clearSessionWorkspace(
   database: Database,
   sessionId: string,
   workspaceId: string,
+  expectedActiveRunId?: string | null,
 ): Promise<boolean> {
+  const head =
+    expectedActiveRunId === undefined
+      ? []
+      : [
+          expectedActiveRunId === null
+            ? isNull(sessions.activeRunId)
+            : eq(sessions.activeRunId, expectedActiveRunId),
+        ];
   const updated = await database
     .update(sessions)
     .set({
       sandboxProvider: null,
       sandboxId: null,
       workspaceExpiresAt: null,
+      retentionStatus: "inactive",
+      checkpointSizeBytes: null,
       updatedAt: new Date(),
     })
-    .where(and(eq(sessions.id, sessionId), eq(sessions.sandboxId, workspaceId)))
+    .where(and(eq(sessions.id, sessionId), eq(sessions.sandboxId, workspaceId), ...head))
     .returning({ id: sessions.id });
   return updated.length > 0;
+}
+
+/** Permanently delete a session and its turns after the checkpoint is reclaimed. */
+export async function deleteSession(
+  database: Database,
+  sessionId: string,
+  userId?: string | null,
+  expectedActiveRunId?: string | null,
+  /** Prevent an archive from deleting a turn queued after its initial read. */
+  expectedLatestRunId?: string,
+): Promise<boolean> {
+  const ownership = userId ? [eq(sessions.userId, userId)] : [];
+  const head =
+    expectedActiveRunId === undefined
+      ? []
+      : [
+          expectedActiveRunId === null
+            ? isNull(sessions.activeRunId)
+            : eq(sessions.activeRunId, expectedActiveRunId),
+        ];
+  const deleted = await database
+    .delete(sessions)
+    .where(
+      and(
+        eq(sessions.id, sessionId),
+        ...ownership,
+        ...head,
+        ...(expectedLatestRunId ? [eq(sessions.latestRunId, expectedLatestRunId)] : []),
+      ),
+    )
+    .returning({ id: sessions.id });
+  return deleted.length > 0;
 }

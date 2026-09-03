@@ -81,10 +81,12 @@ export interface RunEventsResponse {
 }
 
 export type SessionStatus = "idle" | "queued" | "provisioning" | "running" | "parking";
+export type SessionRetentionStatus = "active" | "inactive";
 
 export interface SessionSummary {
   id: string;
   status: SessionStatus;
+  retentionStatus: SessionRetentionStatus;
   title: string;
   provider: string;
   repo: string;
@@ -93,6 +95,7 @@ export interface SessionSummary {
   activeRunId: string | null;
   latestRunId: string;
   workspaceAvailable: boolean;
+  checkpointSizeBytes: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -169,7 +172,18 @@ export interface BranchesResponse {
 export const updateRepositoryEnvironmentRequestSchema = z.object({
   provider: z.string().min(1),
   repo: z.string().min(3),
-  setupScript: z.string().max(100_000),
+  imageRef: z
+    .string()
+    .trim()
+    .max(500)
+    .refine(
+      (value) =>
+        Array.from(value).every((char) => {
+          const code = char.charCodeAt(0);
+          return code >= 32 && code !== 127;
+        }),
+      "image reference contains control characters",
+    ),
 });
 
 export type UpdateRepositoryEnvironmentRequest = z.infer<
@@ -179,7 +193,7 @@ export type UpdateRepositoryEnvironmentRequest = z.infer<
 export interface RepositoryEnvironmentSummary {
   provider: string;
   repo: string;
-  setupScript: string;
+  imageRef: string;
   updatedAt: string;
 }
 

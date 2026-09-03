@@ -80,6 +80,15 @@ export interface Reconciler {
 }
 
 const BATCH = 25;
+type ParkableSessionRun = Omit<RunRow, "sessionId" | "sandboxId" | "sandboxProvider"> & {
+  sessionId: string;
+  sandboxId: string;
+  sandboxProvider: string;
+};
+
+function isParkableSessionRun(run: RunRow): run is ParkableSessionRun {
+  return Boolean(run.sessionId && run.sandboxId && run.sandboxProvider);
+}
 
 export function createReconciler(options: ReconcilerOptions): Reconciler {
   const {
@@ -96,7 +105,14 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
   } = options;
 
   const sandbox = providedSandbox ?? createProvider(config.sandbox.provider);
-  const provisionDeps: ProvisionDeps = { config, database, broker, sandbox, log };
+  const provisionDeps: ProvisionDeps = {
+    config,
+    database,
+    broker,
+    sandbox,
+    createProvider,
+    log,
+  };
 
   let running = false;
   let timer: NodeJS.Timeout | null = null;
@@ -131,22 +147,32 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
       await reclaim(run, reason);
       return;
     }
-    if (!run.sandboxId || !run.sandboxProvider) {
-      // A promoted turn can be cancelled before it resumes the session's
-      // parked workspace. It owns no sandbox to suspend, so preserve the
-      // existing workspace reference for the next queued turn.
-      await parkSession(database, run, undefined, null);
+    if (!isParkableSessionRun(run)) {
+      await parkWithoutSandbox(run);
       return;
     }
 
+    await parkWithSandbox(run, reason);
+  }
+
+  async function parkWithoutSandbox(run: RunRow): Promise<void> {
+    // A promoted turn can be cancelled before it resumes the session's
+    // parked workspace. It owns no sandbox to suspend, so preserve the
+    // existing workspace reference for the next queued turn.
+    await parkSession(database, run, undefined, null);
+  }
+
+  async function parkWithSandbox(run: ParkableSessionRun, reason: string): Promise<void> {
     const provider =
       run.sandboxProvider === sandbox.name ? sandbox : createProvider(run.sandboxProvider);
     const ref = { provider: run.sandboxProvider, id: run.sandboxId };
+    const previous = await getSession(database, run.sessionId);
     try {
       const workspace = await provider.suspend(ref);
       const expiresAt = new Date(Date.now() + config.sessionWorkspaceRetentionSeconds * 1000);
       const parked = await parkSession(database, run, workspace, expiresAt);
       if (parked) {
+        await deleteReplacedWorkspace(provider, previous, workspace, log, run.sessionId);
         log.info("session workspace suspended", {
           sessionId: run.sessionId,
           runId: run.id,
@@ -155,7 +181,10 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
         });
       } else {
         const current = await getSession(database, run.sessionId);
-        const stillOwned = current?.activeRunId || current?.sandboxId === workspace.id;
+        // A follow-up may have claimed the session while the provider was
+        // snapshotting. If the CAS lost, the newly-created artifact is not the
+        // checkpoint the follow-up owns and must be reclaimed immediately.
+        const stillOwned = current?.sandboxId === workspace.id;
         if (!stillOwned) await provider.deleteWorkspace(workspace);
       }
     } catch (error) {
@@ -165,12 +194,78 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
         error,
       });
       await provider.stop(ref).catch(() => undefined);
-      await parkSession(database, run, null, null);
+      const parked = await parkSession(database, run, null, null);
+      await cleanupFailedSuspension(provider, previous, ref, parked, run.sessionId);
+    }
+  }
+
+  async function cleanupFailedSuspension(
+    provider: SandboxProvider,
+    previous: SessionRow | null,
+    ref: { provider: string; id: string },
+    parked: boolean,
+    sessionId: string,
+  ): Promise<void> {
+    if (
+      !parked ||
+      !previous?.sandboxId ||
+      previous.sandboxProvider !== ref.provider ||
+      previous.sandboxId === ref.id
+    ) {
+      return;
+    }
+    await provider
+      .deleteWorkspace({ provider: previous.sandboxProvider, id: previous.sandboxId })
+      .catch((cleanupError) =>
+        log.error("old session workspace cleanup failed after suspension error", {
+          sessionId,
+          workspaceId: previous.sandboxId,
+          error: cleanupError,
+        }),
+      );
+  }
+
+  async function deleteReplacedWorkspace(
+    provider: SandboxProvider,
+    previous: SessionRow | null,
+    workspace: { provider: string; id: string },
+    sessionLog: Logger,
+    sessionId: string,
+  ): Promise<void> {
+    if (
+      !previous?.sandboxId ||
+      !previous.sandboxProvider ||
+      previous.sandboxProvider !== workspace.provider ||
+      previous.sandboxId === workspace.id
+    ) {
+      return;
+    }
+    try {
+      await provider.deleteWorkspace({
+        provider: previous.sandboxProvider,
+        id: previous.sandboxId,
+      });
+      sessionLog.info("replaced session workspace deleted", {
+        sessionId,
+        workspaceId: previous.sandboxId,
+      });
+    } catch (error) {
+      // The new checkpoint is already durable. Keep the session usable and let
+      // the provider's own lifecycle policy reclaim the old artifact if needed.
+      sessionLog.error("replaced session workspace deletion failed", {
+        sessionId,
+        workspaceId: previous.sandboxId,
+        error,
+      });
     }
   }
 
   async function expireWorkspace(session: SessionRow): Promise<void> {
     if (!session.sandboxId || !session.sandboxProvider) return;
+    const current = await getSession(database, session.id);
+    if (!current || current.activeRunId !== null || current.sandboxId !== session.sandboxId) {
+      return;
+    }
     const provider =
       session.sandboxProvider === sandbox.name
         ? sandbox
@@ -186,8 +281,12 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
         workspaceId: session.sandboxId,
         error,
       });
+      // Keep the durable reference so the next reconciliation pass can retry.
+      // Clearing it here would mark the session inactive while leaking the
+      // provider artifact permanently.
+      return;
     }
-    await clearSessionWorkspace(database, session.id, session.sandboxId);
+    await clearSessionWorkspace(database, session.id, session.sandboxId, null);
   }
 
   async function drainQueue(): Promise<void> {

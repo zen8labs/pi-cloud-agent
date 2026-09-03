@@ -14,7 +14,7 @@ export interface SandboxProvider {
 }
 ```
 
-`create`/`stop` are the standalone lifecycle. `suspend`/`resume`/`deleteWorkspace` are the durable-session lifecycle. A backend may implement the latter with a filesystem-only pause, snapshot, archive, or detached volume. The optional `execute` method powers the Settings setup preflight and must run a disposable foreground command, return its output, and reclaim the machine before returning. The opaque `WorkspaceRef` is the only provider-specific state stored by the controller.
+`create`/`stop` are the standalone lifecycle. `suspend`/`resume`/`deleteWorkspace` are the durable-session lifecycle. A backend may implement the latter with a filesystem-only pause, snapshot, archive, or detached volume. The optional `execute` method powers the Settings image preflight and must run a disposable foreground command, return its output, and reclaim the machine before returning. The opaque `WorkspaceRef` (optionally including `sizeBytes`) is the only provider-specific state stored by the controller.
 
 ## 1. Write it
 
@@ -72,7 +72,7 @@ export function createMyBackendProvider(
 
     async suspend(ref) {
       const workspace = await snapshotFilesystem(ref.id);
-      return { provider: "my-backend", id: workspace.id };
+      return { provider: "my-backend", id: workspace.id, sizeBytes: workspace.sizeBytes };
     },
 
     async deleteWorkspace(ref) {
@@ -132,9 +132,9 @@ If you ever find yourself needing an application route, polling bridge, or agent
 
 ## The image
 
-`spec.image` is provider-specific: an E2B template name, a Docker tag, a Modal image reference. An empty string means "use this provider's configured default".
+`spec.image` is provider-specific: an E2B template name, a Docker/OCI tag, a Modal image reference. An empty string means "use this provider's configured default". The E2B implementation turns public OCI references into a cached template before creating a sandbox.
 
-Whatever it points at needs Node, `git`, `gh`, and the bundled runtime at `/app/run.js`. `packages/runtime/Dockerfile.sandbox` is the reference; a provider that consumes plain Dockerfiles can use it unchanged.
+Whatever it points at needs Node, `git`, `gh`, the `tsx` loader, `/app/run.js`, and `/app/package.json` with the runtime dependencies. `packages/runtime/Dockerfile.sandbox` is the reference; a provider that consumes plain Dockerfiles can use it unchanged.
 
 ## Test it
 

@@ -5,12 +5,13 @@ import {
   type SessionStatus,
   type SessionSummary,
 } from "@pi-cloud-agent/protocol";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { getRun } from "../db/runs";
 import type { RunRow, SessionRow } from "../db/schema";
 import {
   createSessionTurn,
   createSessionWithRun,
+  deleteSession,
   getSession,
   listSessionRuns,
   listSessions,
@@ -18,13 +19,17 @@ import {
 } from "../db/sessions";
 import type { resolveLlmModel } from "../llm/connections";
 import { requireAuthenticatedUser, userOwns } from "./auth";
-import type { AppEnv } from "./deps";
+import type { AppEnv, Deps } from "./deps";
 import { readManualRouteRequest } from "./manual";
 import { resolveRequestedLlmModel } from "./model-selection";
 import { toDetail } from "./runs";
 
+type SessionContext = Context<AppEnv>;
+
 /** Durable chat sessions. Each user turn creates one ordinary run. */
-export function sessionRoutes(): Hono<AppEnv> {
+export function sessionRoutes(
+  deps: Pick<Deps, "sandbox" | "createSandboxProvider"> = {},
+): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   app.use("*", requireAuthenticatedUser);
@@ -116,7 +121,88 @@ export function sessionRoutes(): Hono<AppEnv> {
     return c.json(toDetail(result.run), 201);
   });
 
+  app.delete("/:sessionId", async (c) => {
+    return archiveSession(c, deps);
+  });
+
   return app;
+}
+
+async function archiveSession(
+  c: SessionContext,
+  deps: Pick<Deps, "sandbox" | "createSandboxProvider">,
+) {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "authentication required" }, 401);
+  const database = c.get("database");
+  const sessionId = c.req.param("sessionId");
+  if (!sessionId) return c.json({ error: "session not found" }, 404);
+  const session = await getSession(database, sessionId, user.id);
+  if (!session) return c.json({ error: "session not found" }, 404);
+
+  const activeRun = session.activeRunId ? await getRun(database, session.activeRunId) : null;
+  if (activeRun && !isTerminalRun(activeRun)) {
+    return c.json({ error: "session has an active run" }, 409);
+  }
+  const sessionRuns = await listSessionRuns(database, session.id, user.id);
+  if (sessionRuns.some((run) => run.id !== activeRun?.id && !isTerminalRun(run))) {
+    return c.json({ error: "session has a queued run" }, 409);
+  }
+  if (
+    (session.sandboxId || activeRun?.sandboxId) &&
+    !deps.sandbox &&
+    !deps.createSandboxProvider
+  ) {
+    return c.json({ error: "sandbox cleanup is not available" }, 503);
+  }
+  try {
+    await cleanupSessionSandbox(deps, session, activeRun);
+  } catch (error) {
+    c.get("log").error("session checkpoint cleanup failed", { sessionId: session.id, error });
+    return c.json({ error: "could not delete session checkpoint" }, 502);
+  }
+  const deleted = await deleteSession(
+    database,
+    session.id,
+    user.id,
+    activeRun?.id ?? null,
+    session.latestRunId,
+  );
+  if (!deleted) {
+    return c.json({ error: "session changed while it was being archived; retry" }, 409);
+  }
+  return c.json({ ok: true });
+}
+
+function isTerminalRun(run: RunRow): boolean {
+  return ["succeeded", "failed", "cancelled"].includes(run.status);
+}
+
+async function cleanupSessionSandbox(
+  deps: Pick<Deps, "sandbox" | "createSandboxProvider">,
+  session: SessionRow,
+  activeRun: RunRow | null,
+): Promise<void> {
+  const providerFor = (name: string | null | undefined) => {
+    if (deps.sandbox?.name === name || !name) return deps.sandbox;
+    return deps.createSandboxProvider?.(name);
+  };
+  if (activeRun?.sandboxId && !activeRun.sandboxStoppedAt) {
+    const provider = providerFor(activeRun.sandboxProvider);
+    if (!provider) throw new Error("sandbox cleanup is not available");
+    await provider.stop({
+      provider: activeRun.sandboxProvider ?? provider.name,
+      id: activeRun.sandboxId,
+    });
+  }
+  if (session.sandboxId) {
+    const provider = providerFor(session.sandboxProvider);
+    if (!provider) throw new Error("sandbox cleanup is not available");
+    await provider.deleteWorkspace({
+      provider: session.sandboxProvider ?? provider.name,
+      id: session.sandboxId,
+    });
+  }
 }
 
 type SessionTurnResult =
@@ -183,6 +269,8 @@ async function toSessionSummary(
     activeRunId: session.activeRunId,
     latestRunId: session.latestRunId,
     workspaceAvailable: Boolean(session.sandboxId),
+    retentionStatus: session.retentionStatus,
+    checkpointSizeBytes: session.checkpointSizeBytes,
     createdAt: session.createdAt.toISOString(),
     updatedAt: session.updatedAt.toISOString(),
   };

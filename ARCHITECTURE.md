@@ -84,7 +84,7 @@ Eight tables. That is the entire persistent state of the system.
 | `app_users` | stable application users established by GitHub App authorization |
 | `web_sessions` | hashed, expiring browser sessions |
 
-Session state and runtime lifetime are deliberately separate. Postgres owns the conversation checkpoint; the sandbox provider owns a filesystem reference; live compute exists only while a turn runs. If the parked workspace expires, the next turn cold-clones the repository and still opens the same Pi session. See [docs/sessions.md](docs/sessions.md).
+Session state and runtime lifetime are deliberately separate. Postgres owns the conversation checkpoint; the sandbox provider owns a filesystem checkpoint; live compute exists only while a turn runs. If the checkpoint expires, the next turn cold-clones the repository and still opens the same Pi session. See [docs/resumability.md](docs/resumability.md).
 
 ## Observability
 

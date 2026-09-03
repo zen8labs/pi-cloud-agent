@@ -1,0 +1,1 @@
+ALTER TABLE "sessions" ADD COLUMN "sandbox_image_ref" text;

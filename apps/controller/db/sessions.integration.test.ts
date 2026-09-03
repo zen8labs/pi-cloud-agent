@@ -5,6 +5,7 @@ import type { Database } from "./client";
 import { claimNextRun, completeRun } from "./runs";
 import { sessions } from "./schema";
 import {
+  clearSessionWorkspace,
   createSessionTurn,
   findSessionRunsToPark,
   getSession,
@@ -154,7 +155,12 @@ describe("durable sessions", () => {
     );
     const expiresAt = new Date(Date.now() + 60_000);
     await completeRun(database, run.id, "succeeded", null);
-    await parkSession(database, run, { provider: "fake", id: "workspace-1" }, expiresAt);
+    await parkSession(
+      database,
+      run,
+      { provider: "fake", id: "workspace-1", sizeBytes: 4096 },
+      expiresAt,
+    );
     await completeRun(database, promoted.id, "cancelled", "cancelled before provisioning");
 
     expect(await parkSession(database, promoted, undefined, null)).toBe(true);
@@ -163,6 +169,8 @@ describe("durable sessions", () => {
     expect(stored?.sandboxProvider).toBe("fake");
     expect(stored?.sandboxId).toBe("workspace-1");
     expect(stored?.workspaceExpiresAt).toEqual(expiresAt);
+    expect(stored?.retentionStatus).toBe("active");
+    expect(stored?.checkpointSizeBytes).toBe(4096);
   });
 
   it("persists checkpoints only from the active session head", async () => {
@@ -192,6 +200,7 @@ describe("durable sessions", () => {
     const { session, run } = await seedSession(database);
     await completeRun(database, run.id, "succeeded", null);
     await parkSession(database, run, null, null);
+    expect((await getSession(database, session.id))?.retentionStatus).toBe("inactive");
     const second = await createSessionTurn(
       database,
       session.id,
@@ -202,7 +211,27 @@ describe("durable sessions", () => {
     );
 
     expect(second.turnNumber).toBe(2);
+    expect((await getSession(database, session.id))?.retentionStatus).toBe("active");
     expect(second.trigger.repo).toEqual(session.repo);
     expect(second.trigger.prompt).toBe("Inspect the same checkout");
+  });
+
+  it("does not clear an expired checkpoint after a follow-up claims the session", async () => {
+    const { session, run } = await seedSession(database);
+    await completeRun(database, run.id, "succeeded", null);
+    await parkSession(database, run, { provider: "fake", id: "workspace-1" }, new Date());
+    const followUp = await createSessionTurn(
+      database,
+      session.id,
+      "Resume while expiry is being reconciled",
+      "token-2",
+      null,
+      { model: session.model, modelConnectionId: session.modelConnectionId },
+    );
+
+    expect(await clearSessionWorkspace(database, session.id, "workspace-1", null)).toBe(false);
+    const stored = await getSession(database, session.id);
+    expect(stored?.activeRunId).toBe(followUp.id);
+    expect(stored?.sandboxId).toBe("workspace-1");
   });
 });

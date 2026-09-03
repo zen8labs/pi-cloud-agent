@@ -134,7 +134,19 @@ pnpm sandbox:image
 
 For E2B, use `pnpm sandbox:template` instead.
 
-The image provides Node/npm/pnpm, Python/pip/venv/uv, Git/GitHub CLIs, common shell utilities, and native build tools. Repository-specific dependencies belong in the per-repository setup script in Settings > Environments; see [packages/runtime/README.md](packages/runtime/README.md#sandbox-tools-and-repository-setup).
+The image provides Node/npm/pnpm, Python/pip/venv/uv, Git/GitHub CLIs, common shell utilities, and native build tools. Repository-specific dependencies belong in a per-repository custom image; see [packages/runtime/README.md](packages/runtime/README.md#image-contract).
+
+To build a derivative image, extend the bundled image, install the repository's toolchain as root, then return to the unprivileged runtime user before pushing it to a public registry:
+
+```dockerfile
+FROM pi-cloud-agent:local
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends <toolchain> \
+    && rm -rf /var/lib/apt/lists/*
+USER node
+```
+
+Enter the pushed OCI reference in Settings > Environments and run **Test image** before saving it for the repository.
 
 ## Troubleshooting
 

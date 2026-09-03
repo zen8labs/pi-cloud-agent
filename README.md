@@ -31,7 +31,7 @@ Runs are fully headless. The dashboard can also continue a deliberate multi-turn
 
 A remote dev environment. There is nothing to attach to; the controller cannot even dial into a sandbox, by design. A parked session preserves agent history and a filesystem, not a machine you can SSH into.
 
-The execution unit is a **run**: an event starts it, it ends, and its log is immutable. A **session** is the durable parent for ordered chat turns, the Pi checkpoint, and an optional parked workspace. See [docs/sessions.md](docs/sessions.md).
+The execution unit is a **run**: an event starts it, it ends, and its log is immutable. A **session** is the durable parent for ordered chat turns, the Pi checkpoint, and an optional provider checkpoint. See [docs/resumability.md](docs/resumability.md).
 
 ## Development
 

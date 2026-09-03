@@ -127,6 +127,9 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  archiveSession: (id: string): Promise<{ ok: boolean }> =>
+    request<{ ok: boolean }>(`/sessions/${id}`, { method: "DELETE" }),
+
   cancelRun: (id: string): Promise<{ status: string }> =>
     request<{ status: string }>(`/runs/${id}/cancel`, { method: "POST" }),
 
@@ -144,7 +147,7 @@ export const api = {
   saveRepositoryEnvironment: (body: {
     provider: string;
     repo: string;
-    setupScript: string;
+    imageRef: string;
   }): Promise<{
     ok: boolean;
     configured: boolean;
@@ -158,7 +161,7 @@ export const api = {
   testRepositoryEnvironment: (body: {
     provider: string;
     repo: string;
-    setupScript: string;
+    imageRef: string;
   }): Promise<{ ok: boolean; code: number; output: string }> =>
     request<{ ok: boolean; code: number; output: string }>("/environments/test", {
       method: "POST",

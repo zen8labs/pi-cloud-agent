@@ -10,7 +10,7 @@ import {
 } from "@pi-cloud-agent/protocol";
 import type { Config } from "../config";
 import type { Database } from "../db/client";
-import { getRepositoryEnvironment } from "../db/environments";
+import { getRepositorySandboxImage } from "../db/environments";
 import {
   appendEvent,
   attachSandbox,
@@ -20,7 +20,11 @@ import {
   setRunPlugins,
 } from "../db/runs";
 import type { RunRow } from "../db/schema";
-import { clearSessionWorkspace, getSessionForRun } from "../db/sessions";
+import {
+  clearSessionWorkspace,
+  getSessionForRun,
+  pinSessionSandboxImage,
+} from "../db/sessions";
 import type { Logger } from "../logger";
 import { buildTaskPrompt, resolvePluginsForRun } from "../plugins/catalog";
 import type { CredentialBroker } from "../secrets/broker";
@@ -42,6 +46,8 @@ export interface ProvisionDeps {
   database: Database;
   broker: CredentialBroker;
   sandbox: SandboxProvider;
+  /** Resolve a provider recorded on a parked session after a config change. */
+  createProvider?: (name: string) => SandboxProvider;
   log: Logger;
 }
 
@@ -99,28 +105,29 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
         "mcp config",
       );
     }
-    const environment = await getRepositoryEnvironment(
+    const environment = await getRepositorySandboxImage(
       database,
       run.userId,
       run.provider,
       run.repoFullName,
     );
-    if (environment?.setupScript) {
-      secrets[SANDBOX_ENV.setupScript] = new Secret(
-        environment.setupScript,
-        "app-managed repository setup script",
-      );
+    const imageRef = session?.sandboxImageRef ?? environment?.imageRef ?? "";
+    if (session && session.sandboxImageRef === null) {
+      await pinSessionSandboxImage(database, session.id, imageRef);
     }
-
     const spec = {
       runId: run.id,
-      image: "",
+      image: imageRef,
       timeoutSeconds: config.sandbox.timeoutSeconds,
       env,
       secrets,
       command: `node --import tsx ${SANDBOX_PATHS.app}/run.js`,
     };
-    const ref = await startSandbox(session, spec, sandbox, database, log);
+    const sessionSandbox =
+      session?.sandboxProvider && session.sandboxProvider !== sandbox.name
+        ? (deps.createProvider?.(session.sandboxProvider) ?? sandbox)
+        : sandbox;
+    const ref = await startSandbox(session, spec, sessionSandbox, database, log);
 
     // First durable write after the machine exists. Until this commits, a crash
     // would leak the sandbox; after it, the reconciler will always find it.
@@ -138,7 +145,9 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
       log.warn("run left provisioning during create; stopping the orphan sandbox", {
         sandboxId: ref.id,
       });
-      await sandbox.stop(ref).catch((error) => log.error("orphan stop failed", { error }));
+      await sessionSandbox
+        .stop(ref)
+        .catch((error) => log.error("orphan stop failed", { error }));
       return;
     }
 
@@ -170,7 +179,7 @@ async function startSandbox(
     return await sandbox.resume(workspace, spec);
   } catch (error) {
     if (!(error instanceof WorkspaceNotFoundError)) throw error;
-    await clearSessionWorkspace(database, session.id, workspace.id);
+    await clearSessionWorkspace(database, session.id, workspace.id, session.activeRunId);
     log.warn("stored session workspace is gone; continuing from checkpoint", {
       sessionId: session.id,
       workspaceId: workspace.id,

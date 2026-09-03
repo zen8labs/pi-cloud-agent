@@ -127,6 +127,20 @@
       "when": 1786207299175,
       "tag": "0017_gorgeous_quicksilver",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788407523337,
+      "tag": "0018_session_checkpoints",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788413287069,
+      "tag": "0019_nostalgic_krista_starr",
+      "breakpoints": true
     }
   ]
 }

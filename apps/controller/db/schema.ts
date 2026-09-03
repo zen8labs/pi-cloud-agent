@@ -5,11 +5,13 @@ import type {
   RepoRef,
   RunEventType,
   RunStatus,
+  SessionRetentionStatus,
   ThinkingLevel,
   Trigger,
 } from "@pi-cloud-agent/protocol";
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -70,7 +72,7 @@ export const vcsConnections = pgTable(
   ],
 );
 
-export const repositoryEnvironments = pgTable(
+export const repositorySandboxImages = pgTable(
   "repository_environments",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -79,8 +81,8 @@ export const repositoryEnvironments = pgTable(
       .references(() => appUsers.id, { onDelete: "cascade" }),
     provider: text("provider").notNull(),
     repoFullName: text("repo_full_name").notNull(),
-    /** App-managed setup script. Empty configurations are deleted. */
-    setupScript: text("setup_script").notNull(),
+    /** Provider-specific base image/template reference. Empty mappings are deleted. */
+    imageRef: text("image_ref").notNull(),
     createdAt: timestamptz("created_at").notNull().defaultNow(),
     updatedAt: timestamptz("updated_at").notNull().defaultNow(),
   },
@@ -161,10 +163,22 @@ export const sessions = pgTable(
     /** Original checkout revision used for the cumulative session diff. */
     diffBaseSha: text("diff_base_sha"),
 
-    /** Provider-owned workspace retained while the session is idle. */
+    /** Repository image/template selected for this session's cold starts. */
+    sandboxImageRef: text("sandbox_image_ref"),
+
+    /** Provider-owned checkpoint retained while the session is idle. */
     sandboxProvider: text("sandbox_provider"),
     sandboxId: text("sandbox_id"),
     workspaceExpiresAt: timestamptz("workspace_expires_at"),
+    /** Retention state for the provider-owned checkpoint. */
+    retentionStatus: text("retention_status")
+      .notNull()
+      .default("active")
+      .$type<SessionRetentionStatus>(),
+    /** Last user activity, used to transition active sessions to inactive. */
+    lastActivityAt: timestamptz("last_activity_at").notNull().defaultNow(),
+    /** Provider-reported checkpoint size for quota/retention accounting. */
+    checkpointSizeBytes: bigint("checkpoint_size_bytes", { mode: "number" }),
 
     createdAt: timestamptz("created_at").notNull().defaultNow(),
     updatedAt: timestamptz("updated_at").notNull().defaultNow(),
@@ -174,6 +188,9 @@ export const sessions = pgTable(
     index("sessions_workspace_expiry_idx")
       .on(table.workspaceExpiresAt)
       .where(sql`${table.sandboxId} is not null and ${table.activeRunId} is null`),
+    index("sessions_retention_activity_idx")
+      .on(table.retentionStatus, table.lastActivityAt)
+      .where(sql`${table.activeRunId} is null`),
   ],
 );
 
@@ -452,7 +469,7 @@ export type SessionRow = typeof sessions.$inferSelect;
 export type RunEventRow = typeof runEvents.$inferSelect;
 export type ObservabilityExportRow = typeof observabilityExports.$inferSelect;
 export type VcsConnectionRow = typeof vcsConnections.$inferSelect;
-export type RepositoryEnvironmentRow = typeof repositoryEnvironments.$inferSelect;
+export type RepositorySandboxImageRow = typeof repositorySandboxImages.$inferSelect;
 export type LlmConnectionRow = typeof llmConnections.$inferSelect;
 export type OAuthStateRow = typeof oauthStates.$inferSelect;
 export type AppUserRow = typeof appUsers.$inferSelect;

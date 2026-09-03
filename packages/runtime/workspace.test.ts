@@ -1,13 +1,15 @@
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { SANDBOX_ENV } from "@pi-cloud-agent/protocol";
+import { existsSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeConfig } from "./config";
 import type { Reporter } from "./reporter";
-import { runSetupScript } from "./setup";
-import { gitDiff, gitRevision, trimCommandOutput } from "./workspace";
+import { gitDiff, gitRevision, prepareCheckout, trimCommandOutput } from "./workspace";
 
 vi.mock("node:child_process", () => ({ spawn: vi.fn() }));
+vi.mock("node:fs", () => ({ existsSync: vi.fn() }));
+vi.mock("node:fs/promises", () => ({ rm: vi.fn(async () => undefined) }));
 
 const config: RuntimeConfig = {
   runId: "run-1",
@@ -18,7 +20,6 @@ const config: RuntimeConfig = {
   controlPlaneUrl: "https://controller.test",
   callbackToken: "callback-token-value-1234",
   prompt: "test",
-  appSetupScript: "",
   model: {
     provider: "test-provider",
     name: "test-model",
@@ -64,126 +65,69 @@ function addMockChild(
   return child;
 }
 
-function fakeReporter(): Reporter {
-  return {
-    event: vi.fn(),
-    log: vi.fn(),
-    status: vi.fn(),
-    modelCredential: vi.fn(async () => true),
-    flush: vi.fn(),
-  };
+function queueChild(children: MockChild[], output: string, code: number): void {
+  vi.mocked(spawn).mockImplementationOnce(() => addMockChild(children, output, code) as never);
 }
 
 afterEach(() => {
-  vi.useRealTimers();
-  vi.unstubAllEnvs();
   vi.resetAllMocks();
 });
 
-describe("repository setup", () => {
-  it("runs the app-managed setup script", async () => {
-    vi.mocked(spawn).mockImplementationOnce(
-      () => addMockChild([], "configured environment ready", 0) as never,
-    );
-    const reporter = fakeReporter();
+function testReporter() {
+  return {
+    event: vi.fn(),
+    log: vi.fn(),
+    status: vi.fn(async () => {}),
+    modelCredential: vi.fn(async () => false),
+    flush: vi.fn(async () => {}),
+  } satisfies Reporter;
+}
 
-    await runSetupScript({ ...config, appSetupScript: "pnpm install" }, reporter);
+describe("checkout preparation", () => {
+  it("reuses a resumed checkout without cloning again", async () => {
+    const children: MockChild[] = [];
+    const reporter = testReporter();
+    vi.mocked(existsSync).mockReturnValue(true);
+    queueChild(children, "https://github.com/acme/widgets.git\n", 0);
 
-    expect(spawn).toHaveBeenCalledWith(
-      "bash",
-      ["--noprofile", "--norc", "-e", "-u", "-o", "pipefail", "-c", "pnpm install"],
-      expect.objectContaining({ cwd: config.repo.path }),
-    );
-    expect(reporter.log).toHaveBeenCalledWith("setup.started", {
-      script: "app environment setting",
+    const result = await prepareCheckout({ ...config, workspaceResumed: true }, reporter);
+
+    expect(result).toBe("resumed");
+    expect(children).toHaveLength(1);
+    expect(vi.mocked(spawn).mock.calls[0]?.[0]).toBe("git");
+    expect(vi.mocked(spawn).mock.calls[0]?.[1]).toEqual(["remote", "get-url", "origin"]);
+    expect(reporter.log).toHaveBeenCalledWith("git.workspace_resumed", {
+      path: config.repo.path,
     });
-    expect(reporter.log).toHaveBeenCalledWith("setup.complete");
+    expect(reporter.log).not.toHaveBeenCalledWith("git.cloned", expect.anything());
+    expect(rm).not.toHaveBeenCalled();
   });
 
-  it("does nothing when no app-managed script is configured", async () => {
-    const reporter = fakeReporter();
+  it("clones on a cold start instead of trusting a preloaded checkout", async () => {
+    const children: MockChild[] = [];
+    const reporter = testReporter();
+    // A repository image may contain a stale path; only the provider resume bit
+    // authorizes reusing it.
+    vi.mocked(existsSync).mockReturnValue(true);
+    queueChild(children, "", 0);
 
-    await runSetupScript(config, reporter);
+    const result = await prepareCheckout({ ...config, workspaceResumed: false }, reporter);
 
-    expect(spawn).not.toHaveBeenCalled();
-    expect(reporter.log).toHaveBeenCalledWith("setup.skipped", { reason: "no script" });
-  });
-
-  it("runs setup without model or callback credentials", async () => {
-    vi.stubEnv("BASH_ENV", "/etc/bash.bashrc");
-    vi.stubEnv("ENV", "/etc/profile");
-    vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv(SANDBOX_ENV.callbackToken, "callback-secret");
-    vi.stubEnv(SANDBOX_ENV.modelApiKey, "model-secret");
-    vi.stubEnv(SANDBOX_ENV.modelAuthJson, "model-oauth-secret");
-    vi.stubEnv(SANDBOX_ENV.mcpConfig, "plugin-secret");
-    vi.stubEnv(SANDBOX_ENV.scmToken, "forge-secret");
-    vi.mocked(spawn).mockImplementationOnce(
-      () => addMockChild([], "dependencies ready", 0) as never,
-    );
-    const reporter = fakeReporter();
-
-    await runSetupScript({ ...config, appSetupScript: "pnpm install" }, reporter);
-
-    const options = vi.mocked(spawn).mock.calls[0]?.[2];
-    expect(options?.env).not.toHaveProperty(SANDBOX_ENV.callbackToken);
-    expect(options?.env).not.toHaveProperty(SANDBOX_ENV.modelApiKey);
-    expect(options?.env).not.toHaveProperty(SANDBOX_ENV.modelAuthJson);
-    expect(options?.env).not.toHaveProperty(SANDBOX_ENV.mcpConfig);
-    expect(options?.env).not.toHaveProperty("BASH_ENV");
-    expect(options?.env).not.toHaveProperty("ENV");
-    expect(options?.env).not.toHaveProperty("NODE_ENV");
-    expect(options?.env).toHaveProperty(SANDBOX_ENV.scmToken, "forge-secret");
-    expect(reporter.log).toHaveBeenCalledWith("setup.started", {
-      script: "app environment setting",
+    expect(result).toBe("created");
+    expect(children).toHaveLength(1);
+    expect(rm).toHaveBeenCalledWith(config.repo.path, {
+      recursive: true,
+      force: true,
     });
-    expect(reporter.log).toHaveBeenCalledWith("setup.complete");
-  });
-
-  it("fails the run when app-managed setup exits non-zero", async () => {
-    vi.mocked(spawn).mockImplementationOnce(
-      () => addMockChild([], "", 17, "dependency install failed") as never,
-    );
-    const reporter = fakeReporter();
-
-    await expect(
-      runSetupScript({ ...config, appSetupScript: "pnpm install" }, reporter),
-    ).rejects.toThrow("repository setup exited with code 17: dependency install failed");
-    expect(reporter.log).toHaveBeenCalledWith(
-      "setup.failed",
-      expect.objectContaining({ exitCode: 17, timedOut: false }),
-    );
-    expect(reporter.log).not.toHaveBeenCalledWith("setup.complete");
-  });
-
-  it("fails the run when app-managed setup reaches its timeout", async () => {
-    vi.useFakeTimers();
-    const child = new EventEmitter() as EventEmitter & {
-      stdout: EventEmitter;
-      stderr: EventEmitter;
-      kill: ReturnType<typeof vi.fn>;
-    };
-    child.stdout = new EventEmitter();
-    child.stderr = new EventEmitter();
-    child.kill = vi.fn(() => {
-      child.emit("close", null, "SIGKILL");
-      return true;
-    });
-    vi.mocked(spawn).mockReturnValue(child as never);
-
-    const reporter = fakeReporter();
-    const pending = runSetupScript({ ...config, appSetupScript: "pnpm install" }, reporter);
-    const assertion = expect(pending).rejects.toThrow(
-      "repository setup timed out after 300 seconds",
-    );
-    await vi.advanceTimersByTimeAsync(300_000);
-    await assertion;
-
-    expect(reporter.log).not.toHaveBeenCalledWith("setup.complete");
-    expect(reporter.log).toHaveBeenCalledWith(
-      "setup.failed",
-      expect.objectContaining({ timedOut: true, signal: "SIGKILL" }),
-    );
+    expect(vi.mocked(spawn).mock.calls[0]?.[1]).toEqual([
+      "clone",
+      "--depth",
+      "100",
+      "--branch",
+      "main",
+      config.repo.cloneUrl,
+      config.repo.path,
+    ]);
   });
 });
 

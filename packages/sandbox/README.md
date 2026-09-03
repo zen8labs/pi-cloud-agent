@@ -12,10 +12,7 @@ It stays this small because of one constraint: **the sandbox is outbound-only.**
 
 `execute` is optional and is used only by the Settings preflight test. It creates a disposable sandbox, runs one foreground command, returns bounded output, and destroys the machine. It is not a general controller-side shell or an inbound channel into agent workspaces.
 
-Durable chat sessions additionally use `resume`, `suspend`, and
-`deleteWorkspace`. These remain provider control-plane operations; they do not
-open an inbound application connection to the sandbox. See
-[../../docs/sessions.md](../../docs/sessions.md).
+Durable chat sessions additionally use `resume`, `suspend`, and `deleteWorkspace`. These remain provider control-plane operations; they do not open an inbound application connection to the sandbox. See [../../docs/resumability.md](../../docs/resumability.md).
 
 **Depends on:** `@pi-cloud-agent/protocol`, `zod`, and each backend's own SDK.
 
@@ -24,7 +21,7 @@ open an inbound application connection to the sandbox. See
 | File | Role |
 |---|---|
 | `index.ts` | the `FACTORIES` registry, `createSandboxProvider`, `sandboxProviderNames` |
-| `microsandbox.ts` | microSandbox: local OCI microVM create/kill plus stop/start resume |
+| `microsandbox.ts` | microSandbox: local OCI microVM create/kill plus local integrity-checked snapshots |
 | `e2b.ts` | E2B: hosted create/kill plus filesystem-only pause/resume |
 | `registry.test.ts` | the registry contract: construction and its failure messages |
 
@@ -44,9 +41,9 @@ open an inbound application connection to the sandbox. See
 
 microSandbox consumes an OCI image. Build the repository's local runtime image with `pnpm sandbox:image`; the command imports the Docker-built archive into the microSandbox cache. `MICROSANDBOX_IMAGE` can point at a different local image or registry reference. The provider overrides the image entrypoint with an inert command and starts the per-run runtime explicitly so credentials and run values are not baked into the image.
 
-microSandbox's default root filesystem is persisted by stopping and restarting the named sandbox. Its snapshots are an optional filesystem-only optimization; they do not preserve process memory.
+microSandbox persists a session by stopping the VM, creating an integrity-checked Snapshot under `MICROSANDBOX_SNAPSHOT_DIR`, and removing the live sandbox. Resume boots from that Snapshot, so process memory and per-run credentials do not survive. The default directory is `.pi-cloud-agent-snapshots` in the controller working directory; mount it on durable local storage in production and monitor its size.
 
-E2B remains selectable with `SANDBOX_PROVIDER=e2b` and uses its hosted template workflow.
+E2B remains selectable with `SANDBOX_PROVIDER=e2b` and uses its hosted template workflow. If Settings contains a public OCI reference, the provider builds a deterministically named E2B template from that image and reuses it on later runs. A simple name is first checked as an existing E2B template alias and, if it does not exist, is treated as an untagged Docker Hub image.
 
 For deployment, build the image with an immutable registry tag and push it to an OCI-compatible registry. Set `MICROSANDBOX_IMAGE` to that reference on the machine that runs the controller and microSandbox, or pre-load the image with `msb load` on that machine. The local `pi-cloud-agent:local` tag is not a production artifact name and is not automatically visible on another host.
 
