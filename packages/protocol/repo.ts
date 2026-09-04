@@ -15,6 +15,8 @@ export const repoRefSchema = z.object({
   owner: z.string().min(1),
   name: z.string().min(1),
   cloneUrl: z.string().url(),
+  /** Base repository clone URL when a pull request comes from a fork. */
+  baseCloneUrl: z.string().url().optional(),
   defaultBranch: z.string().default("main"),
   /** Merge base, when the trigger is a pull request. */
   baseSha: z.string().default(""),

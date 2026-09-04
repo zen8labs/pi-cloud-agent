@@ -34,6 +34,7 @@ const config: RuntimeConfig = {
     owner: "acme",
     name: "widgets",
     cloneUrl: "https://github.com/acme/widgets.git",
+    baseCloneUrl: "https://github.com/acme/widgets.git",
     defaultBranch: "main",
     headBranch: "main",
     headSha: "",
@@ -42,6 +43,8 @@ const config: RuntimeConfig = {
   },
   git: { username: "x-access-token", hasToken: false },
   mcpConfig: null,
+  githubReview: null,
+  githubComment: null,
 };
 
 type MockChild = EventEmitter & { stdout: EventEmitter; stderr: EventEmitter };
@@ -70,6 +73,8 @@ function fakeReporter(): Reporter {
     log: vi.fn(),
     status: vi.fn(),
     modelCredential: vi.fn(async () => true),
+    review: vi.fn(),
+    comment: vi.fn(),
     flush: vi.fn(),
   };
 }

@@ -178,6 +178,12 @@ export const api = {
       ? `${API_BASE}/auth/github/connect?returnTo=settings`
       : `${API_BASE}/vcs/connections/${encodeURIComponent(provider)}/connect`,
 
+  bindGithubInstallation: (installationId: string): Promise<{ ok: boolean }> =>
+    request<{ ok: boolean }>("/integrations/github/setup", {
+      method: "POST",
+      body: JSON.stringify({ installationId }),
+    }),
+
   listPlugins: (): Promise<PluginCatalogResponse> => request<PluginCatalogResponse>("/plugins"),
 
   connectPluginOAuthUrl: (name: string): string =>

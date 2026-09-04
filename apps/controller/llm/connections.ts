@@ -158,6 +158,22 @@ export async function resolveLlmModel(
   return decryptModel(connection, config, modelId);
 }
 
+/** Resolve the user's configured default for integration-triggered work. */
+export async function resolveDefaultLlmModel(
+  database: Database,
+  config: Config,
+  userId: string,
+): Promise<ResolvedLlmModel> {
+  const connections = await listLlmConnections(database, userId);
+  const selected = connections.find((connection) => connection.isDefault) ?? connections[0];
+  if (!selected) {
+    throw new LlmModelSelectionError(
+      "connect a model provider in Settings before starting an integration task",
+    );
+  }
+  return resolveLlmModel(database, config, userId, selected.id, selected.model);
+}
+
 export async function resolveLlmModelForRun(
   database: Database,
   config: Config,

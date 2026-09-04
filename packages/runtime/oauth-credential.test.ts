@@ -27,6 +27,8 @@ it("captures Pi's rotated refresh token before the run-local auth file is delete
     log: vi.fn(),
     status: vi.fn(),
     modelCredential,
+    review: vi.fn(),
+    comment: vi.fn(),
     flush: vi.fn(),
   };
   const config = {
@@ -49,6 +51,8 @@ it("does not replace the turn outcome when OAuth cleanup cannot read its tempora
     log: vi.fn(),
     status: vi.fn(),
     modelCredential: vi.fn(),
+    review: vi.fn(),
+    comment: vi.fn(),
     flush: vi.fn(),
   };
   const config = {
@@ -85,6 +89,8 @@ it("does not fail a completed turn when refreshed credential delivery is unavail
     modelCredential: vi.fn(async () => {
       throw new Error("controller unavailable");
     }),
+    review: vi.fn(),
+    comment: vi.fn(),
     flush: vi.fn(),
   };
   const config = {

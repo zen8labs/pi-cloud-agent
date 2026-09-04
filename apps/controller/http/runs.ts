@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import {
   isTerminal,
   type RunDetail,
@@ -7,13 +6,14 @@ import {
 } from "@pi-cloud-agent/protocol";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+import { queueSessionCommand } from "../commands/session";
 import type { Database } from "../db/client";
-import { completeRun, createRun, getRun, listEvents, listRuns } from "../db/runs";
+import { completeRun, getRun, listEvents, listRuns } from "../db/runs";
 import type { RunRow } from "../db/schema";
+import { LlmModelSelectionError } from "../llm/connections";
 import { requireAuthenticatedUser, userOwns } from "./auth";
 import type { AppEnv } from "./deps";
 import { readManualRouteRequest } from "./manual";
-import { resolveRequestedLlmModel } from "./model-selection";
 
 /** The operator API: start runs, read them, watch them, stop them. */
 export function runRoutes(): Hono<AppEnv> {
@@ -39,28 +39,25 @@ export function runRoutes(): Hono<AppEnv> {
     const resolved = await readManualRouteRequest(c);
     if (!resolved.ok) return c.json(resolved.error, 422);
     const { body, request: manual } = resolved;
-    const selected = await resolveRequestedLlmModel(
-      c.get("database"),
-      config,
-      user.id,
-      body.modelConnectionId,
-      body.modelId,
-      body.thinkingLevel,
-    );
-    if (!selected.ok) return c.json({ error: selected.error }, 422);
-    const model = selected.model;
-
-    const run = await createRun(c.get("database"), {
-      userId: user.id,
-      provider: body.provider,
-      repoFullName: body.repo,
-      trigger: manual.trigger,
-      // Pinned at creation, so a run stays reproducible if configuration changes.
-      model: `${model.provider}/${model.name}`,
-      modelConnectionId: model.connectionId,
-      thinkingLevel: body.thinkingLevel,
-      callbackToken: randomBytes(32).toString("hex"),
-    });
+    let queued: Awaited<ReturnType<typeof queueSessionCommand>>;
+    try {
+      queued = await queueSessionCommand(c.get("database"), config, {
+        userId: user.id,
+        repo: manual.repo,
+        prompt: body.prompt,
+        mode: "standalone_run",
+        intent: "general",
+        modelConnectionId: body.modelConnectionId,
+        modelId: body.modelId,
+        thinkingLevel: body.thinkingLevel,
+        provenance: { source: "dashboard", eventType: "manual" },
+      });
+    } catch (error) {
+      if (error instanceof LlmModelSelectionError) return c.json({ error: error.message }, 422);
+      throw error;
+    }
+    const run = await getRun(c.get("database"), queued.runId);
+    if (!run) return c.json({ error: "run could not be created" }, 500);
 
     c.get("log").info("run queued", {
       runId: run.id,

@@ -1,6 +1,10 @@
 import { join } from "node:path";
 import {
   createRedactor,
+  type GithubCommentContext,
+  type GithubReviewContext,
+  githubCommentContextSchema,
+  githubReviewContextSchema,
   redactUrlCredentials,
   SANDBOX_ENV,
   SANDBOX_PATHS,
@@ -45,6 +49,7 @@ export interface RuntimeConfig {
     owner: string;
     name: string;
     cloneUrl: string;
+    baseCloneUrl: string;
     defaultBranch: string;
     headBranch: string;
     headSha: string;
@@ -56,6 +61,10 @@ export interface RuntimeConfig {
 
   /** Parsed MCP config JSON when plugins attached MCP; null means zero MCP. */
   mcpConfig: unknown | null;
+  /** Present only for a GitHub review run; enables the structured publisher tool. */
+  githubReview: GithubReviewContext | null;
+  /** Present only for a GitHub comment task; enables the structured reply tool. */
+  githubComment: GithubCommentContext | null;
 }
 
 const DEFAULT_VIRTUAL_ENV = "/home/node/.venv";
@@ -93,6 +102,10 @@ export function readConfig(): RuntimeConfig {
   // so repository code cannot read it from the inherited process environment.
   delete process.env[SANDBOX_ENV.setupScript];
 
+  const githubReview = parseGithubReview(optional(SANDBOX_ENV.githubReview));
+  const githubComment = parseGithubComment(optional(SANDBOX_ENV.githubComment));
+  const cloneUrl = required(SANDBOX_ENV.repoCloneUrl);
+
   return {
     runId: required(SANDBOX_ENV.runId),
     controlPlaneUrl: required(SANDBOX_ENV.controlPlaneUrl).replace(/\/$/, ""),
@@ -120,7 +133,8 @@ export function readConfig(): RuntimeConfig {
     repo: {
       owner: optional(SANDBOX_ENV.repoOwner),
       name: repoName,
-      cloneUrl: required(SANDBOX_ENV.repoCloneUrl),
+      cloneUrl,
+      baseCloneUrl: optional(SANDBOX_ENV.repoBaseCloneUrl, cloneUrl),
       defaultBranch: optional(SANDBOX_ENV.repoDefaultBranch, "main"),
       headBranch: optional(SANDBOX_ENV.repoHeadBranch),
       headSha: optional(SANDBOX_ENV.repoHeadSha),
@@ -134,7 +148,22 @@ export function readConfig(): RuntimeConfig {
     },
 
     mcpConfig: parseMcpConfig(optional(SANDBOX_ENV.mcpConfig)),
+    githubReview,
+    githubComment,
   };
+}
+
+function parseGithubComment(raw: string): GithubCommentContext | null {
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error(`${SANDBOX_ENV.githubComment} is not valid JSON`);
+  }
+  const context = githubCommentContextSchema.safeParse(parsed);
+  if (!context.success) throw new Error(`${SANDBOX_ENV.githubComment} is invalid`);
+  return context.data;
 }
 
 function configurePythonEnvironment(): void {
@@ -151,6 +180,19 @@ function parseMcpConfig(raw: string): unknown | null {
   } catch {
     throw new Error(`${SANDBOX_ENV.mcpConfig} is not valid JSON`);
   }
+}
+
+function parseGithubReview(raw: string): GithubReviewContext | null {
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error(`${SANDBOX_ENV.githubReview} is not valid JSON`);
+  }
+  const context = githubReviewContextSchema.safeParse(parsed);
+  if (!context.success) throw new Error(`${SANDBOX_ENV.githubReview} is invalid`);
+  return context.data;
 }
 
 function readThinkingLevel(): ThinkingLevel {

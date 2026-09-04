@@ -380,9 +380,14 @@ export async function prepareCheckout(
   }
 
   if (repo.headSha) {
-    await run("git", ["fetch", "--depth", String(CLONE_DEPTH), "origin", repo.headSha], {
-      cwd: repo.path,
-    });
+    const fetched = await run(
+      "git",
+      ["fetch", "--depth", String(CLONE_DEPTH), "origin", repo.headSha],
+      { cwd: repo.path },
+    );
+    if (fetched.code !== 0) {
+      throw new Error(`could not fetch head revision ${repo.headSha}: ${fetched.output}`);
+    }
     const checkout = await run("git", ["reset", "--hard", repo.headSha], { cwd: repo.path });
     if (checkout.code !== 0) {
       throw new Error(`could not check out ${repo.headSha}: ${checkout.output}`);
@@ -396,16 +401,28 @@ export async function prepareCheckout(
 }
 
 async function fetchDiffRevisions(config: RuntimeConfig): Promise<void> {
-  const revisions = [config.repo.baseSha, config.sessionBaseSha].filter(
-    (revision, index, all): revision is string =>
-      Boolean(revision) && all.indexOf(revision) === index,
-  );
-  for (const revision of revisions) {
+  const revisions = [
+    config.repo.baseSha
+      ? { revision: config.repo.baseSha, remote: config.repo.baseCloneUrl }
+      : null,
+    config.sessionBaseSha ? { revision: config.sessionBaseSha, remote: "origin" } : null,
+  ].filter((entry): entry is { revision: string; remote: string } => entry !== null);
+  const fetched = new Set<string>();
+  for (const { revision, remote } of revisions) {
+    if (fetched.has(revision)) continue;
+    fetched.add(revision);
     // Fetched but not checked out: a shallow clone would not otherwise have the
     // revision needed for a cumulative diff.
-    await run("git", ["fetch", "--depth", String(CLONE_DEPTH), "origin", revision], {
-      cwd: config.repo.path,
-    });
+    const result = await run(
+      "git",
+      ["fetch", "--depth", String(CLONE_DEPTH), remote, revision],
+      {
+        cwd: config.repo.path,
+      },
+    );
+    if (result.code !== 0) {
+      throw new Error(`could not fetch diff revision ${revision}: ${result.output}`);
+    }
   }
 }
 

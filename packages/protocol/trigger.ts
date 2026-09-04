@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { provenanceSchema } from "./provenance";
 import { repoRefSchema } from "./repo";
 
 /**
@@ -26,6 +27,10 @@ export const triggerSchema = z.object({
   prompt: z.string().optional(),
   /** The comment body, for pr_comment triggers. */
   command: z.string().optional(),
+  /** Provider-neutral provenance retained for replay and audit. */
+  ...provenanceSchema.shape,
+  source: provenanceSchema.shape.source.default("manual"),
+  intent: z.enum(["general", "github_review", "github_task"]).default("general"),
 });
 
 export type Trigger = z.infer<typeof triggerSchema>;

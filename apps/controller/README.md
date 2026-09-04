@@ -25,7 +25,8 @@ Decides what runs and when, resolves connected identities, mints run credentials
 | `http/runs.ts` | the operator API, including the resumable SSE stream |
 | `http/sessions.ts` | durable chat sessions and guarded follow-up turns |
 | `http/plugins.ts` | marketplace catalog, install, configure, OAuth connect/callback, operator publish/review |
-| `http/internal.ts` | events, terminal status, checkpoint, and model-credential callbacks, authenticated per run |
+| `http/internal.ts` | events, terminal status, checkpoint, model-credential, and structured GitHub publication callbacks, authenticated per run |
+| `integrations/github.ts` | signed webhook intake, installation binding, durable delivery projection, exact PR-head resolution, and mention routing |
 | `http/environments.ts` | dashboard API for repository setup commands |
 | `observability.ts` | projects completed run journals into vendor-neutral OTLP traces from the trusted side |
 | `observability-projection.ts` | reconstructs run, step, turn, and tool span nesting from the durable journal |
@@ -49,7 +50,8 @@ Decides what runs and when, resolves connected identities, mints run credentials
 - **No in-memory session state.** Pi history is checkpointed in Postgres; a provider workspace id is only an optimization. See [../../docs/sessions.md](../../docs/sessions.md).
 - **No workflow-specific behavior.** Intake resolves the user's repository and request; attached skills are handled through plugins.
 - **`attachSandbox` is the first durable write after a machine exists.** Before it commits a crash leaks a sandbox; after it, the reconciler always finds it.
-- **The controller never parses agent output.** The agent actuates its own outcomes. Adding a parser here is one of the changes to raise first.
+- **The controller does not infer outcomes from prose.** A GitHub review is an explicit structured tool call from the runtime, validated and published by the controller; ordinary agent text remains telemetry.
+- **External side effects are explicit and durable.** GitHub reviews and comment replies arrive through authenticated structured callbacks, are idempotently reserved in Postgres, and only then complete the run.
 - **OTLP export is optional and best-effort.** The durable run journal remains the source of truth; exporter credentials stay in the controller, never in the sandbox. Delivery retries use `observability_exports` and do not affect run completion.
 - **Migrations are never applied on boot.** A schema change is a deliberate step, not a side effect of one replica winning a race during a deploy.
 

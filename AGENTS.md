@@ -33,6 +33,7 @@ Every package and app has one, and it is the local entry point: what that packag
 | adding or changing a plugin (skills / MCP) | [docs/adding-a-plugin.md](docs/adding-a-plugin.md) |
 | adding a sandbox backend (Docker, Modal, Daytona…) | [docs/adding-a-sandbox-provider.md](docs/adding-a-sandbox-provider.md) |
 | adding a forge (GitHub Enterprise, Gitea, Forgejo…) | [docs/adding-a-vcs-provider.md](docs/adding-a-vcs-provider.md) |
+| adding an external trigger (GitHub, Slack, Linear, Azure DevOps…) | [docs/adding-an-integration.md](docs/adding-an-integration.md) |
 | touching run state, the queue, or the reconciler | [docs/resumability.md](docs/resumability.md) |
 | touching credentials, tokens, or anything logged | [docs/secrets.md](docs/secrets.md) |
 | writing or changing tests | [docs/testing.md](docs/testing.md) |

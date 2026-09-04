@@ -19,7 +19,9 @@ It reaches exactly one thing: `CONTROL_PLANE_URL`, outbound only.
 | `agent.ts` | one agent turn, relaying Pi's native events as telemetry |
 | `oauth-credential.ts` | persists Pi OAuth rotation before deleting run-local auth state |
 | `session-state.ts` | authenticated download/open/upload of the Pi JSONL checkpoint |
-| `reporter.ts` | the only outbound path: telemetry, OAuth rotation, and terminal status |
+| `reporter.ts` | the only outbound path: telemetry, OAuth rotation, structured GitHub publication, and terminal status |
+| `github-review.ts` | schema-shaped Pi tool that requests one trusted controller-side PR review |
+| `github-comment.ts` | schema-shaped Pi tool that requests one trusted controller-side reply to the triggering comment |
 | `build.ts` | bundles to `dist/run.js` and pins the harness version for the image |
 | `Dockerfile.sandbox` | the sandbox image: Node/Python toolchains, coding CLIs, the bundle |
 
@@ -31,6 +33,8 @@ It reaches exactly one thing: `CONTROL_PLANE_URL`, outbound only.
 - **Never write a credential to parked workspace state.** The git credential helper prints from the environment on demand, precisely so no token lands in `.git/config` where the agent could later read or commit it. Pi OAuth may use a run-scoped temporary auth file. If Pi rotates it, the runtime sends the replacement to the authenticated controller callback before removing the file and before the session workspace can be suspended.
 - **Repository setup is explicit.** A per-repository setup script saved in the dashboard's Settings > Environments runs once after a fresh clone. The current setting is resolved when the run is provisioned; an empty setting skips custom setup and uses only the bundled image. A non-zero exit or five-minute timeout fails the run instead of handing the agent a known-broken checkout. The script does not receive model, callback, or plugin credentials; forge credentials remain available for private Git dependencies.
 - **No workflow code here.** The controller composes enabled plugin skills and the user request into one finished `TASK_PROMPT`, so the image ships no plugin package.
+- **GitHub review actuation is explicit.** Review runs receive one `submit_github_review` tool. It sends a structured body and inline comments to the authenticated controller callback; it does not use `gh` to post, and the controller never infers a review from streamed prose.
+- **GitHub task replies are explicit.** Mention-triggered runs receive one `reply_github_comment` tool. It targets the original issue or inline review comment through the controller, never through `gh` or credentials in the sandbox.
 - **MCP is opt-in via env.** When `MCP_CONFIG` is set, the runtime dynamically loads `pi-mcp-adapter` with that isolated snapshot. It never discovers `.mcp.json` from the cloned repository, and a run without MCP never imports the adapter. After `createAgentSession`, the runtime calls `bindExtensions` so Pi emits `session_start` — without that, the adapter registers tools but never initializes. The sandbox command uses `node --import tsx` so the adapter's TypeScript entry can load; the image pins the adapter's peers (`typebox`, `@earendil-works/pi-ai`, `@earendil-works/pi-tui`) at the top level because npm nests Pi's copies where the adapter cannot resolve them, and remaps `pi-ai`'s main entry to `/compat` so the adapter's `complete` import matches Pi 0.82.
 - **This is the one package with a build step.** Crossing into a container image is where "just run the TypeScript" stops being simpler.
 

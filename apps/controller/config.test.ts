@@ -45,4 +45,14 @@ describe("observability configuration", () => {
       }),
     ).toThrow("valid URL");
   });
+
+  it("requires a numeric GitHub App id when App-authored publication is enabled", () => {
+    expect(() => configFrom({ ...baseEnv, GITHUB_APP_ID: "zen8agent" })).toThrow(
+      "numeric GitHub App id",
+    );
+    expect(
+      configFrom({ ...baseEnv, GITHUB_APP_ID: "3738122", GITHUB_APP_PRIVATE_KEY: "pem" })
+        .github,
+    ).toMatchObject({ appId: "3738122", privateKey: "pem" });
+  });
 });

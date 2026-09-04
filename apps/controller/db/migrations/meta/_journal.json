@@ -127,6 +127,20 @@
       "when": 1786207299175,
       "tag": "0017_gorgeous_quicksilver",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1786638574969,
+      "tag": "0018_graceful_tombstone",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1786677208881,
+      "tag": "0019_flawless_metal_master",
+      "breakpoints": true
     }
   ]
 }

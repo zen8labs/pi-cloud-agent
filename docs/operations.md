@@ -10,6 +10,29 @@ For first-time account setup, dependencies, local microSandbox image creation, a
 
 The Settings page manages the GitHub App and Azure DevOps connections. GitHub App sign-in is required and dashboard resources are scoped to the signed-in user. A connected VCS token is still exposed to the untrusted sandbox for the duration of a run; see [secrets.md](secrets.md).
 
+## GitHub event-triggered sessions
+
+The webhook endpoint is `POST /webhooks/github`. It verifies the raw request body with `X-Hub-Signature-256`, requires `X-GitHub-Delivery` and `X-GitHub-Event`, records the payload in `integration_deliveries`, and returns `202` without waiting for a model or sandbox. The reconciler claims those rows, retries transient projection failures with a bounded backoff, and projects supported events into the shared `SessionCommand` path.
+
+For a local smoke test, use the configured secret without printing it in shell history where possible:
+
+```bash
+payload='{"action":"ping"}'
+signature="sha256=$(printf %s "$payload" | openssl dgst -sha256 -hmac "$GITHUB_WEBHOOK_SECRET" | awk '{print $2}')"
+curl -i -X POST http://localhost:8080/webhooks/github \
+  -H 'Content-Type: application/json' \
+  -H 'X-GitHub-Delivery: local-smoke-001' \
+  -H 'X-GitHub-Event: ping' \
+  -H "X-Hub-Signature-256: $signature" \
+  --data "$payload"
+```
+
+Expected response: `202` with `{ "accepted": true, "duplicate": false }`; repeating the exact delivery id returns `duplicate: true` and does not create another inbox row. A real PR event must be sent through GitHub or a fixture with a bound `github_installations` row and a configured model connection.
+
+The first review run for a PR is keyed by `github:pr:<owner>/<repo>:<number>`. Later `@pi-cloud-agent` issue or inline review comments append turns to that same session. Review runs always use a fresh sandbox workspace, clone the head repository, reset to the exact head SHA from the event, fetch the base SHA, and publish through the controller's structured review callback. This avoids reviewing a newer main branch or posting comments from an untrusted `gh` process.
+
+The GitHub App Setup URL is intentionally public. If the browser does not have a controller-host session cookie (the usual localhost-dashboard plus ngrok-controller setup), it redirects to dashboard Settings with the installation id. Settings then calls the authenticated setup endpoint to verify the installation through the connected GitHub user token and persist the binding.
+
 ### The one setting people get wrong
 
 `CONTROL_PLANE_URL` must be reachable **from inside the sandbox**, because the sandbox is outbound-only and reports back over it. With the default local microSandbox provider, use its host gateway:

@@ -129,9 +129,22 @@ export async function getVcsProvider(
   provider: string,
   userId: string | null,
 ) {
-  if (!userId) return createVcsProvider(provider, "");
+  return createVcsProvider(
+    provider,
+    await getVcsAccessToken(database, config, provider, userId),
+  );
+}
+
+/** Resolve the current user token, refreshing the stored OAuth credential when needed. */
+export async function getVcsAccessToken(
+  database: Database,
+  config: Config,
+  provider: string,
+  userId: string | null,
+): Promise<string> {
+  if (!userId) return "";
   const row = await getVcsConnection(database, userId, provider);
-  if (!row) return createVcsProvider(provider, "");
+  if (!row) return "";
 
   const accessToken = decryptSecret(row.accessToken, config.vcs.encryptionKey);
   const refreshToken = row.refreshToken
@@ -148,9 +161,9 @@ export async function getVcsProvider(
         : row.refreshToken,
       expiresAt: token.expiresAt,
     });
-    return oauth.create(token.accessToken);
+    return token.accessToken;
   }
-  return createVcsProvider(provider, accessToken);
+  return accessToken;
 }
 
 function isOAuthConfigured(provider: string, config: Config): boolean {

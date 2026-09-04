@@ -65,7 +65,21 @@ const schema = z.object({
   LLM_ENCRYPTION_KEY: z.string().regex(/^[0-9a-f]{64}$/i, "must be 64 hexadecimal characters"),
   GITHUB_APP_CLIENT_ID: z.string().default(""),
   GITHUB_APP_CLIENT_SECRET: z.string().default(""),
+  /** Numeric GitHub App id, distinct from the OAuth client id. */
+  GITHUB_APP_ID: z
+    .string()
+    .refine((value) => value === "" || /^\d+$/.test(value), "must be a numeric GitHub App id")
+    .default(""),
+  /** PEM private key used only by the trusted controller to mint installation tokens. */
+  GITHUB_APP_PRIVATE_KEY: z.string().default(""),
   GITHUB_APP_REDIRECT_URI: z.string().default(""),
+  /** HMAC secret configured on the GitHub App webhook. Empty disables delivery intake. */
+  GITHUB_WEBHOOK_SECRET: z.string().default(""),
+  /** Mention that opts a repository comment into a follow-up task. */
+  GITHUB_MENTION: z
+    .string()
+    .regex(/^@[A-Za-z0-9][A-Za-z0-9_-]*$/)
+    .default("@pi-cloud-agent"),
   AZURE_DEVOPS_CLIENT_ID: z.string().default(""),
   AZURE_DEVOPS_CLIENT_SECRET: z.string().default(""),
   AZURE_DEVOPS_TENANT_ID: z.string().default("common"),
@@ -114,6 +128,12 @@ export interface Config {
   };
   vcs: { encryptionKey: string };
   llm: { encryptionKey: string };
+  github: {
+    webhookSecret: string;
+    mention: string;
+    appId: string;
+    privateKey: string;
+  };
   plugins: {
     operatorLogins: string[];
     artifactRoot: string;
@@ -135,6 +155,10 @@ function build(env: Env): Config {
     throw new Error(`Invalid configuration:\n${issues}\n\nSee .env.example.`);
   }
   const value = parsed.data;
+
+  if (Boolean(value.GITHUB_APP_ID) !== Boolean(value.GITHUB_APP_PRIVATE_KEY)) {
+    throw new Error("GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY must be configured together");
+  }
 
   const requireUser = value.APP_AUTH_REQUIRED === "true";
   if (requireUser && value.APP_SESSION_SECRET.length < 32) {
@@ -181,6 +205,12 @@ function build(env: Env): Config {
     },
     vcs: { encryptionKey: value.VCS_ENCRYPTION_KEY },
     llm: { encryptionKey: value.LLM_ENCRYPTION_KEY },
+    github: {
+      webhookSecret: value.GITHUB_WEBHOOK_SECRET,
+      mention: value.GITHUB_MENTION,
+      appId: value.GITHUB_APP_ID,
+      privateKey: value.GITHUB_APP_PRIVATE_KEY.replace(/\\n/g, "\n"),
+    },
     plugins: {
       operatorLogins: value.OPERATOR_GITHUB_LOGINS.split(",")
         .map((login) => login.trim().toLowerCase())

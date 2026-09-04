@@ -2,7 +2,6 @@ import {
   type CreateRunBody,
   createRunRequestSchema,
   type RepoRef,
-  type Trigger,
 } from "@pi-cloud-agent/protocol";
 import type { Context } from "hono";
 import type { Config } from "../config";
@@ -12,7 +11,6 @@ import type { AppEnv } from "./deps";
 
 interface ManualRequest {
   repo: RepoRef;
-  trigger: Trigger;
 }
 
 type ManualRequestResult =
@@ -78,6 +76,5 @@ async function resolveManualRequest(
     headBranch: branch,
     prNumber: null,
   };
-  const trigger: Trigger = { kind: "manual", repo, prompt: body.prompt };
-  return { repo, trigger };
+  return { repo };
 }

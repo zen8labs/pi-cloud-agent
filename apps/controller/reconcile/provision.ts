@@ -76,7 +76,9 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
     );
 
     const session = await getSessionForRun(database, run);
-    const workspaceResumed = Boolean(session?.sandboxId);
+    const workspaceResumed = Boolean(session?.sandboxId) && run.trigger.source !== "github";
+    const sessionBaseSha =
+      run.trigger.source === "github" ? null : (session?.diffBaseSha ?? null);
     const env = {
       ...buildEnv(
         run,
@@ -85,7 +87,7 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
         workspaceResumed,
         resolved.skillText,
         credentials.model,
-        session?.diffBaseSha ?? null,
+        sessionBaseSha,
       ),
       ...credentials.env,
     };
@@ -120,7 +122,14 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
       secrets,
       command: `node --import tsx ${SANDBOX_PATHS.app}/run.js`,
     };
-    const ref = await startSandbox(session, spec, sandbox, database, log);
+    const ref = await startSandbox(
+      session,
+      spec,
+      sandbox,
+      database,
+      log,
+      run.trigger.source !== "github",
+    );
 
     // First durable write after the machine exists. Until this commits, a crash
     // would leak the sandbox; after it, the reconciler will always find it.
@@ -160,8 +169,9 @@ async function startSandbox(
   sandbox: SandboxProvider,
   database: Database,
   log: Logger,
+  allowResume: boolean,
 ): Promise<SandboxRef> {
-  if (!session?.sandboxId) return sandbox.create(spec);
+  if (!allowResume || !session?.sandboxId) return sandbox.create(spec);
   const workspace = {
     provider: session.sandboxProvider ?? sandbox.name,
     id: session.sandboxId,
@@ -227,6 +237,32 @@ function buildEnv(
   sessionBaseSha: string | null,
 ): Record<string, string> {
   const { repo } = task;
+  const githubReview =
+    run.trigger.intent === "github_review" && repo.prNumber && repo.headSha
+      ? JSON.stringify({
+          owner: repo.owner,
+          repo: repo.name,
+          pullNumber: repo.prNumber,
+          headSha: repo.headSha,
+        })
+      : "";
+  const githubComment =
+    run.trigger.intent === "github_task" &&
+    repo.prNumber &&
+    run.trigger.integrationId &&
+    run.trigger.externalMessageId
+      ? JSON.stringify({
+          owner: repo.owner,
+          repo: repo.name,
+          issueNumber: repo.prNumber,
+          commentId: run.trigger.externalMessageId,
+          commentAuthor: run.trigger.externalActor,
+          replyKind:
+            run.trigger.eventType === "pull_request_review_comment"
+              ? "review_comment"
+              : "issue_comment",
+        })
+      : "";
   return {
     [SANDBOX_ENV.controlPlaneUrl]: config.controlPlaneUrl,
     [SANDBOX_ENV.runId]: run.id,
@@ -250,9 +286,12 @@ function buildEnv(
     [SANDBOX_ENV.repoOwner]: repo.owner,
     [SANDBOX_ENV.repoName]: repo.name,
     [SANDBOX_ENV.repoCloneUrl]: repo.cloneUrl,
+    [SANDBOX_ENV.repoBaseCloneUrl]: repo.baseCloneUrl ?? repo.cloneUrl,
     [SANDBOX_ENV.repoDefaultBranch]: repo.defaultBranch,
     [SANDBOX_ENV.repoBaseSha]: repo.baseSha,
     [SANDBOX_ENV.repoHeadSha]: repo.headSha,
     [SANDBOX_ENV.repoHeadBranch]: repo.headBranch,
+    [SANDBOX_ENV.githubReview]: githubReview,
+    [SANDBOX_ENV.githubComment]: githubComment,
   };
 }

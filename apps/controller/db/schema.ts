@@ -21,6 +21,9 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { type AttachedPluginRef, definePluginTables } from "./schema-plugins";
+
+export type { AttachedPluginRef } from "./schema-plugins";
 
 /**
  * Users and web sessions own the application identity boundary; runs and
@@ -177,6 +180,29 @@ export const sessions = pgTable(
   ],
 );
 
+/** Provider resource → durable conversation identity. */
+export const externalThreads = pgTable(
+  "external_threads",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    provider: text("provider").notNull(),
+    externalKey: text("external_key").notNull(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => appUsers.id, { onDelete: "cascade" }),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => sessions.id, { onDelete: "cascade" }),
+    repoFullName: text("repo_full_name").notNull(),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("external_threads_provider_key_idx").on(table.provider, table.externalKey),
+    index("external_threads_user_updated_idx").on(table.userId, table.updatedAt.desc()),
+  ],
+);
+
 export const runs = pgTable(
   "runs",
   {
@@ -269,7 +295,90 @@ export const runEvents = pgTable(
   ],
 );
 
+export type IntegrationDeliveryStatus =
+  | "pending"
+  | "processing"
+  | "processed"
+  | "ignored"
+  | "failed";
+
+/** Verified inbound deliveries. The provider retries; this table makes them idempotent. */
+export const integrationDeliveries = pgTable(
+  "integration_deliveries",
+  {
+    provider: text("provider").notNull(),
+    deliveryId: text("delivery_id").notNull(),
+    eventType: text("event_type").notNull(),
+    action: text("action"),
+    payload: jsonb("payload").notNull(),
+    status: text("status").notNull().default("pending").$type<IntegrationDeliveryStatus>(),
+    attempt: integer("attempt").notNull().default(0),
+    claimedAt: timestamptz("claimed_at"),
+    runId: uuid("run_id").references(() => runs.id, { onDelete: "set null" }),
+    lastError: text("last_error"),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.provider, table.deliveryId] }),
+    index("integration_deliveries_status_idx").on(
+      table.provider,
+      table.status,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const githubInstallations = pgTable(
+  "github_installations",
+  {
+    installationId: text("installation_id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => appUsers.id, { onDelete: "cascade" }),
+    accountId: text("account_id").notNull(),
+    accountLogin: text("account_login").notNull(),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamptz("created_at").notNull().defaultNow(),
+    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+  },
+  (table) => [index("github_installations_user_idx").on(table.userId)],
+);
+
+export type GithubReviewPublicationStatus = "processing" | "published" | "failed";
+
+const githubPublicationIdentityColumns = {
+  runId: uuid("run_id")
+    .primaryKey()
+    .references(() => runs.id, { onDelete: "cascade" }),
+  submission: jsonb("submission").notNull(),
+  lastError: text("last_error"),
+  createdAt: timestamptz("created_at").notNull().defaultNow(),
+  updatedAt: timestamptz("updated_at").notNull().defaultNow(),
+};
+
+/** One trusted actuation record per review run, preventing ordinary retries from duplicating reviews. */
+export const githubReviewPublications = pgTable("github_review_publications", {
+  ...githubPublicationIdentityColumns,
+  status: text("status").notNull().default("processing").$type<GithubReviewPublicationStatus>(),
+  githubReviewId: text("github_review_id"),
+});
+
 export type ObservabilityExportStatus = "pending" | "processing" | "exported" | "failed";
+
+export type GithubCommentPublicationStatus = "processing" | "published" | "failed";
+
+/** One trusted actuation record per comment task, preventing duplicate replies. */
+export const githubCommentPublications = pgTable("github_comment_publications", {
+  ...githubPublicationIdentityColumns,
+  status: text("status")
+    .notNull()
+    .default("processing")
+    .$type<GithubCommentPublicationStatus>(),
+  githubCommentId: text("github_comment_id"),
+});
+
+export type GithubCommentPublicationRow = typeof githubCommentPublications.$inferSelect;
 
 /** Durable delivery state for the configured OTLP destination. */
 export const observabilityExports = pgTable(
@@ -315,141 +424,27 @@ export const webSessions = pgTable(
   ],
 );
 
-/** Replay pin for plugins attached to a run. */
-export interface AttachedPluginRef {
-  name: string;
-  version: string;
-  components: { skills: boolean; mcp: boolean };
-}
+const pluginTables = definePluginTables(() => appUsers.id);
+export const {
+  plugins,
+  pluginVersions,
+  pluginSettings,
+  pluginUserState,
+  pluginUserVariables,
+  pluginAuditLog,
+  pluginOauthClients,
+  pluginOauthTokens,
+} = pluginTables;
 
-export type InstallMode = "default_off" | "default_on" | "required";
-export type ReviewStatus = "draft" | "approved" | "yanked";
-export type UserPluginOverride = "enabled" | "disabled";
-
-export const plugins = pgTable(
-  "plugins",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    name: text("name").notNull(),
-    publisher: text("publisher").notNull().default("Zen8"),
-    createdAt: timestamptz("created_at").notNull().defaultNow(),
-  },
-  (table) => [uniqueIndex("plugins_name_idx").on(table.name)],
-);
-
-export const pluginVersions = pgTable(
-  "plugin_versions",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    pluginId: uuid("plugin_id")
-      .notNull()
-      .references(() => plugins.id, { onDelete: "cascade" }),
-    version: text("version").notNull(),
-    source: text("source").notNull(),
-    artifactPath: text("artifact_path").notNull(),
-    components: jsonb("components")
-      .notNull()
-      .$type<{ skills: boolean; mcp: boolean }>()
-      .default({ skills: false, mcp: false }),
-    reviewStatus: text("review_status").notNull().default("draft").$type<ReviewStatus>(),
-    manifest: jsonb("manifest").notNull().$type<Record<string, unknown>>().default({}),
-    createdAt: timestamptz("created_at").notNull().defaultNow(),
-  },
-  (table) => [
-    uniqueIndex("plugin_versions_plugin_version_idx").on(table.pluginId, table.version),
-    index("plugin_versions_status_idx").on(table.reviewStatus),
-  ],
-);
-
-export const pluginSettings = pgTable("plugin_settings", {
-  pluginId: uuid("plugin_id")
-    .primaryKey()
-    .references(() => plugins.id, { onDelete: "cascade" }),
-  installMode: text("install_mode").notNull().default("default_off").$type<InstallMode>(),
-  updatedAt: timestamptz("updated_at").notNull().defaultNow(),
-});
-
-/** Shared owner columns for per-user plugin state tables. */
-function userPluginOwner() {
-  return {
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => appUsers.id, { onDelete: "cascade" }),
-    pluginId: uuid("plugin_id")
-      .notNull()
-      .references(() => plugins.id, { onDelete: "cascade" }),
-  };
-}
-
-export const pluginUserState = pgTable(
-  "plugin_user_state",
-  {
-    ...userPluginOwner(),
-    override: text("override").$type<UserPluginOverride | null>(),
-    installedVersionId: uuid("installed_version_id").references(() => pluginVersions.id, {
-      onDelete: "set null",
-    }),
-    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
-  },
-  (table) => [primaryKey({ columns: [table.userId, table.pluginId] })],
-);
-
-export const pluginUserVariables = pgTable(
-  "plugin_user_variables",
-  {
-    ...userPluginOwner(),
-    name: text("name").notNull(),
-    /** AES-GCM ciphertext from encryptSecret. */
-    valueEncrypted: text("value_encrypted").notNull(),
-    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
-  },
-  (table) => [primaryKey({ columns: [table.userId, table.pluginId, table.name] })],
-);
-
-export const pluginAuditLog = pgTable(
-  "plugin_audit_log",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    actorUserId: uuid("actor_user_id").references(() => appUsers.id, { onDelete: "set null" }),
-    pluginName: text("plugin_name").notNull(),
-    action: text("action").notNull(),
-    detail: jsonb("detail").notNull().default({}),
-    createdAt: timestamptz("created_at").notNull().defaultNow(),
-  },
-  (table) => [index("plugin_audit_log_created_idx").on(table.createdAt.desc())],
-);
-
-/** Cached OAuth Dynamic Client Registration result (public client, PKCE). */
-export const pluginOauthClients = pgTable(
-  "plugin_oauth_clients",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    issuer: text("issuer").notNull(),
-    redirectUri: text("redirect_uri").notNull(),
-    clientId: text("client_id").notNull(),
-    createdAt: timestamptz("created_at").notNull().defaultNow(),
-  },
-  (table) => [
-    uniqueIndex("plugin_oauth_clients_issuer_redirect_idx").on(table.issuer, table.redirectUri),
-  ],
-);
-
-/** Per-user OAuth tokens for a marketplace plugin (host-mediated MCP OAuth). */
-export const pluginOauthTokens = pgTable(
-  "plugin_oauth_tokens",
-  {
-    ...userPluginOwner(),
-    accessEncrypted: text("access_encrypted").notNull(),
-    refreshEncrypted: text("refresh_encrypted"),
-    expiresAt: timestamptz("expires_at"),
-    updatedAt: timestamptz("updated_at").notNull().defaultNow(),
-  },
-  (table) => [primaryKey({ columns: [table.userId, table.pluginId] })],
-);
+export type { InstallMode, ReviewStatus, UserPluginOverride } from "./schema-plugins";
 
 export type RunRow = typeof runs.$inferSelect;
 export type SessionRow = typeof sessions.$inferSelect;
 export type RunEventRow = typeof runEvents.$inferSelect;
+export type ExternalThreadRow = typeof externalThreads.$inferSelect;
+export type IntegrationDeliveryRow = typeof integrationDeliveries.$inferSelect;
+export type GithubInstallationRow = typeof githubInstallations.$inferSelect;
+export type GithubReviewPublicationRow = typeof githubReviewPublications.$inferSelect;
 export type ObservabilityExportRow = typeof observabilityExports.$inferSelect;
 export type VcsConnectionRow = typeof vcsConnections.$inferSelect;
 export type RepositoryEnvironmentRow = typeof repositoryEnvironments.$inferSelect;

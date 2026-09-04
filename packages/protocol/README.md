@@ -13,8 +13,11 @@ Nothing here executes anything or touches the network.
 | `index.ts` | the single public entry point; everything is re-exported here |
 | `run.ts` | `RunStatus` and the six lifecycle states, plus terminal/active helpers |
 | `trigger.ts` | `Trigger`: the normalized reason a run exists, and `TriggerKind` |
+| `session-command.ts` | `SessionCommand`: the provider-neutral command shared by chat and external event clients, including optional `thinkingLevel` |
+| `github-review.ts` | structured review submission/context schemas used across the runtime/controller boundary |
+| `github-task.ts` | structured context/submission schemas for replies to issue and inline review comments |
 | `task.ts` | `TaskSpec`: the concrete request handed to infrastructure |
-| `repo.ts` | `RepoRef`: everything needed to clone and address a repo at one revision |
+| `repo.ts` | `RepoRef`: head and optional base clone coordinates plus one pinned revision |
 | `events.ts` | the two outbound channels: `RunEventInput` (telemetry) and `RunStatusReport` (terminal) |
 | `secret.ts` | `Secret`, `createRedactor`, `redactUrlCredentials` |
 | `env.ts` | `SANDBOX_ENV` and `SANDBOX_PATHS`: the controller/sandbox environment contract |

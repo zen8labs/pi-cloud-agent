@@ -36,6 +36,8 @@ function SettingsContent() {
     kind: "success" | "error";
   } | null>(null);
   const result = searchParams.get("connection");
+  const githubInstallId =
+    searchParams.get("github") === "install" ? searchParams.get("installation_id") : null;
   const callbackMessage = searchParams.get("message");
   const callbackNotice = result
     ? result === "connected"
@@ -70,6 +72,26 @@ function SettingsContent() {
     const timer = window.setTimeout(() => setDismissedNotice(true), 7000);
     return () => window.clearTimeout(timer);
   }, [noticeMessage, noticeKind]);
+
+  useEffect(() => {
+    if (!githubInstallId) return;
+    let active = true;
+    void api
+      .bindGithubInstallation(githubInstallId)
+      .then(async () => {
+        if (!active) return;
+        setConnections(await api.listConnections());
+        notify("GitHub App installation connected.", "success");
+        window.history.replaceState(null, "", "/settings");
+      })
+      .catch((cause) => {
+        if (!active) return;
+        notify(cause instanceof Error ? cause.message : String(cause), "error");
+      });
+    return () => {
+      active = false;
+    };
+  }, [githubInstallId, notify]);
 
   const disconnect = async (provider: string) => {
     setBusy(provider);

@@ -2,12 +2,12 @@ import type { VcsRepository } from "./repo";
 import type { Secret } from "./secret";
 
 /**
- * Read and auth only.
+ * Repository metadata and checkout authentication.
  *
- * The agent posts its own comments and pushes its own commits from inside the
- * sandbox using the token this mints, so there is no provider-specific write
- * side here — no publish, no comment API, no diff fetching. The controller
- * needs repository metadata plus the credential for a run.
+ * The VCSProvider interface stays deliberately read/auth-only. Provider-specific
+ * trusted actuators, such as GitHub review publication, are separate functions
+ * in the implementation package so repository checkout and external side effects
+ * remain composable boundaries.
  *
  * See docs/adding-a-vcs-provider.md.
  */

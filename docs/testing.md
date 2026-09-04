@@ -39,6 +39,8 @@ Integration tests share one database and truncate between tests, so they run in 
 | `apps/controller/db/sessions.integration.test.ts` | one workspace owner, ordered queued turns, promotion, checkpoint ownership, and workspace parking |
 | `apps/controller/reconcile/reconciler.integration.test.ts` | restart safety plus workspace suspend/resume and cold fallback |
 | `apps/controller/http/api.integration.test.ts` | the HTTP contract, including authenticated checkpoint callbacks and session turns |
+| `apps/controller/integrations/github.test.ts` | webhook HMAC verification, event/action filtering, and exact PR head projection |
+| `apps/controller/db/integrations.integration.test.ts` | delivery idempotency, leases, and guarded completion |
 | `apps/web/lib/foldActivityEvents.test.ts` | completed-turn thinking renders as one Thought block, including legacy per-word logs |
 
 The refusal cases matter more than the happy paths.
@@ -81,5 +83,7 @@ LIVE_TEST_REPO=owner/repository pnpm test:live
 For E2B, select `SANDBOX_PROVIDER=e2b` and use `pnpm sandbox:template` instead.
 
 The repository must be public or cloneable by the configured forge credential. Without `LIVE_TEST_REPO`, the paid test is skipped.
+
+For a full GitHub workflow, configure the App webhook and installation binding from [DEVELOPMENT.md](../DEVELOPMENT.md#github-app-setup), expose the controller through HTTPS, and run a small test PR. Validate all of the following: the webhook returns `202`; the same delivery id is deduplicated; `integration_deliveries.status` reaches `processed`; the run trigger contains the base and head SHAs; the sandbox log contains `git.checkout_ready` for the PR head; `github_review_publications.status` reaches `published`; and GitHub shows one top-level summary plus inline comments on the changed lines. Then add a comment containing `@pi-cloud-agent` and verify it becomes a follow-up turn on the same external session.
 
 See [operations.md](operations.md) for what a healthy run looks like.

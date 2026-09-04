@@ -8,7 +8,7 @@ import {
 } from "@pi-cloud-agent/protocol";
 import { and, desc, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { CHANNELS, type Database, notify } from "./client";
-import { type RunRow, runs, type SessionRow, sessions } from "./schema";
+import { externalThreads, type RunRow, runs, type SessionRow, sessions } from "./schema";
 
 export interface CreateSessionInput {
   userId?: string | null;
@@ -21,9 +21,10 @@ export interface CreateSessionInput {
   thinkingLevel?: ThinkingLevel;
   modelConnectionId?: string | null;
   callbackToken: string;
+  externalThreadKey?: string;
 }
 
-export class SessionNotFoundError extends Error {
+class SessionNotFoundError extends Error {
   constructor() {
     super("session not found");
     this.name = "SessionNotFoundError";
@@ -69,6 +70,17 @@ export async function createSessionWithRun(
       })
       .returning();
     if (!session || !run) throw new Error("could not create session and first run");
+    if (input.externalThreadKey) {
+      const ownerId = input.userId;
+      if (!ownerId) throw new Error("external sessions require an owner");
+      await tx.insert(externalThreads).values({
+        provider: input.provider,
+        externalKey: input.externalThreadKey,
+        userId: ownerId,
+        sessionId,
+        repoFullName: input.repoFullName,
+      });
+    }
     return { session, run };
   });
   await notify(database, CHANNELS.runQueued, result.run.id);
@@ -85,6 +97,7 @@ export async function createSessionTurn(
     model: string;
     modelConnectionId: string | null;
     thinkingLevel?: ThinkingLevel;
+    trigger?: Trigger;
   },
 ): Promise<RunRow> {
   const runId = randomUUID();
@@ -100,7 +113,13 @@ export async function createSessionTurn(
     const turnNumber = session.turnCount + 1;
     const startsImmediately = session.activeRunId === null;
 
-    const trigger: Trigger = { kind: "manual", repo: session.repo, prompt };
+    const trigger: Trigger = modelSelection.trigger ?? {
+      kind: "manual",
+      repo: session.repo,
+      prompt,
+      source: "manual",
+      intent: "general",
+    };
     const [created] = await tx
       .insert(runs)
       .values({

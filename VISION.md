@@ -8,7 +8,7 @@ We want to build the 80% once, in the open, small enough to audit, and hand the 
 
 The philosophy comes from [pi](https://mariozechner.at/posts/2025-11-30-pi-coding-agent/), which rethought the *local* coding agent from first principles: strip it to the irreducible parts, refuse the bloat, and make everything else an *extension* you add rather than core you fork. We take that philosophy and Pi's embeddable agent loop, then apply both to a different problem: **cloud agents**.
 
-A *cloud agent* is an agent that runs headless. It's triggered by an event (a PR, a chat message, a schedule), works inside isolated compute, and actuates its own outcomes (posts comments, pushes commits). Background work needs no operator loop; a chat-triggered session may accept later turns without keeping the agent process alive between them.
+A *cloud agent* is an agent that runs headless. It's triggered by an event (a PR, a chat message, a schedule), works inside isolated compute, and actuates its own outcomes through ordinary tools or explicit structured provider actuators. Background work needs no operator loop; a chat-triggered session may accept later turns without keeping the agent process alive between them.
 
 Today every vendor ships a monolithic cloud agent. We want the opposite: a **minimal, task-agnostic core** that accepts a user request and lets anyone extend agent behavior with skills and plugins, not by rewriting the core.
 
@@ -20,7 +20,7 @@ Forget existing products for a moment. If you want a coding agent to do useful w
 - **Sandbox**: the agent needs somewhere to run. Isolated compute with a real checkout of the repo, network, and a shell. Because it will execute untrusted code, this environment is also the security boundary.
 - **Harness**: the actual agent loop. Give the model tools, let it read/edit files and run commands, feed results back, repeat until done. This runs *inside* the sandbox, headless.
 - **Secret broker**: the agent needs credentials (to clone, to comment, to push), but it's running untrusted code. The current MVP hands a connected OAuth token into the sandbox as a known limitation; the planned broker must authorize operations without exposing a reusable token.
-- **Actuation**: the run has to change something in the outside world. A PR comment, a commit, a status. The agent does this itself with ordinary tools (`git`, `gh`), the same way a human would.
+- **Actuation**: the run has to change something in the outside world. A PR comment, a commit, a status. The runtime can use ordinary tools (`git`, `gh`) or request a typed controller-owned actuator when the side effect needs trusted credentials and durable idempotency.
 - **Observability**: no human is watching the loop live, so the run has to be *recorded*, both streamed as it happens and stored for later. This is how you trust, debug, and improve the agent.
 - **Skills/plugins**: installable instructions and MCP capabilities that attach to a user request. The kernel stays infrastructure-only; plugins are a named distribution primitive, not a workflow engine.
 
@@ -36,7 +36,7 @@ Notably *not* irreducible: MCP, sub-agents, to-do plan tracking. Useful sometime
 
 Saying no is how the core stays small. These are deliberate omissions, not missing features:
 
-- **No controller-side publish step.** The controller does *not* collect structured findings and post them on the agent's behalf. The agent actuates its own outcomes with `git`/`gh` inside the sandbox. Parsing and re-structuring agent output on the controller is brittle, strips the agent's agency, and duplicates work the model already does well. (We used to have this; we removed it. This doc just names the principle.)
+- **No prose parser.** The controller does not collect ordinary agent text and guess what to publish. When a provider side effect needs trusted credentials, the runtime calls a typed actuator and the controller validates, authorizes, and records it; ordinary `git`/`gh` work remains inside the sandbox.
 - **No baked-in MCP.** MCP is opt-in via an installed plugin, never in the kernel. A popular MCP server can burn 7–9% of the context window on tool descriptions before any work starts. Default runs carry zero MCP servers; when a plugin contributes MCP it runs inside the sandbox from a controller-resolved config snapshot — never from the cloned repository. Prefer a CLI tool with a README the agent reads on demand (progressive disclosure).
 - **No baked sub-agents / plan mode / to-dos.** These add hidden state the model has to track and hurt observability. If a vertical wants them, it builds them as an extension or writes a plan/TODO file in the repo.
 

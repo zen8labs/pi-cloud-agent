@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { cors } from "hono/cors";
 import { getAppUserForSession } from "../db/auth";
+import { githubSetupRoutes, githubWebhookRoutes } from "../integrations/github";
 import { OAuthFlowManager } from "../llm/oauth";
 import { authRoutes } from "./auth";
 import type { AppEnv, Deps } from "./deps";
@@ -56,7 +57,9 @@ export function createApp(deps: Deps): Hono<AppEnv> {
     const publicPath =
       c.req.path === "/healthz" ||
       c.req.path.startsWith("/auth/") ||
-      c.req.path.startsWith("/internal/");
+      c.req.path.startsWith("/internal/") ||
+      c.req.path.startsWith("/webhooks/") ||
+      c.req.path === "/integrations/github/setup";
     if (deps.config.auth.requireUser && !c.get("user") && !publicPath) {
       return c.json({ error: "authentication required" }, 401);
     }
@@ -87,6 +90,8 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   app.get("/healthz", (c) => c.json({ ok: true }));
 
   app.route("/auth", authRoutes());
+  app.route("/webhooks", githubWebhookRoutes());
+  app.route("/integrations/github", githubSetupRoutes());
   app.route("/runs", runRoutes());
   app.route("/sessions", sessionRoutes());
   app.route("/plugins", pluginRoutes());

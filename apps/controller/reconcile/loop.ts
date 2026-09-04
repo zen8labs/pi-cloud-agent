@@ -20,6 +20,7 @@ import {
   getSession,
   parkSession,
 } from "../db/sessions";
+import { processPendingGithubDeliveries } from "../integrations/github";
 import type { Logger } from "../logger";
 import type { CredentialBroker } from "../secrets/broker";
 import { type ProvisionDeps, provisionRun } from "./provision";
@@ -131,6 +132,11 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
       await reclaim(run, reason);
       return;
     }
+    const priorSession = await getSession(database, run.sessionId);
+    const priorWorkspace =
+      priorSession?.sandboxId && priorSession.sandboxProvider
+        ? { provider: priorSession.sandboxProvider, id: priorSession.sandboxId }
+        : null;
     if (!run.sandboxId || !run.sandboxProvider) {
       // A promoted turn can be cancelled before it resumes the session's
       // parked workspace. It owns no sandbox to suspend, so preserve the
@@ -138,7 +144,15 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
       await parkSession(database, run, undefined, null);
       return;
     }
+    await suspendSessionWorkspace(run, reason, priorWorkspace);
+  }
 
+  async function suspendSessionWorkspace(
+    run: RunRow,
+    reason: string,
+    priorWorkspace: { provider: string; id: string } | null,
+  ): Promise<void> {
+    if (!run.sessionId || !run.sandboxId || !run.sandboxProvider) return;
     const provider =
       run.sandboxProvider === sandbox.name ? sandbox : createProvider(run.sandboxProvider);
     const ref = { provider: run.sandboxProvider, id: run.sandboxId };
@@ -147,6 +161,7 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
       const expiresAt = new Date(Date.now() + config.sessionWorkspaceRetentionSeconds * 1000);
       const parked = await parkSession(database, run, workspace, expiresAt);
       if (parked) {
+        await deletePreviousWorkspace(run, priorWorkspace, workspace);
         log.info("session workspace suspended", {
           sessionId: run.sessionId,
           runId: run.id,
@@ -167,6 +182,30 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
       await provider.stop(ref).catch(() => undefined);
       await parkSession(database, run, null, null);
     }
+  }
+
+  async function deletePreviousWorkspace(
+    run: RunRow,
+    priorWorkspace: { provider: string; id: string } | null,
+    currentWorkspace: { provider: string; id: string },
+  ): Promise<void> {
+    if (
+      !priorWorkspace ||
+      (priorWorkspace.provider === currentWorkspace.provider &&
+        priorWorkspace.id === currentWorkspace.id)
+    )
+      return;
+    const priorProvider =
+      priorWorkspace.provider === sandbox.name
+        ? sandbox
+        : createProvider(priorWorkspace.provider);
+    await priorProvider.deleteWorkspace(priorWorkspace).catch((error) =>
+      log.error("previous external workspace deletion failed", {
+        sessionId: run.sessionId,
+        workspaceId: priorWorkspace.id,
+        error,
+      }),
+    );
   }
 
   async function expireWorkspace(session: SessionRow): Promise<void> {
@@ -229,6 +268,11 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
   }
 
   async function tick(): Promise<void> {
+    // Webhooks are durable inbox rows, not work done inside the HTTP request.
+    // Drain a small bounded batch before queueing runs so duplicate delivery
+    // retries are collapsed before they can create duplicate sessions.
+    await processPendingGithubDeliveries(database, config, log, BATCH);
+
     // Ordered cheapest-first, and teardown before new work so a busy queue can
     // never starve reclamation of machines that are still costing money.
     for (const run of await findSandboxesToStop(database, BATCH)) {

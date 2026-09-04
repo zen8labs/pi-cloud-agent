@@ -17,6 +17,10 @@ export const SANDBOX_ENV = {
   debugEvents: "AGENT_DEBUG_EVENTS",
 
   taskPrompt: "TASK_PROMPT",
+  /** JSON review target for the trusted `submit_github_review` runtime tool. */
+  githubReview: "GITHUB_REVIEW_CONTEXT",
+  /** JSON comment target for the trusted `reply_github_comment` runtime tool. */
+  githubComment: "GITHUB_COMMENT_CONTEXT",
   /** Optional app-managed setup script for a fresh repository checkout. */
   setupScript: "REPO_SETUP_SCRIPT",
 
@@ -42,6 +46,7 @@ export const SANDBOX_ENV = {
   repoOwner: "REPO_OWNER",
   repoName: "REPO_NAME",
   repoCloneUrl: "REPO_CLONE_URL",
+  repoBaseCloneUrl: "REPO_BASE_CLONE_URL",
   repoDefaultBranch: "REPO_DEFAULT_BRANCH",
   repoBaseSha: "REPO_BASE_SHA",
   repoHeadSha: "REPO_HEAD_SHA",
