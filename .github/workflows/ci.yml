@@ -101,5 +101,9 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - name: Dashboard build
         run: pnpm --filter @pi-cloud-agent/web build
-      - name: Sandbox runtime artifacts
-        run: pnpm sandbox:runtime
+      - name: Sandbox runtime bundle
+        run: pnpm --filter @pi-cloud-agent/runtime build
+      - name: Linux amd64 runtime artifact
+        run: docker buildx build --platform linux/amd64 --output type=local,dest=packages/runtime/dist -f packages/runtime/Dockerfile.runtime packages/runtime
+      - name: Linux arm64 runtime artifact
+        run: docker buildx build --platform linux/arm64 --output type=local,dest=packages/runtime/dist -f packages/runtime/Dockerfile.runtime packages/runtime
