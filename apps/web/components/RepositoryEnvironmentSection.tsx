@@ -7,6 +7,7 @@ import {
   LoaderCircleIcon,
   PlayIcon,
   TerminalSquareIcon,
+  XIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -219,7 +220,9 @@ function EnvironmentEditor({
           blank to use the default environment.
         </p>
       </div>
-      {testResult && <ImageTestResult result={testResult} />}
+      {testResult && (
+        <ImageTestResult result={testResult} onClose={() => setTestResult(null)} />
+      )}
       <div className="flex items-center justify-between gap-3">
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
           {configured && <CheckCircle2Icon className="size-3.5 text-emerald-500" />}
@@ -253,7 +256,13 @@ function EnvironmentEditor({
   );
 }
 
-function ImageTestResult({ result }: { result: { ok: boolean; output: string } }) {
+function ImageTestResult({
+  result,
+  onClose,
+}: {
+  result: { ok: boolean; output: string };
+  onClose: () => void;
+}) {
   return (
     <div
       className={`rounded-lg border px-3 py-2 text-xs ${
@@ -262,13 +271,24 @@ function ImageTestResult({ result }: { result: { ok: boolean; output: string } }
           : "border-destructive/30 bg-destructive/5 text-destructive"
       }`}
     >
-      <div className="flex items-center gap-1.5 font-medium">
-        {result.ok ? (
-          <CheckCircle2Icon className="size-3.5" />
-        ) : (
-          <CircleXIcon className="size-3.5" />
-        )}
-        {result.ok ? "Image test passed" : "Image test failed"}
+      <div className="flex items-center justify-between gap-2 font-medium">
+        <div className="flex items-center gap-1.5">
+          {result.ok ? (
+            <CheckCircle2Icon className="size-3.5" />
+          ) : (
+            <CircleXIcon className="size-3.5" />
+          )}
+          {result.ok ? "Image test passed" : "Image test failed"}
+        </div>
+        <button
+          type="button"
+          aria-label="Close image test result"
+          title="Close image test result"
+          onClick={onClose}
+          className="rounded p-0.5 opacity-70 transition-opacity hover:opacity-100"
+        >
+          <XIcon className="size-3.5" />
+        </button>
       </div>
       {result.output && (
         <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-4 opacity-90">

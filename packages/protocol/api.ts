@@ -40,6 +40,12 @@ export const createSessionTurnRequestSchema = z.object({
 
 export type CreateSessionTurnRequest = z.infer<typeof createSessionTurnRequestSchema>;
 
+export const updateSessionPinRequestSchema = z.object({
+  pinned: z.boolean(),
+});
+
+export type UpdateSessionPinRequest = z.infer<typeof updateSessionPinRequestSchema>;
+
 export const sessionCheckpointSchema = z.object({
   content: z.string().max(20_000_000),
 });
@@ -87,6 +93,7 @@ export interface SessionSummary {
   id: string;
   status: SessionStatus;
   retentionStatus: SessionRetentionStatus;
+  pinned: boolean;
   title: string;
   provider: string;
   repo: string;

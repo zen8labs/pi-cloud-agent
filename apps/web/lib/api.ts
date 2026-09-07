@@ -130,6 +130,12 @@ export const api = {
   archiveSession: (id: string): Promise<{ ok: boolean }> =>
     request<{ ok: boolean }>(`/sessions/${id}`, { method: "DELETE" }),
 
+  setSessionPinned: (id: string, pinned: boolean): Promise<{ ok: boolean; pinned: boolean }> =>
+    request<{ ok: boolean; pinned: boolean }>(`/sessions/${id}/pin`, {
+      method: "PATCH",
+      body: JSON.stringify({ pinned }),
+    }),
+
   cancelRun: (id: string): Promise<{ status: string }> =>
     request<{ status: string }>(`/runs/${id}/cancel`, { method: "POST" }),
 

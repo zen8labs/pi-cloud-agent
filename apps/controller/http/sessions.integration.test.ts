@@ -171,6 +171,47 @@ describe("durable session HTTP contract", () => {
     expect((await getRun(database, session.latestRunId))?.error).toContain("checkpoint");
   });
 
+  it("pins and unpins a session", async () => {
+    const session = await json<SessionSummary>(
+      await send("POST", "/sessions", {
+        repo: "acme/widgets",
+        prompt: "Pin me",
+      }),
+    );
+
+    const pin = await app.request(`/sessions/${session.id}/pin`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `pca_session=${testCookie}`,
+      },
+      body: JSON.stringify({ pinned: true }),
+    });
+    expect(pin.status).toBe(200);
+    expect(await json<{ ok: boolean; pinned: boolean }>(pin)).toEqual({
+      ok: true,
+      pinned: true,
+    });
+
+    const listed = await json<SessionListResponse>(
+      await app.request("/sessions", {
+        headers: { Cookie: `pca_session=${testCookie}` },
+      }),
+    );
+    expect(listed.sessions.find((item) => item.id === session.id)?.pinned).toBe(true);
+
+    const unpin = await app.request(`/sessions/${session.id}/pin`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `pca_session=${testCookie}`,
+      },
+      body: JSON.stringify({ pinned: false }),
+    });
+    expect(unpin.status).toBe(200);
+    expect((await json<{ pinned: boolean }>(unpin)).pinned).toBe(false);
+  });
+
   it("archives an idle session and removes its chat history", async () => {
     const session = await json<SessionSummary>(
       await send("POST", "/sessions", {

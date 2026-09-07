@@ -148,6 +148,13 @@
       "when": 1788756748560,
       "tag": "0020_wise_black_bolt",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788760843922,
+      "tag": "0021_session_pins",
+      "breakpoints": true
     }
   ]
 }

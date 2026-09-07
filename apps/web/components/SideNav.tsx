@@ -1,10 +1,10 @@
 "use client";
 
 import type { SessionSummary } from "@pi-cloud-agent/protocol";
-import { PanelLeftIcon, PlusIcon } from "lucide-react";
+import { ArchiveIcon, PanelLeftIcon, PinIcon, PlusIcon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AccountMenu } from "@/components/AccountMenu";
 import { useNavCollapse } from "@/components/nav-collapse";
@@ -14,8 +14,10 @@ import { cn } from "@/lib/utils";
 
 export function SideNav() {
   const pathname = usePathname();
+  const router = useRouter();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [titles, setTitles] = useState<Record<string, string>>({});
+  const [pendingActionId, setPendingActionId] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -38,7 +40,44 @@ export function SideNav() {
   }, []);
 
   const active = sessions.filter((session) => session.status !== "idle");
-  const recent = sessions.filter((session) => session.status === "idle");
+  const pinned = sessions.filter((session) => session.status === "idle" && session.pinned);
+  const recent = sessions.filter((session) => session.status === "idle" && !session.pinned);
+
+  const togglePin = async (session: SessionSummary) => {
+    setPendingActionId(session.id);
+    try {
+      const result = await api.setSessionPinned(session.id, !session.pinned);
+      setSessions((current) =>
+        current.map((item) =>
+          item.id === session.id ? { ...item, pinned: result.pinned } : item,
+        ),
+      );
+    } catch (cause) {
+      window.alert(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setPendingActionId(null);
+    }
+  };
+
+  const archive = async (session: SessionSummary) => {
+    if (
+      !window.confirm(
+        "Archive this session? Its sandbox checkpoint and chat history will be deleted.",
+      )
+    ) {
+      return;
+    }
+    setPendingActionId(session.id);
+    try {
+      await api.archiveSession(session.id);
+      setSessions((current) => current.filter((item) => item.id !== session.id));
+      if (pathname === `/sessions/${session.id}`) router.push("/");
+    } catch (cause) {
+      window.alert(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setPendingActionId(null);
+    }
+  };
 
   return (
     <>
@@ -74,6 +113,20 @@ export function SideNav() {
               sessions={active}
               pathname={pathname}
               titles={titles}
+              pendingActionId={pendingActionId}
+              onTogglePin={togglePin}
+              onArchive={archive}
+            />
+          )}
+          {pinned.length > 0 && (
+            <SessionGroup
+              label="Pinned"
+              sessions={pinned}
+              pathname={pathname}
+              titles={titles}
+              pendingActionId={pendingActionId}
+              onTogglePin={togglePin}
+              onArchive={archive}
             />
           )}
           {recent.length > 0 && (
@@ -82,6 +135,9 @@ export function SideNav() {
               sessions={recent}
               pathname={pathname}
               titles={titles}
+              pendingActionId={pendingActionId}
+              onTogglePin={togglePin}
+              onArchive={archive}
             />
           )}
           {sessions.length === 0 && (
@@ -104,43 +160,72 @@ function SessionGroup({
   sessions,
   pathname,
   titles,
+  pendingActionId,
+  onTogglePin,
+  onArchive,
 }: {
   label: string;
   sessions: SessionSummary[];
   pathname: string;
   titles: Record<string, string>;
+  pendingActionId: string | null;
+  onTogglePin: (session: SessionSummary) => Promise<void>;
+  onArchive: (session: SessionSummary) => Promise<void>;
 }) {
   return (
     <section className="mb-4">
       <h2 className="nav-label">{label}</h2>
       <div className="space-y-px">
         {sessions.map((session) => (
-          <Link
-            key={session.id}
-            href={`/sessions/${session.id}`}
-            title={session.repo}
-            className={cn(
-              "history-link",
-              pathname === `/sessions/${session.id}` && "is-active",
-            )}
-          >
-            <span className="truncate">
-              {titles[session.id] || session.title || sessionLabel(session)}
-            </span>
-            {session.retentionStatus === "inactive" && (
-              <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
-                inactive
+          <div key={session.id} className="group relative">
+            <Link
+              href={`/sessions/${session.id}`}
+              title={session.repo}
+              className={cn(
+                "history-link pr-16",
+                pathname === `/sessions/${session.id}` && "is-active",
+              )}
+            >
+              <span className="truncate">
+                {titles[session.id] || session.title || sessionLabel(session)}
               </span>
-            )}
-            {session.status !== "idle" && (
-              <span
-                className={cn(
-                  "size-1.5 shrink-0 animate-pulse-dot rounded-full bg-emerald-500",
-                  session.retentionStatus === "inactive" ? "ml-1.5" : "ml-auto",
-                )}
-              />
-            )}
-          </Link>
+              {session.retentionStatus === "inactive" && (
+                <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
+                  inactive
+                </span>
+              )}
+              {session.status !== "idle" && (
+                <span
+                  className={cn(
+                    "size-1.5 shrink-0 animate-pulse-dot rounded-full bg-emerald-500",
+                    session.retentionStatus === "inactive" ? "ml-1.5" : "ml-auto",
+                  )}
+                />
+              )}
+            </Link>
+            <div className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+              <button
+                type="button"
+                aria-label={session.pinned ? "Unpin session" : "Pin session"}
+                title={session.pinned ? "Unpin session" : "Pin session"}
+                disabled={pendingActionId === session.id}
+                onClick={() => void onTogglePin(session)}
+                className="pointer-events-auto rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+              >
+                <PinIcon className="size-3.5" fill={session.pinned ? "currentColor" : "none"} />
+              </button>
+              <button
+                type="button"
+                aria-label="Archive session"
+                title="Archive session"
+                disabled={pendingActionId === session.id}
+                onClick={() => void onArchive(session)}
+                className="pointer-events-auto rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+              >
+                <ArchiveIcon className="size-3.5" />
+              </button>
+            </div>
+          </div>
         ))}
       </div>
     </section>

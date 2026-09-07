@@ -4,6 +4,7 @@ import {
   type SessionDetail,
   type SessionStatus,
   type SessionSummary,
+  updateSessionPinRequestSchema,
 } from "@pi-cloud-agent/protocol";
 import { type Context, Hono } from "hono";
 import { getRun } from "../db/runs";
@@ -18,6 +19,7 @@ import {
   listSessions,
   SessionBusyError,
   SessionNotFoundError,
+  setSessionPinned,
 } from "../db/sessions";
 import type { resolveLlmModel } from "../llm/connections";
 import { requireAuthenticatedUser, userOwns } from "./auth";
@@ -121,6 +123,23 @@ export function sessionRoutes(
       turnNumber: result.run.turnNumber,
     });
     return c.json(toDetail(result.run), 201);
+  });
+
+  app.patch("/:sessionId/pin", async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ error: "authentication required" }, 401);
+    const parsed = updateSessionPinRequestSchema.safeParse(
+      await c.req.json().catch(() => null),
+    );
+    if (!parsed.success) return c.json({ error: "invalid request" }, 422);
+    const changed = await setSessionPinned(
+      c.get("database"),
+      c.req.param("sessionId"),
+      user.id,
+      parsed.data.pinned,
+    );
+    if (!changed) return c.json({ error: "session not found" }, 404);
+    return c.json({ ok: true, pinned: parsed.data.pinned });
   });
 
   app.delete("/:sessionId", async (c) => {
@@ -279,6 +298,7 @@ async function toSessionSummary(
     id: session.id,
     status: sessionStatus(activeRun),
     title: session.title,
+    pinned: session.pinned,
     provider: session.provider,
     repo: session.repoFullName,
     model: session.model,

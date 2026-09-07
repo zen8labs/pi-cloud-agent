@@ -194,8 +194,22 @@ export async function listSessions(
     .select()
     .from(sessions)
     .where(userId ? eq(sessions.userId, userId) : undefined)
-    .orderBy(desc(sessions.updatedAt))
+    .orderBy(desc(sessions.pinned), desc(sessions.updatedAt))
     .limit(limit);
+}
+
+export async function setSessionPinned(
+  database: Database,
+  sessionId: string,
+  userId: string,
+  pinned: boolean,
+): Promise<boolean> {
+  const updated = await database
+    .update(sessions)
+    .set({ pinned, updatedAt: new Date() })
+    .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)))
+    .returning({ id: sessions.id });
+  return updated.length > 0;
 }
 
 export async function listSessionRuns(

@@ -146,6 +146,7 @@ export const sessions = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id").references(() => appUsers.id, { onDelete: "set null" }),
     title: text("title").notNull(),
+    pinned: boolean("pinned").notNull().default(false),
     provider: text("provider").notNull(),
     repoFullName: text("repo_full_name").notNull(),
     repo: jsonb("repo").notNull().$type<RepoRef>(),
