@@ -11,6 +11,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { InfoTooltip } from "./LlmConnectionSupport";
 
 export function RepositoryEnvironmentSection({ onNotice }: { onNotice: NoticeHandler }) {
   const [repos, setRepos] = useState<VcsRepository[]>([]);
@@ -191,12 +192,20 @@ function EnvironmentEditor({
         ))}
       </select>
       <div>
-        <label
-          className="block text-xs font-medium text-muted-foreground"
-          htmlFor="environment-image"
-        >
-          Container image (optional)
-        </label>
+        <div className="flex items-center gap-1.5">
+          <label
+            className="block text-xs font-medium text-muted-foreground"
+            htmlFor="environment-image"
+          >
+            Container image (optional)
+          </label>
+          <InfoTooltip label="Container image requirements">
+            Use a public Docker image address, such as one from Docker Hub or GHCR. It should
+            include the language runtimes and tools your project needs, plus Node.js, git, and
+            the GitHub command-line tool. Test image checks whether the app can start it. Leave
+            blank to use the default environment.
+          </InfoTooltip>
+        </div>
         <input
           id="environment-image"
           value={imageRef}
@@ -206,12 +215,8 @@ function EnvironmentEditor({
           spellCheck={false}
         />
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
-          Enter a public Docker image address, such as one from Docker Hub or GHCR, that already
-          contains the language runtimes and tools your project needs. It must be able to run
-          the app and provide a writable workspace with Node.js, git, and the GitHub
-          command-line tool. Use <strong>Test image</strong> to check it before saving. Each new
-          session for this repository starts an isolated sandbox from this image. Leave blank to
-          use the default environment.
+          Each new session for this repository starts an isolated sandbox from this image. Leave
+          blank to use the default environment.
         </p>
       </div>
       {testResult && <ImageTestResult result={testResult} />}
