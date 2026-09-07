@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   SandboxError,
   type SandboxExecutionResult,
@@ -135,7 +135,6 @@ export function createE2BProvider(
             cause,
           });
         }
-        if (sandbox) await Sandbox.kill(sandbox.sandboxId, { apiKey }).catch(() => undefined);
         throw new SandboxError(`e2b: could not resume workspace "${ref.id}"`, {
           retryable: isRetryable(cause),
           cause,
@@ -197,17 +196,14 @@ function isContainerImageReference(imageRef: string): boolean {
 }
 
 async function buildTemplateFromImage(imageRef: string, apiKey: string): Promise<string> {
-  const suffix = createHash("sha256").update(imageRef).digest("hex").slice(0, 16);
+  const digest = createHash("sha256").update(imageRef).digest("hex").slice(0, 16);
+  const unique = randomUUID().replaceAll("-", "").slice(0, 12);
+  const suffix = `${digest}-${unique}`;
   const name = `pi-cloud-agent-${suffix}`;
   const template = Template().fromImage(imageRef).setStartCmd("sleep infinity", "true");
-  try {
-    await Template.build(template, name, { apiKey, skipCache: true });
-  } catch (cause) {
-    // Multiple controller replicas may race to materialize the same image.
-    // If another replica won, the deterministic template is still usable.
-    if (await Template.exists(name, { apiKey }).catch(() => false)) return name;
-    throw cause;
-  }
+  // Every materialization gets its own immutable alias. A registry tag can be
+  // republished, and a failed build must never silently reuse an older alias.
+  await Template.build(template, name, { apiKey, skipCache: true });
   return name;
 }
 

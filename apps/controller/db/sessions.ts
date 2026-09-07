@@ -9,7 +9,7 @@ import {
 import { and, desc, eq, inArray, isNotNull, isNull, lt, or, type SQL, sql } from "drizzle-orm";
 import { CHANNELS, type Database, notify } from "./client";
 import { type RunRow, runs, type SessionOperation, type SessionRow, sessions } from "./schema";
-import { isSessionOperationStale } from "./session-operations";
+import { CLEARED_SESSION_OPERATION, isSessionOperationStale } from "./session-operations";
 
 export interface CreateSessionInput {
   userId?: string | null;
@@ -147,20 +147,20 @@ export async function createSessionTurn(
   if (result.startsImmediately) await notify(database, CHANNELS.runQueued, result.run.id);
   return result.run;
 }
-
 async function clearStaleSessionOperation(
   tx: SessionTransaction,
   session: SessionRow,
   sessionId: string,
 ): Promise<void> {
   if (!session.sessionOperation) return;
-  if (!isSessionOperationStale(session.sessionOperationAt)) throw new SessionBusyError();
+  if (!isSessionOperationStale(session.sessionOperationHeartbeatAt))
+    throw new SessionBusyError();
   const marker = session.sessionOperationAt
     ? eq(sessions.sessionOperationAt, session.sessionOperationAt)
     : isNull(sessions.sessionOperationAt);
   const reclaimed = await tx
     .update(sessions)
-    .set({ sessionOperation: null, sessionOperationAt: null, updatedAt: new Date() })
+    .set({ ...CLEARED_SESSION_OPERATION, updatedAt: new Date() })
     .where(
       and(
         eq(sessions.id, sessionId),
@@ -171,7 +171,6 @@ async function clearStaleSessionOperation(
     .returning({ id: sessions.id });
   if (reclaimed.length === 0) throw new SessionBusyError();
 }
-
 export async function getSession(
   database: Database,
   sessionId: string,

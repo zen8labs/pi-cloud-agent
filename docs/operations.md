@@ -75,7 +75,9 @@ After each completed session turn, microSandbox stores an integrity-checked loca
 
 The first provisioning also pins the resolved repository image on the session. Changing the Settings mapping therefore affects new sessions; an existing session keeps its original image if it ever needs a cold resume.
 
-Delete and retention expiry claim the session before provider cleanup. A follow-up submitted during cleanup receives `409`; if a controller crash leaves a claim stale, the next follow-up reclaims it safely and the guarded delete cannot remove the resumed session.
+Delete and retention expiry claim the session before provider cleanup. A follow-up submitted during cleanup receives `409`; cleanup renews its heartbeat while the provider call runs, and only a claim stale for ten minutes can be reclaimed after a crash. The guarded delete or clear then verifies the immutable operation token before changing the session.
+
+E2B materializes each public OCI image resolution under a unique template alias and fails a build instead of reusing an older alias. A session stores the resolved alias once, so a republished registry tag affects only later sessions.
 
 Session artifacts are filesystem checkpoints rather than full Docker image commits. Keep `MICROSANDBOX_SNAPSHOT_DIR` on durable storage, monitor the `checkpoint_size_bytes` column, and use delete or retention expiry as the normal reclamation paths. The controller keeps one checkpoint per session and deletes the old one only after the replacement is durable. If a provider delete temporarily fails during replacement, the new checkpoint remains usable and the old artifact is reported in controller logs for provider-side/manual cleanup.
 

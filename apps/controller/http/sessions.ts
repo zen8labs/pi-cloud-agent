@@ -9,7 +9,11 @@ import {
 import { type Context, Hono } from "hono";
 import { getRun } from "../db/runs";
 import type { RunRow, SessionRow } from "../db/schema";
-import { claimSessionOperation, releaseSessionOperation } from "../db/session-operations";
+import {
+  claimSessionOperation,
+  releaseSessionOperation,
+  startSessionOperationHeartbeat,
+} from "../db/session-operations";
 import {
   createSessionTurn,
   createSessionWithRun,
@@ -186,11 +190,7 @@ async function deleteSession(
   if (sessionRuns.some((run) => run.id !== activeRun?.id && !isTerminalRun(run))) {
     return c.json({ error: "session has a queued run" }, 409);
   }
-  if (
-    (session.sandboxId || activeRun?.sandboxId) &&
-    !deps.sandbox &&
-    !deps.createSandboxProvider
-  ) {
+  if (!hasSandboxCleanup(deps, session, activeRun)) {
     return c.json({ error: "sandbox cleanup is not available" }, 503);
   }
   const operationAt = await claimSessionOperation(database, session.id, "archiving", {
@@ -201,12 +201,22 @@ async function deleteSession(
   if (!operationAt) {
     return c.json({ error: "session changed while it was being deleted; retry" }, 409);
   }
+  const stopHeartbeat = startSessionOperationHeartbeat(
+    database,
+    session.id,
+    "archiving",
+    operationAt,
+    (error) =>
+      c.get("log").warn("session deletion heartbeat failed", { sessionId: session.id, error }),
+  );
   try {
     await cleanupSessionSandbox(deps, session, activeRun);
   } catch (error) {
     await releaseSessionOperation(database, session.id, "archiving", operationAt);
     c.get("log").error("session checkpoint deletion failed", { sessionId: session.id, error });
     return c.json({ error: "could not delete session checkpoint" }, 502);
+  } finally {
+    stopHeartbeat();
   }
   const deleted = await deleteSessionRow(
     database,
@@ -226,6 +236,17 @@ async function deleteSession(
 
 function isTerminalRun(run: RunRow): boolean {
   return ["succeeded", "failed", "cancelled"].includes(run.status);
+}
+
+function hasSandboxCleanup(
+  deps: Pick<Deps, "sandbox" | "createSandboxProvider">,
+  session: SessionRow,
+  activeRun: RunRow | null,
+): boolean {
+  return (
+    (!session.sandboxId && !activeRun?.sandboxId) ||
+    Boolean(deps.sandbox || deps.createSandboxProvider)
+  );
 }
 
 async function cleanupSessionSandbox(

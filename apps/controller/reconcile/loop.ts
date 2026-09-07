@@ -13,7 +13,11 @@ import {
   requeueRun,
 } from "../db/runs";
 import type { RunRow, SessionRow } from "../db/schema";
-import { claimSessionOperation, releaseSessionOperation } from "../db/session-operations";
+import {
+  claimSessionOperation,
+  releaseSessionOperation,
+  startSessionOperationHeartbeat,
+} from "../db/session-operations";
 import {
   clearSessionWorkspace,
   findExpiredSessionWorkspaces,
@@ -305,6 +309,13 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
       session.sandboxProvider === sandbox.name
         ? sandbox
         : createProvider(session.sandboxProvider);
+    const stopHeartbeat = startSessionOperationHeartbeat(
+      database,
+      session.id,
+      "expiring",
+      operationAt,
+      (error) => log.warn("session expiry heartbeat failed", { sessionId: session.id, error }),
+    );
     try {
       await provider.deleteWorkspace({
         provider: session.sandboxProvider,
@@ -321,8 +332,10 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
       // provider artifact permanently.
       await releaseSessionOperation(database, session.id, "expiring", operationAt);
       return;
+    } finally {
+      stopHeartbeat();
     }
-    const cleared = await clearSessionWorkspace(
+    await clearSessionWorkspace(
       database,
       session.id,
       session.sandboxId,
@@ -330,7 +343,7 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
       "expiring",
       operationAt,
     );
-    if (!cleared) await releaseSessionOperation(database, session.id, "expiring", operationAt);
+    await releaseSessionOperation(database, session.id, "expiring", operationAt);
   }
 
   async function drainQueue(): Promise<void> {

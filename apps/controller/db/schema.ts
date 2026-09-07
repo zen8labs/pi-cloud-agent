@@ -186,6 +186,8 @@ export const sessions = pgTable(
     /** Durable cleanup operation that blocks new turns until it completes. */
     sessionOperation: text("session_operation").$type<SessionOperation>(),
     sessionOperationAt: timestamptz("session_operation_at"),
+    /** Lease heartbeat for long-running cleanup; the operation timestamp is immutable. */
+    sessionOperationHeartbeatAt: timestamptz("session_operation_heartbeat_at"),
 
     createdAt: timestamptz("created_at").notNull().defaultNow(),
     updatedAt: timestamptz("updated_at").notNull().defaultNow(),

@@ -66,7 +66,9 @@ describe("session checkpoint races", () => {
 
     releaseDeletion();
     await expiry;
-    expect((await sessionDb.getSession(database, session.id))?.sandboxId).toBeNull();
+    const stored = await sessionDb.getSession(database, session.id);
+    expect(stored?.sandboxId).toBeNull();
+    expect(stored?.sessionOperation).toBeNull();
   });
 
   it("pins a provider default image for stable cold resumes", async () => {

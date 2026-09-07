@@ -4,6 +4,7 @@ import { bindTestDatabase, seedSession } from "../test-support";
 import type { Database } from "./client";
 import { claimNextRun, completeRun } from "./runs";
 import { sessions } from "./schema";
+import { claimSessionOperation, renewSessionOperation } from "./session-operations";
 import {
   clearSessionWorkspace,
   createSessionTurn,
@@ -11,6 +12,7 @@ import {
   getSession,
   listSessionRuns,
   parkSession,
+  SessionBusyError,
   saveSessionCheckpoint,
   saveSessionDiffBaseSha,
 } from "./sessions";
@@ -239,11 +241,13 @@ describe("durable sessions", () => {
     const { session, run } = await seedSession(database);
     await completeRun(database, run.id, "succeeded", null);
     await parkSession(database, run, null, null);
+    const operationAt = new Date(Date.now() - 60 * 1000);
     await database
       .update(sessions)
       .set({
         sessionOperation: "archiving",
-        sessionOperationAt: new Date(Date.now() - 11 * 60 * 1000),
+        sessionOperationAt: operationAt,
+        sessionOperationHeartbeatAt: new Date(Date.now() - 11 * 60 * 1000),
       })
       .where(eq(sessions.id, session.id));
 
@@ -258,6 +262,45 @@ describe("durable sessions", () => {
 
     expect(followUp.turnNumber).toBe(2);
     expect((await getSession(database, session.id))?.sessionOperation).toBeNull();
+  });
+
+  it("does not reclaim a cleanup claim while its heartbeat is current", async () => {
+    const { session, run } = await seedSession(database);
+    await completeRun(database, run.id, "succeeded", null);
+    await parkSession(database, run, null, null);
+    await database
+      .update(sessions)
+      .set({
+        sessionOperation: "archiving",
+        sessionOperationAt: new Date(Date.now() - 11 * 60 * 1000),
+        sessionOperationHeartbeatAt: new Date(),
+      })
+      .where(eq(sessions.id, session.id));
+
+    await expect(
+      createSessionTurn(database, session.id, "Do not overlap cleanup", "token-busy", null, {
+        model: session.model,
+        modelConnectionId: session.modelConnectionId,
+      }),
+    ).rejects.toBeInstanceOf(SessionBusyError);
+  });
+
+  it("renews only the operation that still owns the session claim", async () => {
+    const { session, run } = await seedSession(database);
+    await completeRun(database, run.id, "succeeded", null);
+    await parkSession(database, run, null, null);
+    const operationAt = await claimSessionOperation(database, session.id, "archiving", {
+      activeRunId: null,
+    });
+    expect(operationAt).not.toBeNull();
+    if (!operationAt) throw new Error("session operation claim missing");
+
+    expect(
+      await renewSessionOperation(database, session.id, "archiving", operationAt),
+    ).not.toBeNull();
+    expect(
+      await renewSessionOperation(database, session.id, "archiving", new Date(0)),
+    ).toBeNull();
   });
 
   it("retains the provider identity when a workspace checkpoint is cleared", async () => {

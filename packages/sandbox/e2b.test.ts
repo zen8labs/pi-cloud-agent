@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { buildTemplate, templateExists, templateFactory, templateBuilder } = vi.hoisted(() => {
+const {
+  buildTemplate,
+  sandboxConnect,
+  sandboxKill,
+  templateExists,
+  templateFactory,
+  templateBuilder,
+} = vi.hoisted(() => {
   const builder = {
     fromImage: vi.fn(),
     setStartCmd: vi.fn(),
@@ -9,6 +16,8 @@ const { buildTemplate, templateExists, templateFactory, templateBuilder } = vi.h
   builder.setStartCmd.mockReturnValue(builder);
   return {
     buildTemplate: vi.fn(async (): Promise<void> => undefined),
+    sandboxConnect: vi.fn(),
+    sandboxKill: vi.fn(async (): Promise<void> => undefined),
     templateExists: vi.fn(async () => false),
     templateFactory: vi.fn(() => builder),
     templateBuilder: builder,
@@ -16,7 +25,7 @@ const { buildTemplate, templateExists, templateFactory, templateBuilder } = vi.h
 });
 
 vi.mock("e2b", () => ({
-  Sandbox: {},
+  Sandbox: { connect: sandboxConnect, kill: sandboxKill },
   SandboxNotFoundError: class SandboxNotFoundError extends Error {},
   Template: Object.assign(templateFactory, {
     build: buildTemplate,
@@ -36,12 +45,12 @@ describe("E2B image resolution", () => {
     const first = await provider.resolveImage(image);
     const second = await provider.resolveImage(image);
 
-    expect(second).toBe(first);
+    expect(second).not.toBe(first);
     expect(buildTemplate).toHaveBeenCalledTimes(2);
     expect(buildTemplate).toHaveBeenNthCalledWith(
       1,
       templateBuilder,
-      expect.stringMatching(/^pi-cloud-agent-[0-9a-f]{16}$/),
+      expect.stringMatching(/^pi-cloud-agent-[0-9a-f]{16}-[0-9a-f]{12}$/),
       { apiKey: "test-key", skipCache: true },
     );
   });
@@ -63,5 +72,39 @@ describe("E2B image resolution", () => {
 
     await expect(Promise.all([first, second])).resolves.toHaveLength(2);
     expect(buildTemplate).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reuse a stale template when materialization fails", async () => {
+    buildTemplate.mockRejectedValueOnce(new Error("template build failed"));
+    templateExists.mockResolvedValueOnce(true);
+    const provider = createE2BProvider({ E2B_API_KEY: "test-key" });
+
+    await expect(provider.resolveImage("ghcr.io/acme/widgets:latest")).rejects.toThrow(
+      "template build failed",
+    );
+    expect(templateExists).not.toHaveBeenCalled();
+  });
+
+  it("preserves a paused workspace when the resumed runtime cannot launch", async () => {
+    sandboxConnect.mockResolvedValueOnce({
+      sandboxId: "paused-1",
+      commands: { run: vi.fn().mockRejectedValue(new Error("command launch failed")) },
+    });
+    const provider = createE2BProvider({ E2B_API_KEY: "test-key" });
+
+    await expect(
+      provider.resume(
+        { provider: "e2b", id: "paused-1" },
+        {
+          runId: "run-1",
+          image: "template-1",
+          timeoutSeconds: 60,
+          env: {},
+          secrets: {},
+          command: "node /app/run.js",
+        },
+      ),
+    ).rejects.toMatchObject({ name: "SandboxError" });
+    expect(sandboxKill).not.toHaveBeenCalled();
   });
 });
