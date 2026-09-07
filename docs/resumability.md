@@ -64,7 +64,7 @@ Only the run named by `sessions.active_run_id` may own a session. Follow-ups sub
 
 An active session has a provider checkpoint and can resume without cloning or installing dependencies. After the configured retention period (the existing `sessionWorkspaceRetentionSeconds` setting, seven days by default), the reconciler deletes that checkpoint and marks the session `inactive`; its Postgres Pi checkpoint remains. The next turn cold-starts from the repository's configured base image, removes only its derived `/workspace/<repo>` path, clones the repository, and restores only the Pi conversation. This is explicit in `WORKSPACE_RESUMED=false` and never pretends filesystem state survived.
 
-The Settings Delete button permanently deletes the session, all turns, and its provider checkpoint. Deletion is refused while a run is non-terminal. Provider cleanup is idempotent; a repeated HTTP request returns `404` because the chat no longer exists.
+The session Delete action permanently deletes the session, all turns, and its provider checkpoint. Deletion is refused while a run is non-terminal. Provider cleanup is idempotent; a repeated HTTP request returns `404` because the chat no longer exists.
 
 ## Agent checkpoint and credentials
 
