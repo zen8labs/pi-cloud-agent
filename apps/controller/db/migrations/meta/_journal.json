@@ -169,6 +169,13 @@
       "when": 1788773553393,
       "tag": "0023_hard_wind_dancer",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788774654200,
+      "tag": "0024_free_hellfire_club",
+      "breakpoints": true
     }
   ]
 }

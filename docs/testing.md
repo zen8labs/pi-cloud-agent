@@ -34,6 +34,7 @@ Integration tests share one database and truncate between tests, so they run in 
 | `packages/sandbox/registry.test.ts` | a misconfigured provider fails at startup, naming the variable and the alternatives |
 | `packages/runtime/reporter.test.ts` | secrets do not leave the sandbox; telemetry loss cannot fail a run; the terminal status retries |
 | `packages/runtime/workspace.test.ts` | Git checkout reuse and diff capture stay bounded |
+| `packages/sandbox/project-image.live.test.ts` | app runtime installation into plain Debian and file preservation through a real microSandbox snapshot/resume; no model credentials |
 | `apps/controller/http/environments.integration.test.ts` | per-repository image mappings, preflight, and clearing |
 | `apps/controller/db/runs.integration.test.ts` | the SQL properties: exclusive claim, guarded transitions, gapless sequences under concurrency |
 | `apps/controller/db/sessions.integration.test.ts` | one workspace owner, ordered queued turns, promotion, checkpoint ownership, and workspace parking |

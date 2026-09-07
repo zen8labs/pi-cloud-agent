@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   type RepositoryEnvironmentSummary,
+  SANDBOX_PATHS,
   updateRepositoryEnvironmentRequestSchema,
 } from "@pi-cloud-agent/protocol";
 import { type Context, Hono } from "hono";
@@ -100,17 +101,15 @@ async function readImageRequest(c: EnvironmentContext) {
 function imageCompatibilityTestCommand(): string {
   return [
     "set -eu",
-    "test -r /app/run.js",
-    "test -r /app/package.json",
+    `test -r ${SANDBOX_PATHS.app}/run.js`,
+    `test -r ${SANDBOX_PATHS.app}/package.json`,
     "test -d /workspace",
     "test -w /workspace",
-    "id node",
-    "command -v node",
     "command -v git",
     "command -v gh",
-    "cd /app",
-    "node --import tsx -e \"process.stdout.write('runtime-loader-ok\\n')\"",
-    "node --version",
+    `cd ${SANDBOX_PATHS.app}`,
+    "./bin/node --import tsx -e \"await import('@earendil-works/pi-coding-agent'); process.stdout.write('runtime-loader-ok\\n')\"",
+    "./bin/node --version",
     "git --version",
     "gh --version | head -n 1",
   ].join("\n");

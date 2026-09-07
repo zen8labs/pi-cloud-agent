@@ -8,7 +8,7 @@ Users authenticate through the configured GitHub App. The controller creates a l
 
 The current broker injects the token into the sandbox as `SCM_TOKEN` and provider-specific aliases. This is intentionally temporary: repository code and the agent run in the same untrusted machine, so a malicious repository can read or exfiltrate a token visible to its process.
 
-Repository-specific dependencies belong in a user-selected base image/template. The Settings **Test image** action runs a disposable compatibility check and destroys it. The image executes in the same untrusted sandbox as repository code, so image authors must be trusted. Provider checkpoints are filesystem-only and must not retain credential values.
+Repository-specific dependencies belong in a user-selected base image/template. The Settings **Test environment** action runs a disposable compatibility check and destroys it. The image executes in the same untrusted sandbox as repository code, so image authors must be trusted. Provider checkpoints are filesystem-only and must not retain credential values.
 
 ## Security concerns
 

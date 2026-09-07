@@ -67,7 +67,7 @@ docker run --rm --entrypoint bash pi-cloud-agent:local -lc \
 
 ## Repository images and checkpoints
 
-Configure an OCI image (microSandbox) or E2B template per connected repository in Settings > Environments. Use **Test image** to run the runtime-contract check in a disposable sandbox before saving it. The image must provide `/app/run.js`, `/app/package.json` with its runtime dependencies (including `tsx`), `/workspace`, Node.js, git, gh, and an unprivileged `node` user. Leaving it empty uses the bundled image. Dependencies and toolchains are built into the image; no arbitrary setup script runs after checkout.
+Configure a public project image per connected repository in Settings > Environments. It supplies project toolchains on a supported Debian/Ubuntu base; the provider installs the app runtime, its Node, git/gh prerequisites, and unprivileged user inside the VM. No private runtime paths need to be packaged in the image. **Test environment** optionally checks installation and library loading without running a model task. Leaving the mapping empty uses the default project environment. Build and deploy the app archives with `pnpm sandbox:runtime`; see [compatibility and deployment](../packages/runtime/README.md#image-contract).
 
 After each completed session turn, microSandbox stores an integrity-checked local snapshot, commits its path and source-finalization marker, and then releases the stopped source VM; E2B pauses the filesystem. If source release fails, the marker remains and the reconciler retries it on a later pass. The previous checkpoint is deleted after its replacement is durable, so a session keeps one warm artifact. Warm follow-ups resume that checkpoint without cloning. Checkpoints expire after `SESSION_WORKSPACE_RETENTION_SECONDS` (seven days by default); the reconciler deletes them and marks the session inactive while retaining the provider identity, so the next turn cold-clones from the correct provider's pinned image while restoring Pi history. See [resumability.md](resumability.md).
 
@@ -77,7 +77,7 @@ Delete and retention expiry claim the session before provider cleanup. A follow-
 
 E2B materializes each public OCI image resolution under a unique template alias and fails a build instead of reusing an older alias. A session stores the resolved alias once, so a republished registry tag affects only later sessions.
 
-Session artifacts are filesystem checkpoints rather than full Docker image commits. Keep `MICROSANDBOX_SNAPSHOT_DIR` on durable storage, monitor the `checkpoint_size_bytes` column, and use delete or retention expiry as the normal reclamation paths. The controller keeps one checkpoint per session and deletes the old one only after the replacement is durable. If a provider delete temporarily fails during replacement, the new checkpoint remains usable and the old artifact is reported in controller logs for provider-side/manual cleanup.
+Session artifacts are filesystem checkpoints rather than full Docker image commits. Keep `MICROSANDBOX_SNAPSHOT_DIR` on durable storage, monitor that storage directly, and use delete or retention expiry as the normal reclamation paths. The controller keeps one checkpoint per session and deletes the old one only after the replacement is durable. If a provider delete temporarily fails during replacement, the new checkpoint remains usable and the old artifact is reported in controller logs for provider-side/manual cleanup.
 
 ## Watching a run
 
@@ -134,7 +134,7 @@ psql -c "select id, status, sandbox_provider, sandbox_id
          from runs where sandbox_id is not null and sandbox_stopped_at is null;"
 
 # durable sessions and their parked workspaces
-psql -c "select id, active_run_id, latest_run_id, turn_count, sandbox_image_ref, retention_status, checkpoint_size_bytes, sandbox_id, workspace_expires_at
+psql -c "select id, active_run_id, latest_run_id, turn_count, sandbox_image_ref, retention_status, sandbox_id, workspace_expires_at
          from sessions order by updated_at desc limit 10;"
 ```
 
@@ -156,7 +156,7 @@ The terminal evidence is a `status` event followed by the run row reaching `succ
 | stuck in `queued` | reconciler not running, or `SANDBOX_PROVIDER` misconfigured | controller logs at startup |
 | `failed` immediately, "could not create a sandbox" | bad provider configuration, missing local image, or missing E2B template | `pnpm sandbox:image` or `pnpm sandbox:template` |
 | `running`, no events, fails with "stopped reporting" | `CONTROL_PLANE_URL` is unreachable from the sandbox, or the detached runtime failed before it could report | the controller log, `msb logs <sandbox-id>`, `msb exec <sandbox-id> -- cat /tmp/pi-cloud-agent-runtime.log` while the microSandbox is running, and the selected provider's network path |
-| image compatibility failure before the agent starts | image lacks the runtime contract or cannot boot | Settings **Test image** output and provider logs |
+| image compatibility failure before the agent starts | image lacks the runtime contract or cannot boot | Settings **Test environment** output and provider logs |
 | events stop mid-run, then "wall-clock budget" | the agent genuinely ran long | `RUN_WALL_CLOCK_SECONDS` |
 | `git.clone_branch_failed` then a successful clone | the named branch is gone; fell back to the default | benign |
 | `attempt` climbing | retryable provisioning failures | the provider's error in the logs |

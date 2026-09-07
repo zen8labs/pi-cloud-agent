@@ -114,7 +114,7 @@ function SettingsContent() {
         <div className="mb-8 mt-12">
           <h2 className="text-xl font-medium tracking-[-0.02em]">Environments</h2>
           <p className="mt-2 text-sm text-muted-foreground">
-            Prepare each connected repository before an agent starts working.
+            Choose the environment each new session starts from.
           </p>
         </div>
 

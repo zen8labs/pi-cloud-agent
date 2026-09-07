@@ -60,8 +60,6 @@ export interface SandboxRef {
 export interface WorkspaceRef {
   provider: string;
   id: string;
-  /** Optional provider-reported artifact size, used for retention accounting. */
-  sizeBytes?: number;
 }
 
 /**

@@ -10,6 +10,7 @@ import {
 import { Sandbox, SandboxNotFoundError, Template } from "e2b";
 import { z } from "zod";
 import { flattenSecrets } from "./environment.js";
+import { readRuntimeArchive, runtimeInstallCommand, runtimeUser } from "./runtime-install.js";
 
 /**
  * E2B: a hosted microVM per run.
@@ -25,12 +26,17 @@ import { flattenSecrets } from "./environment.js";
 const envSchema = z.object({
   E2B_API_KEY: z.string().default(""),
   E2B_TEMPLATE: z.string().default("pi-cloud-agent"),
+  SANDBOX_RUNTIME_DIR: z.string().default(""),
 });
 
 export function createE2BProvider(
   env: Readonly<Record<string, string | undefined>>,
 ): SandboxProvider {
-  const { E2B_API_KEY: apiKey, E2B_TEMPLATE: defaultTemplate } = envSchema.parse(env);
+  const {
+    E2B_API_KEY: apiKey,
+    E2B_TEMPLATE: defaultTemplate,
+    SANDBOX_RUNTIME_DIR: runtimeDirectory,
+  } = envSchema.parse(env);
   // Checked here rather than in the schema so the message names the variable and
   // the provider, which is the only useful thing to say at startup.
   if (apiKey === "") {
@@ -64,11 +70,12 @@ export function createE2BProvider(
       let sandbox: Sandbox | undefined;
       try {
         const template = await resolveTemplate(spec.image);
-        sandbox = await Sandbox.create(template, { apiKey, envs, timeoutMs });
+        sandbox = await Sandbox.create(template, { apiKey, timeoutMs });
+        await installRuntime(sandbox, runtimeDirectory, timeoutMs);
         const result = await sandbox.commands.run(spec.command, {
           envs,
           timeoutMs,
-          user: "node",
+          user: runtimeUser,
         });
         return { code: result.exitCode, stdout: result.stdout, stderr: result.stderr };
       } catch (cause) {
@@ -88,7 +95,7 @@ export function createE2BProvider(
       let sandbox: Sandbox;
       try {
         const template = await resolveTemplate(spec.image);
-        sandbox = await Sandbox.create(template, { apiKey, envs, timeoutMs });
+        sandbox = await Sandbox.create(template, { apiKey, timeoutMs });
       } catch (cause) {
         const requested = spec.image || defaultTemplate;
         throw new SandboxError(`e2b: could not create a sandbox from "${requested}"`, {
@@ -98,11 +105,12 @@ export function createE2BProvider(
       }
 
       try {
+        await installRuntime(sandbox, runtimeDirectory, timeoutMs);
         await sandbox.commands.run(spec.command, {
           background: true,
           envs,
           timeoutMs,
-          user: "node",
+          user: runtimeUser,
         });
       } catch (cause) {
         // The machine exists but will never do anything. Reclaim it now rather
@@ -123,11 +131,12 @@ export function createE2BProvider(
       let sandbox: Sandbox | undefined;
       try {
         sandbox = await Sandbox.connect(ref.id, { apiKey, timeoutMs });
+        await installRuntime(sandbox, runtimeDirectory, timeoutMs);
         await sandbox.commands.run(spec.command, {
           background: true,
           envs,
           timeoutMs,
-          user: "node",
+          user: runtimeUser,
         });
       } catch (cause) {
         if (cause instanceof SandboxNotFoundError) {
@@ -172,6 +181,14 @@ export function createE2BProvider(
       await Sandbox.kill(ref.id, { apiKey });
     },
   };
+}
+
+async function installRuntime(sandbox: Sandbox, directory: string, timeoutMs: number) {
+  const machine = await sandbox.commands.run("uname -m", { user: "root", timeoutMs });
+  const archive = await readRuntimeArchive(directory, machine.stdout);
+  const target = `/tmp/pi-runtime-${randomUUID()}.tar.gz`;
+  await sandbox.files.write(target, new Uint8Array(archive).buffer, { user: "root" });
+  await sandbox.commands.run(runtimeInstallCommand(target), { user: "root", timeoutMs });
 }
 
 async function resolveTemplateReference(

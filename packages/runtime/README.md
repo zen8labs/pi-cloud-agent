@@ -20,7 +20,8 @@ It reaches exactly one thing: `CONTROL_PLANE_URL`, outbound only.
 | `session-state.ts` | authenticated JSONL checkpoint download/upload |
 | `reporter.ts` | telemetry, OAuth, and terminal status callback |
 | `build.ts` | bundles `dist/run.js` |
-| `Dockerfile.sandbox` | bundled default image |
+| `Dockerfile.sandbox` | default project environment, without the agent runtime |
+| `Dockerfile.runtime` | app-managed Linux runtime archives for amd64 and arm64 |
 
 ## Invariants
 
@@ -36,15 +37,13 @@ It reaches exactly one thing: `CONTROL_PLANE_URL`, outbound only.
 
 The default image includes Node/npm/pnpm, Python/pip/venv/uv, git, gh, git-lfs, jq, ripgrep, archive utilities, and a native compiler toolchain. Go, Rust, Java, browsers, and cloud CLIs should be supplied by a repository's custom image instead of installed by an arbitrary script.
 
-A custom image or E2B template selected in Settings must provide:
+A custom image supplies the project's environment, not the agent. Supported images are Debian 12/13 and Ubuntu 22.04/24.04 with `/bin/sh`, tar/gzip, apt repositories, and outbound access. Alpine, distroless images, and other distributions are not supported yet. Supply your own language toolchains and dependencies; there is no required parent image, Node version, runtime path, or user account.
 
-- `/app/run.js` (the bundled runtime entry point)
-- `/app/package.json` and its runtime dependencies, including the `tsx` loader
-- `/workspace` writable by the `node` user
-- Node.js, `git`, and `gh` on `PATH`, plus an unprivileged `node` user
-- a non-interactive shell and outbound access to the control plane, forge, and model gateway
+Build the app payload with `pnpm sandbox:runtime`. The provider selects the archive matching the guest's amd64/arm64 architecture and transfers it through its SDK. Inside the isolated VM, a credential-free bootstrap installs missing git/gh/bash prerequisites, creates the unprivileged `pi-agent` account and workspace, and installs our bundled Node and agent dependencies under the reserved `/opt/pi-cloud-agent` directory. Each launch refreshes only that app-owned directory, including warm resumes; project files stay in the provider checkpoint. The runtime respects the project's Python environment instead of forcing a bundled virtualenv.
 
-Settings > Environments runs these checks in a disposable sandbox before saving the image reference. Leave the mapping blank to use the bundled image.
+The controller deployment must carry `runtime-linux-amd64.tar.gz` and `runtime-linux-arm64.tar.gz` in `packages/runtime/dist`, or set `SANDBOX_RUNTIME_DIR` to their directory. The deployment's runtime version is independent of the session's base image reference. No runtime or package installation executes on the controller against a user image.
+
+Settings > Environments optionally tests this same installation and loads the agent library in a disposable sandbox. It does not run a model task or verify callback connectivity. Saving does not require testing. Leave the mapping blank to use the default project environment.
 
 On a warm session resume, the provider checkpoint already contains the checkout, uncommitted edits, and installed dependencies, so `prepareCheckout` reuses it without cloning. If the checkpoint is inactive or missing, the runtime removes the derived `/workspace/<repo>` checkout path, cold-starts from the repository image, and clones again while restoring only the Pi JSONL checkpoint. This prevents a stale checkout accidentally baked into a custom image from being treated as session state.
 

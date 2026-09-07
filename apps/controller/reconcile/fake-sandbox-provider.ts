@@ -46,7 +46,7 @@ export function fakeProvider(
     },
     async suspend(ref) {
       suspended.push(ref.id);
-      return { provider: "fake", id: ref.id, sizeBytes: 4096 };
+      return { provider: "fake", id: ref.id };
     },
     async finalizeSuspend() {},
     async deleteWorkspace(ref) {

@@ -369,7 +369,6 @@ async function toSessionSummary(
     latestRunId: session.latestRunId,
     workspaceAvailable: Boolean(session.sandboxId),
     retentionStatus: session.retentionStatus,
-    checkpointSizeBytes: session.checkpointSizeBytes,
     createdAt: session.createdAt.toISOString(),
     updatedAt: session.updatedAt.toISOString(),
   };

@@ -1,0 +1,31 @@
+# The controller image only needs the workspace manifests, controller source,
+# and package source plus the app-managed runtime archives.
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!apps/
+!apps/controller/
+!apps/controller/**
+!packages/
+!packages/**
+
+# Re-exclude generated and dependency trees after allowing package source.
+node_modules/
+node_modules/**
+apps/**/node_modules/
+apps/**/node_modules/**
+packages/**/node_modules/
+packages/**/node_modules/**
+apps/**/.next/
+apps/**/.next/**
+apps/**/.turbo/
+apps/**/.turbo/**
+packages/**/.turbo/
+packages/**/.turbo/**
+apps/**/coverage/
+apps/**/coverage/**
+packages/**/coverage/
+packages/**/coverage/**
+apps/**/.pi-cloud-agent-snapshots/
+apps/**/.pi-cloud-agent-snapshots/**

@@ -54,9 +54,9 @@ export const SANDBOX_ENV = {
 
 export type SandboxEnvKey = keyof typeof SANDBOX_ENV;
 
-/** Where the sandbox image puts things. Fixed by the image, not configurable. */
+/** App-owned paths installed by the provider, independent of the project image. */
 export const SANDBOX_PATHS = {
   workspace: "/workspace",
   state: "/workspace/.pi-cloud-agent",
-  app: "/app",
+  app: "/opt/pi-cloud-agent",
 } as const;

@@ -31,7 +31,6 @@ vi.mock("microsandbox", () => {
     recordIntegrity: () => snapshotBuilder,
     create: vi.fn(async () => ({
       path: "/snapshots/session-test",
-      sizeBytes: 1024n,
     })),
   };
   snapshotForce.mockReturnValue(snapshotBuilder);
@@ -68,7 +67,6 @@ describe("microSandbox checkpoints", () => {
     expect(workspace).toEqual({
       provider: "microsandbox",
       id: "/snapshots/session-test",
-      sizeBytes: 1024,
     });
     await expect(
       provider.finalizeSuspend({ provider: "microsandbox", id: "live-1" }, workspace),

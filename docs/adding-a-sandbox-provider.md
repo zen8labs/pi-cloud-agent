@@ -17,7 +17,9 @@ export interface SandboxProvider {
 }
 ```
 
-`create`/`stop` are the standalone lifecycle. `suspend`/`finalizeSuspend`/`resume`/`deleteWorkspace` are the durable-session lifecycle. A backend may implement the latter with a filesystem-only pause, snapshot, archive, or detached volume. `finalizeSuspend` is called only after the controller commits the returned workspace, is retried until it succeeds, and must be idempotent; this closes the crash window between creating a snapshot and releasing its source. The optional `execute` method powers the Settings image preflight and must run a disposable foreground command, return its output, and reclaim the machine before returning. The opaque `WorkspaceRef` (optionally including `sizeBytes`) is the only provider-specific state stored by the controller.
+`create`/`stop` are the standalone lifecycle. `suspend`/`finalizeSuspend`/`resume`/`deleteWorkspace` are the durable-session lifecycle. A backend may implement the latter with a filesystem-only pause, snapshot, archive, or detached volume. `finalizeSuspend` is called only after the controller commits the returned workspace, is retried until it succeeds, and must be idempotent; this closes the crash window between creating a snapshot and releasing its source. The optional `execute` method powers the Settings image preflight and must run a disposable foreground command, return its output, and reclaim the machine before returning. The opaque `WorkspaceRef` is the only provider-specific checkpoint state stored by the controller.
+
+Project images do not package the agent. Before executing the supplied command, built-in providers transfer the app-managed runtime archive and install it inside the isolated VM, without run credentials. Launch the command as the unprivileged app user with credentials scoped to that process. Preflight follows the same installation path. See [the runtime image contract](../packages/runtime/README.md#image-contract).
 
 `resolveImage` turns the empty image reference into the provider's effective default and may materialize a public OCI reference into a provider-native template. The controller stores that resolved value on the session before the first sandbox is created, so later configuration changes cannot silently alter a cold resume.
 
@@ -80,7 +82,7 @@ export function createMyBackendProvider(
 
     async suspend(ref) {
       const workspace = await snapshotFilesystem(ref.id);
-      return { provider: "my-backend", id: workspace.id, sizeBytes: workspace.sizeBytes };
+      return { provider: "my-backend", id: workspace.id };
     },
 
     async finalizeSuspend(ref) {
@@ -150,7 +152,7 @@ If you ever find yourself needing an application route, polling bridge, or agent
 
 `spec.image` is provider-specific: an E2B template name, a Docker/OCI tag, a Modal image reference. `resolveImage("")` must return the provider's configured default. The E2B implementation turns public OCI references into a provider template and refreshes completed image-tag resolutions so a republished tag is not permanently stale, while microSandbox passes the Docker reference directly to its local runtime.
 
-Whatever it points at needs Node, `git`, `gh`, the `tsx` loader, `/app/run.js`, and `/app/package.json` with the runtime dependencies. `packages/runtime/Dockerfile.sandbox` is the reference; a provider that consumes plain Dockerfiles can use it unchanged.
+The image supplies the project environment. Providers install the app runtime separately; users need no private app paths, agent dependencies, or app user. `packages/runtime/Dockerfile.sandbox` is the default toolchain image, and `Dockerfile.runtime` builds the app-owned archives. See [supported image requirements](../packages/runtime/README.md#image-contract).
 
 ## Test it
 

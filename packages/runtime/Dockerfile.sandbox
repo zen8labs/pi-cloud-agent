@@ -1,4 +1,4 @@
-# The sandbox image: a checkout, a shell, and one agent.
+# The default project environment. The app runtime is installed by the provider.
 #
 # No credential is baked in. The controller injects a scoped forge token and the
 # model key per run, and they live only in that run's process environment.
@@ -8,10 +8,10 @@ FROM node:22-bookworm-slim
 
 ENV NODE_ENV=production \
     DEBIAN_FRONTEND=noninteractive \
-    HOME=/home/node \
-    VIRTUAL_ENV=/home/node/.venv
+    HOME=/home/pi-agent \
+    VIRTUAL_ENV=/home/pi-agent/.venv
 
-ENV PATH=/home/node/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ENV PATH=/home/pi-agent/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -39,8 +39,9 @@ RUN apt-get update \
         zip \
     && pip3 install --break-system-packages --no-cache-dir uv==0.11.20 \
     && npm install --global --no-audit --no-fund pnpm@11.1.3 \
-    && python3 -m venv /home/node/.venv \
-    && chown -R node:node /home/node \
+    && useradd --create-home --shell /bin/bash pi-agent \
+    && python3 -m venv /home/pi-agent/.venv \
+    && chown -R pi-agent:pi-agent /home/pi-agent \
     && git lfs install --system \
     && rm -rf /var/lib/apt/lists/*
 
@@ -60,32 +61,6 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
-
-# dist/package.json pins Pi to the version the bundle was built against, and Pi
-# ships a shrinkwrap, so this layer is reproducible.
-COPY dist/package.json /app/package.json
-COPY dist/patch-pi-ai-exports.mjs /app/patch-pi-ai-exports.mjs
-RUN npm install --omit=dev --no-audit --no-fund \
-    && node /app/patch-pi-ai-exports.mjs \
-    && rm /app/patch-pi-ai-exports.mjs \
-    && chown -R node:node /home/node
-
-COPY dist/run.js /app/run.js
-
-# Where the repository is cloned and the agent works.
-RUN mkdir -p /workspace/.pi-cloud-agent /workspace/.tmp \
-    && chmod 1777 /workspace \
-    && chown node:node /workspace/.pi-cloud-agent \
-    && chown node:node /workspace/.tmp \
-    && chmod 700 /workspace/.pi-cloud-agent
-
-# Both providers execute repository code as this user. Toolchains belong in the
-# immutable base image; repository-specific dependencies belong in a custom
-# image selected per repository, not in an arbitrary setup script.
-USER node
-
-# E2B runs a template's start command at build time, so the real per-run command
-# is issued on create instead — it needs values that only exist then. See
-# packages/sandbox/e2b.ts.
-CMD ["node", "/app/run.js"]
+WORKDIR /workspace
+USER pi-agent
+CMD ["sleep", "infinity"]

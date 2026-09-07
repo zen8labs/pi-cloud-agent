@@ -358,7 +358,6 @@ function buildWorkspaceUpdate(
       sandboxId: null,
       workspaceExpiresAt: expiresAt,
       retentionStatus: "inactive" as const,
-      checkpointSizeBytes: null,
     };
   }
   return {
@@ -366,7 +365,6 @@ function buildWorkspaceUpdate(
     sandboxId: workspace.id,
     workspaceExpiresAt: expiresAt,
     retentionStatus: "active" as const,
-    checkpointSizeBytes: workspace.sizeBytes ?? null,
   };
 }
 
@@ -437,7 +435,6 @@ export async function clearSessionWorkspace(
       sandboxId: null,
       workspaceExpiresAt: null,
       retentionStatus: "inactive",
-      checkpointSizeBytes: null,
       updatedAt: new Date(),
     })
     .where(and(eq(sessions.id, sessionId), eq(sessions.sandboxId, workspaceId), ...guards))

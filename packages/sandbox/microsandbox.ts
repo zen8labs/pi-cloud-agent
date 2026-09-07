@@ -20,9 +20,11 @@ import {
 } from "microsandbox";
 import { z } from "zod";
 import { flattenSecrets } from "./environment.js";
+import { readRuntimeArchive, runtimeInstallCommand, runtimeUser } from "./runtime-install.js";
 
 const envSchema = z.object({
   MICROSANDBOX_IMAGE: z.string().default("pi-cloud-agent:local"),
+  SANDBOX_RUNTIME_DIR: z.string().default(""),
   MICROSANDBOX_CPUS: z.coerce.number().int().positive().default(2),
   MICROSANDBOX_MEMORY_MB: z.coerce.number().int().positive().default(4096),
   MICROSANDBOX_ROOT_DISK_MIB: z.coerce.number().int().positive().default(8192),
@@ -46,6 +48,7 @@ export function createMicroSandboxProvider(
 ): SandboxProvider {
   const {
     MICROSANDBOX_IMAGE: defaultImage,
+    SANDBOX_RUNTIME_DIR: runtimeDirectory,
     MICROSANDBOX_CPUS: cpus,
     MICROSANDBOX_MEMORY_MB: memoryMb,
     MICROSANDBOX_ROOT_DISK_MIB: rootDiskMib,
@@ -74,8 +77,10 @@ export function createMicroSandboxProvider(
           memoryMb,
           allowHost,
         ).create();
+        await installRuntime(sandbox, runtimeDirectory, spec.timeoutSeconds);
         const output = await sandbox.execWith("bash", (exec) =>
           exec
+            .user(runtimeUser)
             .args(["--noprofile", "--norc", "-e", "-u", "-o", "pipefail", "-c", spec.command])
             .envs(flattenSecrets(spec))
             .timeout(spec.timeoutSeconds * 1000),
@@ -117,6 +122,7 @@ export function createMicroSandboxProvider(
       }
 
       try {
+        await installRuntime(sandbox, runtimeDirectory, spec.timeoutSeconds);
         await startRuntime(sandbox, spec);
         await sandbox.detach();
       } catch (cause) {
@@ -142,7 +148,7 @@ export function createMicroSandboxProvider(
         sandbox = await Sandbox.builder(liveId)
           .fromSnapshot(snapshot.path)
           .entrypoint(["sleep", "infinity"])
-          .user("node")
+          .user("root")
           .cpus(cpus)
           .memory(memoryMb)
           .network((network) => network.policy(buildNetworkPolicy(spec, allowHost)))
@@ -163,6 +169,7 @@ export function createMicroSandboxProvider(
       }
 
       try {
+        await installRuntime(sandbox, runtimeDirectory, spec.timeoutSeconds);
         await startRuntime(sandbox, spec);
         await sandbox.detach();
       } catch (cause) {
@@ -201,10 +208,6 @@ export function createMicroSandboxProvider(
       return {
         provider: "microsandbox",
         id: snapshot.path,
-        sizeBytes:
-          snapshot.sizeBytes === null || snapshot.sizeBytes === undefined
-            ? undefined
-            : Number(snapshot.sizeBytes),
       };
     },
 
@@ -259,7 +262,7 @@ function configureImageSandbox(
     .image(spec.image || defaultImage)
     .rootDisk(rootDiskMib)
     .entrypoint(["sleep", "infinity"])
-    .user("node")
+    .user("root")
     .cpus(cpus)
     .memory(memoryMb)
     .network((network) => network.policy(buildNetworkPolicy(spec, allowHost)))
@@ -302,11 +305,12 @@ async function startRuntime(sandbox: Sandbox, spec: SandboxSpec): Promise<void> 
 
   const output = await sandbox.execWith("sh", (exec) =>
     exec
+      .user(runtimeUser)
       .args([
         "-lc",
         // Keep the detached process from holding the exec pipe open. Its output
         // is available inside the guest at this path; see docs/operations.md.
-        `nohup ${spec.command} > /tmp/pi-cloud-agent-runtime.log 2>&1 < /dev/null & pid=$!; sleep 0.1; kill -0 "$pid"`,
+        `nohup sh -c '${spec.command.replaceAll("'", "'\\''")}' > /tmp/pi-cloud-agent-runtime.log 2>&1 < /dev/null & pid=$!; sleep 0.1; kill -0 "$pid"`,
       ])
       .envs(envs)
       .timeout(spec.timeoutSeconds * 1000),
@@ -315,6 +319,21 @@ async function startRuntime(sandbox: Sandbox, spec: SandboxSpec): Promise<void> 
   if (!output.success) {
     throw new Error(output.stderr() || `runtime launch exited with code ${output.code}`);
   }
+}
+
+async function installRuntime(sandbox: Sandbox, directory: string, timeout: number) {
+  const machine = await sandbox.execWith("uname", (exec) => exec.args(["-m"]).user("root"));
+  if (!machine.success) throw new Error("could not identify sandbox architecture");
+  const archive = await readRuntimeArchive(directory, machine.stdout());
+  const target = `/tmp/pi-runtime-${randomUUID()}.tar.gz`;
+  await sandbox.fs().write(target, archive);
+  const result = await sandbox.execWith("sh", (exec) =>
+    exec
+      .args(["-c", runtimeInstallCommand(target)])
+      .user("root")
+      .timeout(timeout * 1000),
+  );
+  if (!result.success) throw new Error(result.stderr() || "app runtime installation failed");
 }
 
 const RETRYABLE_PATTERNS = [

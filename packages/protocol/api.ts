@@ -104,7 +104,6 @@ export interface SessionSummary {
   activeRunId: string | null;
   latestRunId: string;
   workspaceAvailable: boolean;
-  checkpointSizeBytes: number | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -171,12 +171,7 @@ describe("durable sessions", () => {
     );
     const expiresAt = new Date(Date.now() + 60_000);
     await completeRun(database, run.id, "succeeded", null);
-    await parkSession(
-      database,
-      run,
-      { provider: "fake", id: "workspace-1", sizeBytes: 4096 },
-      expiresAt,
-    );
+    await parkSession(database, run, { provider: "fake", id: "workspace-1" }, expiresAt);
     await completeRun(database, promoted.id, "cancelled", "cancelled before provisioning");
 
     expect(await parkSession(database, promoted, undefined, null)).toBe(true);
@@ -186,7 +181,6 @@ describe("durable sessions", () => {
     expect(stored?.sandboxId).toBe("workspace-1");
     expect(stored?.workspaceExpiresAt).toEqual(expiresAt);
     expect(stored?.retentionStatus).toBe("active");
-    expect(stored?.checkpointSizeBytes).toBe(4096);
   });
 
   it("persists checkpoints only from the active session head", async () => {

@@ -141,7 +141,7 @@ describe("completion and teardown", () => {
       provider.suspended.push(ref.id);
       if (provider.suspended.length === 2) releaseBoth();
       await bothSuspended;
-      return { ...ref, sizeBytes: 4096 };
+      return ref;
     };
     await Promise.all([loop.tick(), reconciler(provider).tick()]);
 
@@ -149,7 +149,6 @@ describe("completion and teardown", () => {
     expect(provider.deleted).toEqual([]);
     expect(provider.stopped).toEqual([]);
     expect((await getSession(database, session.id))?.sandboxId).toBe("sb-1");
-    expect((await getSession(database, session.id))?.checkpointSizeBytes).toBe(4096);
 
     const followUp = await createSessionTurn(
       database,

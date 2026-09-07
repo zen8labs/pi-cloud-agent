@@ -85,7 +85,7 @@ describe("E2B image resolution", () => {
     expect(templateExists).not.toHaveBeenCalled();
   });
 
-  it("preserves a paused workspace when the resumed runtime cannot launch", async () => {
+  it("preserves a paused workspace when runtime preparation fails", async () => {
     sandboxConnect.mockResolvedValueOnce({
       sandboxId: "paused-1",
       commands: { run: vi.fn().mockRejectedValue(new Error("command launch failed")) },
@@ -101,7 +101,7 @@ describe("E2B image resolution", () => {
           timeoutSeconds: 60,
           env: {},
           secrets: {},
-          command: "node /app/run.js",
+          command: "cd /opt/pi-cloud-agent && ./bin/node --import tsx ./run.js",
         },
       ),
     ).rejects.toMatchObject({ name: "SandboxError" });

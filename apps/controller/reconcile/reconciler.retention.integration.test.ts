@@ -31,7 +31,7 @@ describe("session retention", () => {
     await parkSession(
       database,
       run,
-      { provider: "fake", id: "checkpoint-expired", sizeBytes: 4096 },
+      { provider: "fake", id: "checkpoint-expired" },
       new Date(Date.now() - 1_000),
     );
     const provider = fakeProvider();
@@ -42,6 +42,5 @@ describe("session retention", () => {
     const stored = await getSession(database, session.id);
     expect(stored?.sandboxId).toBeNull();
     expect(stored?.retentionStatus).toBe("inactive");
-    expect(stored?.checkpointSizeBytes).toBeNull();
   });
 });

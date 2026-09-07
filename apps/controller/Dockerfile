@@ -23,6 +23,10 @@ RUN pnpm install --frozen-lockfile --filter @pi-cloud-agent/controller...
 COPY packages/ packages/
 COPY apps/controller/ apps/controller/
 
+# Built separately from the project image with pnpm sandbox:runtime.
+RUN test -r packages/runtime/dist/runtime-linux-amd64.tar.gz \
+    && test -r packages/runtime/dist/runtime-linux-arm64.tar.gz
+
 WORKDIR /repo/apps/controller
 EXPOSE 8080
 CMD ["pnpm", "start"]

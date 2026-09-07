@@ -134,8 +134,8 @@ describe("repository environments", () => {
       output: "node v22.23.2\nPython 3.11.2",
     });
     expect(executedSpec?.image).toBe("docker.io/acme/widgets:dev");
-    expect(executedSpec?.command).toContain("test -r /app/run.js");
-    expect(executedSpec?.command).toContain("test -r /app/package.json");
+    expect(executedSpec?.command).toContain("test -r /opt/pi-cloud-agent/run.js");
+    expect(executedSpec?.command).toContain("test -r /opt/pi-cloud-agent/package.json");
     expect(executedSpec?.command).toContain("test -w /workspace");
     expect(executedSpec?.command).toContain("node --import tsx");
     expect(executedSpec?.command).toContain("command -v git");

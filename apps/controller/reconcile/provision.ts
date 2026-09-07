@@ -129,7 +129,7 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
       timeoutSeconds: config.sandbox.timeoutSeconds,
       env,
       secrets,
-      command: `node --import tsx ${SANDBOX_PATHS.app}/run.js`,
+      command: `cd ${SANDBOX_PATHS.app} && ./bin/node --import tsx ./run.js`,
     };
     const ref = await startSandbox(session, spec, sessionSandbox, database, log);
 
