@@ -160,7 +160,7 @@ function EnvironmentEditor({
       onNotice(
         imageRef.trim()
           ? "Repository image saved."
-          : "Repository image cleared; bundled image will be used.",
+          : "Repository image cleared; the default environment will be used for new sessions.",
         "success",
       );
     } catch (cause) {
