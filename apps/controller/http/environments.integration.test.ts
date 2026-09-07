@@ -173,7 +173,7 @@ describe("repository environments", () => {
     expect(await response.json()).toEqual({ error: "could not test repository image" });
   });
 
-  it("archives a session and asks the provider to delete its checkpoint", async () => {
+  it("deletes a session and asks the provider to delete its checkpoint", async () => {
     const { session, run } = await seedSession(database, auth.userId);
     await completeRun(database, run.id, "succeeded");
     await parkSession(database, run, { provider: "fake", id: "checkpoint-1" }, null);

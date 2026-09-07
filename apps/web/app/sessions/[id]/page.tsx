@@ -1,7 +1,7 @@
 "use client";
 
 import type { RunDetail, SessionDetail } from "@pi-cloud-agent/protocol";
-import { ArchiveIcon, ArrowLeftIcon, GitBranchIcon, PanelRightIcon } from "lucide-react";
+import { ArrowLeftIcon, GitBranchIcon, PanelRightIcon, Trash2Icon } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
@@ -17,8 +17,9 @@ import { SessionFollowUp } from "@/components/SessionFollowUp";
 import { SessionQueue } from "@/components/SessionQueue";
 import { SidebarResizeHandle } from "@/components/SidebarResizeHandle";
 import { StatusBadge } from "@/components/StatusBadge";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api } from "@/lib/api";
-import { absoluteTime } from "@/lib/format";
+import { absoluteTime, formatDuration } from "@/lib/format";
 import { resolveBranch, summarizeChanges } from "@/lib/session-meta";
 import { sessionRunView, useSession } from "@/lib/useSession";
 import { cn } from "@/lib/utils";
@@ -59,7 +60,9 @@ export default function SessionPage() {
   const router = useRouter();
   const { session, turns, error, refresh } = useSession(id);
   const [cancelling, setCancelling] = useState(false);
-  const [archiving, setArchiving] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [diffOpen, setDiffOpen] = useState(false);
   const [diffResizing, setDiffResizing] = useState(false);
   const [diffWidth, setDiffWidth] = useState(() =>
@@ -117,22 +120,23 @@ export default function SessionPage() {
     }
   };
 
-  const archive = async () => {
+  const requestDelete = () => {
     if (!session || (session.status !== "idle" && session.status !== "parking")) return;
-    if (
-      !window.confirm(
-        "Archive this session? Its sandbox checkpoint and chat history will be deleted.",
-      )
-    )
-      return;
-    setArchiving(true);
+    setDeleteError(null);
+    setDeleteDialogOpen(true);
+  };
+
+  const deleteSession = async () => {
+    if (!session) return;
+    setDeleting(true);
     try {
-      await api.archiveSession(session.id);
+      await api.deleteSession(session.id);
+      setDeleteDialogOpen(false);
       router.push("/");
     } catch (cause) {
-      setArchiving(false);
-      // The page remains usable so the user can retry after a transient cleanup failure.
-      window.alert(cause instanceof Error ? cause.message : String(cause));
+      setDeleteError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -150,8 +154,8 @@ export default function SessionPage() {
               openChanges();
             }
           }}
-          onArchive={() => void archive()}
-          archiving={archiving}
+          onDelete={requestDelete}
+          deleting={deleting}
         />
         <div className="flex min-h-0 min-w-0 flex-1">
           <section className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -252,6 +256,22 @@ export default function SessionPage() {
           />
         ) : null}
       </div>
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        title={session ? `Delete “${session.title || "session"}”` : "Delete session"}
+        description="This permanently deletes the session, its chat history, and its sandbox checkpoint."
+        confirmLabel="Delete"
+        busyLabel="Deleting…"
+        busy={deleting}
+        error={deleteError}
+        onCancel={() => {
+          if (!deleting) {
+            setDeleteDialogOpen(false);
+            setDeleteError(null);
+          }
+        }}
+        onConfirm={() => void deleteSession()}
+      />
     </div>
   );
 }
@@ -260,14 +280,14 @@ function SessionHeader({
   session,
   diffOpen,
   onToggleDiff,
-  onArchive,
-  archiving,
+  onDelete,
+  deleting,
 }: {
   session: SessionDetail | null;
   diffOpen: boolean;
   onToggleDiff: () => void;
-  onArchive: () => void;
-  archiving: boolean;
+  onDelete: () => void;
+  deleting: boolean;
 }) {
   return (
     <header className="app-header flex h-12 shrink-0 items-center gap-2.5 px-3 sm:px-4">
@@ -298,15 +318,15 @@ function SessionHeader({
       </button>
       <button
         type="button"
-        onClick={onArchive}
+        onClick={onDelete}
         disabled={
-          archiving || !session || (session.status !== "idle" && session.status !== "parking")
+          deleting || !session || (session.status !== "idle" && session.status !== "parking")
         }
-        aria-label="Archive session"
-        title="Archive session"
+        aria-label="Delete session"
+        title="Delete session"
         className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
       >
-        <ArchiveIcon className="size-3.5" />
+        <Trash2Icon className="size-3.5" />
       </button>
     </header>
   );
@@ -356,13 +376,19 @@ function SessionMeta({
         {run ? <p className="text-muted-foreground">{absoluteTime(run.createdAt)}</p> : null}
 
         {session ? (
-          <p className="text-muted-foreground">
-            {session.retentionStatus === "inactive"
-              ? "Inactive; next turn will restore a cold checkout"
-              : session.workspaceAvailable
-                ? "Warm checkpoint available"
-                : "Checkpoint will be saved when this turn finishes"}
-          </p>
+          <div className="space-y-1 text-muted-foreground">
+            <p>
+              {session.retentionStatus === "inactive"
+                ? "Inactive; next turn will restore a cold checkout"
+                : session.workspaceAvailable
+                  ? "Active checkpoint available"
+                  : "Checkpoint will be saved when this turn finishes"}
+            </p>
+            <p className="text-[11px] text-muted-foreground/80">
+              Checkpoints are released after {formatDuration(session.inactiveAfterSeconds)}{" "}
+              without activity; chat history is kept for cold resume.
+            </p>
+          </div>
         ) : null}
 
         {run?.error ? (

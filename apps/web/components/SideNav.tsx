@@ -1,14 +1,16 @@
 "use client";
 
 import type { SessionSummary } from "@pi-cloud-agent/protocol";
-import { ArchiveIcon, PanelLeftIcon, PinIcon, PlusIcon } from "lucide-react";
+import { PanelLeftIcon, PinIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AccountMenu } from "@/components/AccountMenu";
 import { useNavCollapse } from "@/components/nav-collapse";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api } from "@/lib/api";
+import { formatDuration } from "@/lib/format";
 import { loadSessionTitles } from "@/lib/session-titles";
 import { cn } from "@/lib/utils";
 
@@ -18,6 +20,8 @@ export function SideNav() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [titles, setTitles] = useState<Record<string, string>>({});
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SessionSummary | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -59,21 +63,22 @@ export function SideNav() {
     }
   };
 
-  const archive = async (session: SessionSummary) => {
-    if (
-      !window.confirm(
-        "Archive this session? Its sandbox checkpoint and chat history will be deleted.",
-      )
-    ) {
-      return;
-    }
+  const requestDelete = (session: SessionSummary) => {
+    setDeleteError(null);
+    setDeleteTarget(session);
+  };
+
+  const deleteSession = async () => {
+    if (!deleteTarget) return;
+    const session = deleteTarget;
     setPendingActionId(session.id);
     try {
-      await api.archiveSession(session.id);
+      await api.deleteSession(session.id);
       setSessions((current) => current.filter((item) => item.id !== session.id));
+      setDeleteTarget(null);
       if (pathname === `/sessions/${session.id}`) router.push("/");
     } catch (cause) {
-      window.alert(cause instanceof Error ? cause.message : String(cause));
+      setDeleteError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setPendingActionId(null);
     }
@@ -115,7 +120,7 @@ export function SideNav() {
               titles={titles}
               pendingActionId={pendingActionId}
               onTogglePin={togglePin}
-              onArchive={archive}
+              onDelete={requestDelete}
             />
           )}
           {pinned.length > 0 && (
@@ -126,7 +131,7 @@ export function SideNav() {
               titles={titles}
               pendingActionId={pendingActionId}
               onTogglePin={togglePin}
-              onArchive={archive}
+              onDelete={requestDelete}
             />
           )}
           {recent.length > 0 && (
@@ -137,7 +142,7 @@ export function SideNav() {
               titles={titles}
               pendingActionId={pendingActionId}
               onTogglePin={togglePin}
-              onArchive={archive}
+              onDelete={requestDelete}
             />
           )}
           {sessions.length === 0 && (
@@ -151,6 +156,22 @@ export function SideNav() {
           <AccountMenu />
         </div>
       </aside>
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title={deleteTarget ? `Delete “${deleteTarget.title || "session"}”` : "Delete session"}
+        description="This permanently deletes the session, its chat history, and its sandbox checkpoint."
+        confirmLabel="Delete"
+        busyLabel="Deleting…"
+        busy={pendingActionId === deleteTarget?.id}
+        error={deleteError}
+        onCancel={() => {
+          if (pendingActionId === null) {
+            setDeleteTarget(null);
+            setDeleteError(null);
+          }
+        }}
+        onConfirm={() => void deleteSession()}
+      />
     </>
   );
 }
@@ -162,7 +183,7 @@ function SessionGroup({
   titles,
   pendingActionId,
   onTogglePin,
-  onArchive,
+  onDelete,
 }: {
   label: string;
   sessions: SessionSummary[];
@@ -170,59 +191,58 @@ function SessionGroup({
   titles: Record<string, string>;
   pendingActionId: string | null;
   onTogglePin: (session: SessionSummary) => Promise<void>;
-  onArchive: (session: SessionSummary) => Promise<void>;
+  onDelete: (session: SessionSummary) => void;
 }) {
   return (
     <section className="mb-4">
       <h2 className="nav-label">{label}</h2>
       <div className="space-y-px">
         {sessions.map((session) => (
-          <div key={session.id} className="group relative">
+          <div
+            key={session.id}
+            className={cn(
+              "history-link group",
+              pathname === `/sessions/${session.id}` && "is-active",
+            )}
+          >
             <Link
               href={`/sessions/${session.id}`}
               title={session.repo}
-              className={cn(
-                "history-link pr-16",
-                pathname === `/sessions/${session.id}` && "is-active",
-              )}
+              className="min-w-0 flex-1 truncate"
             >
-              <span className="truncate">
-                {titles[session.id] || session.title || sessionLabel(session)}
-              </span>
-              {session.retentionStatus === "inactive" && (
-                <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
-                  inactive
-                </span>
-              )}
-              {session.status !== "idle" && (
-                <span
-                  className={cn(
-                    "size-1.5 shrink-0 animate-pulse-dot rounded-full bg-emerald-500",
-                    session.retentionStatus === "inactive" ? "ml-1.5" : "ml-auto",
-                  )}
-                />
-              )}
+              {titles[session.id] || session.title || sessionLabel(session)}
             </Link>
-            <div className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+            {session.retentionStatus === "inactive" && (
+              <span
+                title={`Inactive after ${formatDuration(session.inactiveAfterSeconds)} without activity`}
+                className="shrink-0 text-[10px] text-muted-foreground"
+              >
+                inactive
+              </span>
+            )}
+            {session.status !== "idle" && (
+              <span className="size-1.5 shrink-0 animate-pulse-dot rounded-full bg-emerald-500" />
+            )}
+            <div className="flex shrink-0 items-center gap-0.5 border-l border-transparent pl-1 opacity-0 transition-opacity group-hover:border-border/70 group-hover:opacity-100 group-focus-within:border-border/70 group-focus-within:opacity-100">
               <button
                 type="button"
                 aria-label={session.pinned ? "Unpin session" : "Pin session"}
                 title={session.pinned ? "Unpin session" : "Pin session"}
                 disabled={pendingActionId === session.id}
                 onClick={() => void onTogglePin(session)}
-                className="pointer-events-auto rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+                className="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
               >
                 <PinIcon className="size-3.5" fill={session.pinned ? "currentColor" : "none"} />
               </button>
               <button
                 type="button"
-                aria-label="Archive session"
-                title="Archive session"
+                aria-label="Delete session"
+                title="Delete session"
                 disabled={pendingActionId === session.id}
-                onClick={() => void onArchive(session)}
-                className="pointer-events-auto rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+                onClick={() => onDelete(session)}
+                className="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
               >
-                <ArchiveIcon className="size-3.5" />
+                <Trash2Icon className="size-3.5" />
               </button>
             </div>
           </div>

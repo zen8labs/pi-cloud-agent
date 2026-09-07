@@ -55,7 +55,7 @@ async function json<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-function archiveRequest(sessionId: string) {
+function deleteRequest(sessionId: string) {
   return app.request(`/sessions/${sessionId}`, {
     method: "DELETE",
     headers: { Cookie: `pca_session=${testCookie}` },
@@ -212,11 +212,11 @@ describe("durable session HTTP contract", () => {
     expect((await json<{ pinned: boolean }>(unpin)).pinned).toBe(false);
   });
 
-  it("archives an idle session and removes its chat history", async () => {
+  it("deletes an idle session and removes its chat history", async () => {
     const session = await json<SessionSummary>(
       await send("POST", "/sessions", {
         repo: "acme/widgets",
-        prompt: "Archive me",
+        prompt: "Delete me",
       }),
     );
     const run = await getRun(database, session.latestRunId);
@@ -224,7 +224,7 @@ describe("durable session HTTP contract", () => {
     await completeRun(database, run.id, "succeeded");
     await parkSession(database, run, null, null);
 
-    const response = await archiveRequest(session.id);
+    const response = await deleteRequest(session.id);
     expect(response.status).toBe(200);
     expect(await getSession(database, session.id)).toBeNull();
     expect(
@@ -236,23 +236,23 @@ describe("durable session HTTP contract", () => {
     ).toBe(404);
   });
 
-  it("refuses to archive while a turn is still running", async () => {
+  it("refuses to delete while a turn is still running", async () => {
     const session = await json<SessionSummary>(
       await send("POST", "/sessions", {
         repo: "acme/widgets",
         prompt: "Keep running",
       }),
     );
-    const response = await archiveRequest(session.id);
+    const response = await deleteRequest(session.id);
     expect(response.status).toBe(409);
     expect(await getSession(database, session.id)).not.toBeNull();
   });
 
-  it("refuses to archive when a follow-up is already queued", async () => {
+  it("refuses to delete when a follow-up is already queued", async () => {
     const session = await json<SessionSummary>(
       await send("POST", "/sessions", {
         repo: "acme/widgets",
-        prompt: "Race archive",
+        prompt: "Race delete",
       }),
     );
     const run = await getRun(database, session.latestRunId);
@@ -264,12 +264,12 @@ describe("durable session HTTP contract", () => {
       prompt: "Keep this turn",
     });
     expect(followUp.status).toBe(201);
-    const archive = await archiveRequest(session.id);
-    expect(archive.status).toBe(409);
+    const deletion = await deleteRequest(session.id);
+    expect(deletion.status).toBe(409);
     expect(await getSession(database, session.id)).not.toBeNull();
   });
 
-  it("refuses to archive a terminal turn while parking is pending and a follow-up is queued", async () => {
+  it("refuses to delete a terminal turn while parking is pending and a follow-up is queued", async () => {
     const session = await json<SessionSummary>(
       await send("POST", "/sessions", {
         repo: "acme/widgets",
@@ -284,23 +284,23 @@ describe("durable session HTTP contract", () => {
     });
     expect(followUp.status).toBe(201);
 
-    const archive = await archiveRequest(session.id);
-    expect(archive.status).toBe(409);
+    const deletion = await deleteRequest(session.id);
+    expect(deletion.status).toBe(409);
     const stored = await getSession(database, session.id);
     expect(stored?.latestRunId).not.toBe(run.id);
   });
 
-  it("serializes archive cleanup against a concurrent follow-up", async () => {
+  it("serializes delete cleanup against a concurrent follow-up", async () => {
     const session = await json<SessionSummary>(
       await send("POST", "/sessions", {
         repo: "acme/widgets",
-        prompt: "Archive race",
+        prompt: "Delete race",
       }),
     );
     const run = await getRun(database, session.latestRunId);
     if (!run) throw new Error("session run missing");
     await completeRun(database, run.id, "succeeded");
-    await parkSession(database, run, { provider: "fake", id: "checkpoint-archive" }, null);
+    await parkSession(database, run, { provider: "fake", id: "checkpoint-delete" }, null);
 
     const provider = fakeProvider();
     let cleanupStarted = () => {};
@@ -322,7 +322,7 @@ describe("durable session HTTP contract", () => {
       sandbox: provider,
       createSandboxProvider: () => provider,
     });
-    const archive = raceApp.request(`/sessions/${session.id}`, {
+    const deletion = raceApp.request(`/sessions/${session.id}`, {
       method: "DELETE",
       headers: { Cookie: `pca_session=${testCookie}` },
     });
@@ -335,13 +335,13 @@ describe("durable session HTTP contract", () => {
         Cookie: `pca_session=${testCookie}`,
       },
       body: JSON.stringify(
-        withTestModel({ prompt: "Must not start during archive" }, testModelConnectionId),
+        withTestModel({ prompt: "Must not start during delete" }, testModelConnectionId),
       ),
     });
     expect((await followUp).status).toBe(409);
 
     releaseCleanup();
-    expect((await archive).status).toBe(200);
+    expect((await deletion).status).toBe(200);
     expect(await getSession(database, session.id)).toBeNull();
   });
 });

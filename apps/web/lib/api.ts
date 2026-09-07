@@ -127,7 +127,7 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  archiveSession: (id: string): Promise<{ ok: boolean }> =>
+  deleteSession: (id: string): Promise<{ ok: boolean }> =>
     request<{ ok: boolean }>(`/sessions/${id}`, { method: "DELETE" }),
 
   setSessionPinned: (id: string, pinned: boolean): Promise<{ ok: boolean; pinned: boolean }> =>

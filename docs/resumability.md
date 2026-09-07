@@ -6,10 +6,10 @@ Runs are bounded executions; sessions are durable conversations that contain ord
 
 | State | Owner | Lifetime |
 |---|---|---|
-| Session identity, turn order, and retention state | Postgres | Until archived |
+| Session identity, turn order, and retention state | Postgres | Until deleted |
 | Run lifecycle and event journal | Postgres | Audit history |
 | Pi JSONL conversation checkpoint | Postgres | Until session deletion |
-| Repository workspace checkpoint | Sandbox provider | Until inactive/archived |
+| Repository workspace checkpoint | Sandbox provider | Until inactive/deleted |
 
 The repository image mapping in Settings is a base image/template reference, not executable setup code. A custom image can be hosted in any registry. The controller passes it to the selected provider when a session is created or cold-started. After a completed turn, the provider persists the session's writable layer using its native checkpoint mechanism. These session artifacts are intentionally provider-native filesystem checkpoints, not `docker commit` images. A full OCI image per turn would copy toolchains and make local garbage collection much more expensive, while E2B cannot place its cloud sandbox filesystem on the controller's disk. The checkpoint abstraction gives both providers the same warm-resume contract while keeping the base image immutable.
 
@@ -26,7 +26,7 @@ Custom images must include the runtime contract (`/app/run.js`, its `/app/packag
 
 Every transition is one guarded SQL statement. A transition that loses a race updates zero rows instead of overwriting another worker's decision. There is no in-memory run state: provisioning claims a row, creates a sandbox, records its id, and returns; callbacks and the reconciler write the later facts.
 
-Session teardown uses a durable `session_operation` claim. Archive and expiry claim the row before deleting a provider checkpoint, and follow-up turns, checkpoint writes, and parking refuse to proceed while that claim is held. The claim is released on provider failure; a stale claim can be reclaimed by reconciliation or by a follow-up turn, so a controller crash cannot leave a session permanently busy. The guarded delete or clear then verifies the operation and the previously observed run/workspace ids before changing Postgres.
+Session teardown uses a durable `session_operation` claim. Delete and expiry claim the row before deleting a provider checkpoint, and follow-up turns, checkpoint writes, and parking refuse to proceed while that claim is held. The claim is released on provider failure; a stale claim can be reclaimed by reconciliation or by a follow-up turn, so a controller crash cannot leave a session permanently busy. The guarded delete or clear then verifies the operation and the previously observed run/workspace ids before changing Postgres.
 
 The reconciler (`apps/controller/reconcile/loop.ts`) asks one question per branch:
 
@@ -55,16 +55,16 @@ queued → provisioning → running → terminal
                               ▼
                      idle / follow-up resume
                               │
-             retention expiry ─┴─ archive/delete
+             retention expiry ─┴─ delete
                               ▼
                   inactive (checkpoint deleted)
 ```
 
 Only the run named by `sessions.active_run_id` may own a session. Follow-ups submitted while another turn is active are queued rows. Parking atomically stores the checkpoint and promotes the oldest surviving queued row.
 
-An active session has a provider checkpoint and can resume without cloning or installing dependencies. After the configured retention period (the existing `sessionWorkspaceRetentionSeconds` setting), the reconciler deletes that checkpoint and marks the session `inactive`; its Postgres Pi checkpoint remains. The next turn cold-starts from the repository's configured base image, removes only its derived `/workspace/<repo>` path, clones the repository, and restores only the Pi conversation. This is explicit in `WORKSPACE_RESUMED=false` and never pretends filesystem state survived.
+An active session has a provider checkpoint and can resume without cloning or installing dependencies. After the configured retention period (the existing `sessionWorkspaceRetentionSeconds` setting, seven days by default), the reconciler deletes that checkpoint and marks the session `inactive`; its Postgres Pi checkpoint remains. The next turn cold-starts from the repository's configured base image, removes only its derived `/workspace/<repo>` path, clones the repository, and restores only the Pi conversation. This is explicit in `WORKSPACE_RESUMED=false` and never pretends filesystem state survived.
 
-The Settings archive button permanently deletes the session, all turns, and its provider checkpoint. Deletion is refused while a run is non-terminal. Provider cleanup is idempotent; a repeated HTTP request returns `404` because the chat no longer exists.
+The Settings Delete button permanently deletes the session, all turns, and its provider checkpoint. Deletion is refused while a run is non-terminal. Provider cleanup is idempotent; a repeated HTTP request returns `404` because the chat no longer exists.
 
 ## Agent checkpoint and credentials
 

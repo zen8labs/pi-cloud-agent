@@ -93,6 +93,8 @@ export interface SessionSummary {
   id: string;
   status: SessionStatus;
   retentionStatus: SessionRetentionStatus;
+  /** Seconds without activity before the provider checkpoint is released. */
+  inactiveAfterSeconds: number;
   pinned: boolean;
   title: string;
   provider: string;

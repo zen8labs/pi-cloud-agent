@@ -13,7 +13,7 @@ import { claimSessionOperation, releaseSessionOperation } from "../db/session-op
 import {
   createSessionTurn,
   createSessionWithRun,
-  deleteSession,
+  deleteSession as deleteSessionRow,
   getSession,
   listSessionRuns,
   listSessions,
@@ -42,7 +42,13 @@ export function sessionRoutes(
     const limit = Math.min(Number(c.req.query("limit") ?? 100) || 100, 200);
     const rows = await listSessions(c.get("database"), limit, c.get("user")?.id);
     const summaries = await Promise.all(
-      rows.map((row) => toSessionSummary(c.get("database"), row)),
+      rows.map((row) =>
+        toSessionSummary(
+          c.get("database"),
+          row,
+          c.get("config").sessionWorkspaceRetentionSeconds,
+        ),
+      ),
     );
     return c.json({ sessions: summaries });
   });
@@ -82,7 +88,14 @@ export function sessionRoutes(
       runId: created.run.id,
       repo: created.session.repoFullName,
     });
-    return c.json(await toSessionSummary(c.get("database"), created.session), 201);
+    return c.json(
+      await toSessionSummary(
+        c.get("database"),
+        created.session,
+        config.sessionWorkspaceRetentionSeconds,
+      ),
+      201,
+    );
   });
 
   app.get("/:sessionId", async (c) => {
@@ -93,7 +106,11 @@ export function sessionRoutes(
     }
     const runs = await listSessionRuns(database, session.id, c.get("user")?.id);
     const detail: SessionDetail = {
-      ...(await toSessionSummary(database, session)),
+      ...(await toSessionSummary(
+        database,
+        session,
+        c.get("config").sessionWorkspaceRetentionSeconds,
+      )),
       runs: runs.map(toDetail),
     };
     return c.json(detail);
@@ -143,13 +160,13 @@ export function sessionRoutes(
   });
 
   app.delete("/:sessionId", async (c) => {
-    return archiveSession(c, deps);
+    return deleteSession(c, deps);
   });
 
   return app;
 }
 
-async function archiveSession(
+async function deleteSession(
   c: SessionContext,
   deps: Pick<Deps, "sandbox" | "createSandboxProvider">,
 ) {
@@ -182,16 +199,16 @@ async function archiveSession(
     userId: user.id,
   });
   if (!operationAt) {
-    return c.json({ error: "session changed while it was being archived; retry" }, 409);
+    return c.json({ error: "session changed while it was being deleted; retry" }, 409);
   }
   try {
     await cleanupSessionSandbox(deps, session, activeRun);
   } catch (error) {
     await releaseSessionOperation(database, session.id, "archiving", operationAt);
-    c.get("log").error("session checkpoint cleanup failed", { sessionId: session.id, error });
+    c.get("log").error("session checkpoint deletion failed", { sessionId: session.id, error });
     return c.json({ error: "could not delete session checkpoint" }, 502);
   }
-  const deleted = await deleteSession(
+  const deleted = await deleteSessionRow(
     database,
     session.id,
     user.id,
@@ -202,7 +219,7 @@ async function archiveSession(
   );
   if (!deleted) {
     await releaseSessionOperation(database, session.id, "archiving", operationAt);
-    return c.json({ error: "session changed while it was being archived; retry" }, 409);
+    return c.json({ error: "session changed while it was being deleted; retry" }, 409);
   }
   return c.json({ ok: true });
 }
@@ -292,12 +309,14 @@ async function queueSessionTurn(
 async function toSessionSummary(
   database: Parameters<typeof getRun>[0],
   session: SessionRow,
+  inactiveAfterSeconds: number,
 ): Promise<SessionSummary> {
   const activeRun = session.activeRunId ? await getRun(database, session.activeRunId) : null;
   return {
     id: session.id,
     status: sessionStatus(activeRun),
     title: session.title,
+    inactiveAfterSeconds,
     pinned: session.pinned,
     provider: session.provider,
     repo: session.repoFullName,
