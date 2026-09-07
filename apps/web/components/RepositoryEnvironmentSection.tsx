@@ -11,6 +11,13 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { InfoTooltip } from "./LlmConnectionSupport";
 
@@ -174,24 +181,24 @@ function EnvironmentEditor({
 
   return (
     <div className="space-y-4 rounded-xl border border-border bg-card p-4">
-      <label
+      <span
         className="block text-xs font-medium text-muted-foreground"
-        htmlFor="environment-repo"
+        id="environment-repo-label"
       >
         Repository
-      </label>
-      <select
-        id="environment-repo"
-        value={selectedRepoKey}
-        onChange={(event) => onRepositoryChange(event.target.value)}
-        className="h-9 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-      >
-        {repos.map((item) => (
-          <option key={repoKey(item)} value={repoKey(item)}>
-            {item.fullName}
-          </option>
-        ))}
-      </select>
+      </span>
+      <Select value={selectedRepoKey} onValueChange={(next) => onRepositoryChange(next ?? "")}>
+        <SelectTrigger aria-labelledby="environment-repo-label" className="w-full">
+          <SelectValue placeholder="Select repository" />
+        </SelectTrigger>
+        <SelectContent align="start" className="max-w-[min(28rem,var(--available-width))]">
+          {repos.map((item) => (
+            <SelectItem key={repoKey(item)} value={repoKey(item)}>
+              {item.fullName}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       <div>
         <div className="flex items-center gap-1.5">
           <label
