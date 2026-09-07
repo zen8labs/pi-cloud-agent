@@ -69,6 +69,14 @@ function requestHeaders() {
   };
 }
 
+function testImageRequest(target: ReturnType<typeof createApp>, imageRef: string) {
+  return target.request("/environments/test", {
+    method: "POST",
+    headers: requestHeaders(),
+    body: JSON.stringify({ provider: "github", repo: "acme/widgets", imageRef }),
+  });
+}
+
 describe("repository environments", () => {
   beforeEach(() => {
     executedSpec = null;
@@ -118,15 +126,7 @@ describe("repository environments", () => {
   });
 
   it("tests an unsaved image in a disposable sandbox", async () => {
-    const response = await app.request("/environments/test", {
-      method: "POST",
-      headers: requestHeaders(),
-      body: JSON.stringify({
-        provider: "github",
-        repo: "acme/widgets",
-        imageRef: "docker.io/acme/widgets:dev",
-      }),
-    });
+    const response = await testImageRequest(app, "docker.io/acme/widgets:dev");
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
@@ -166,15 +166,7 @@ describe("repository environments", () => {
       sandbox: failingSandbox,
     });
 
-    const response = await failingApp.request("/environments/test", {
-      method: "POST",
-      headers: requestHeaders(),
-      body: JSON.stringify({
-        provider: "github",
-        repo: "acme/widgets",
-        imageRef: "docker.io/acme/widgets:dev",
-      }),
-    });
+    const response = await testImageRequest(failingApp, "docker.io/acme/widgets:dev");
 
     expect(response.status).toBe(502);
     expect(await response.json()).toEqual({ error: "could not test repository image" });
