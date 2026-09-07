@@ -19,6 +19,7 @@ import {
   lt,
   notInArray,
   or,
+  type SQL,
   sql,
 } from "drizzle-orm";
 import { CHANNELS, type Database, notify } from "./client";
@@ -415,6 +416,43 @@ export async function findSessionSandboxesToFinalize(
   limit: number,
   sessionId?: string,
 ): Promise<RunRow[]> {
+  return findSessionWorkspaceMarkers(
+    database,
+    limit,
+    sessionId,
+    and(
+      isNotNull(runs.sandboxProvider),
+      isNotNull(runs.sandboxId),
+      isNotNull(runs.sandboxStoppedAt),
+      isNotNull(runs.sandboxFinalizationWorkspaceProvider),
+      isNotNull(runs.sandboxFinalizationWorkspaceId),
+    ),
+  );
+}
+
+/** Replaced session checkpoints whose provider deletion still needs a retry. */
+export async function findSessionSandboxReplacementsToDelete(
+  database: Database,
+  limit: number,
+  sessionId?: string,
+): Promise<RunRow[]> {
+  return findSessionWorkspaceMarkers(
+    database,
+    limit,
+    sessionId,
+    and(
+      isNotNull(runs.sandboxReplacementWorkspaceProvider),
+      isNotNull(runs.sandboxReplacementWorkspaceId),
+    ),
+  );
+}
+
+function findSessionWorkspaceMarkers(
+  database: Database,
+  limit: number,
+  sessionId: string | undefined,
+  marker: SQL | undefined,
+): Promise<RunRow[]> {
   return database
     .select()
     .from(runs)
@@ -423,11 +461,7 @@ export async function findSessionSandboxesToFinalize(
         isNotNull(runs.sessionId),
         ...(sessionId ? [eq(runs.sessionId, sessionId)] : []),
         inArray(runs.status, [...TERMINAL_STATUSES]),
-        isNotNull(runs.sandboxProvider),
-        isNotNull(runs.sandboxId),
-        isNotNull(runs.sandboxStoppedAt),
-        isNotNull(runs.sandboxFinalizationWorkspaceProvider),
-        isNotNull(runs.sandboxFinalizationWorkspaceId),
+        ...(marker ? [marker] : []),
       ),
     )
     .limit(limit);

@@ -108,20 +108,26 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
       run.provider,
       run.repoFullName,
     );
-    const sessionSandbox =
-      session?.sandboxProvider && session.sandboxProvider !== sandbox.name
-        ? (deps.createProvider?.(session.sandboxProvider) ?? sandbox)
-        : sandbox;
+    const sessionProvider = session?.sandboxId
+      ? (session.sandboxProvider ?? sandbox.name)
+      : (session?.sandboxImageProvider ?? sandbox.name);
+    let sessionSandbox = providerFor(deps, sandbox, sessionProvider);
     const requestedImageRef = session?.sandboxImageRef || environment?.imageRef || "";
     let imageRef = session?.sandboxImageRef
       ? session.sandboxImageRef
       : await sessionSandbox.resolveImage(requestedImageRef);
     if (session && session.sandboxImageRef === null) {
-      const pinnedImage = await pinSessionSandboxImage(database, session.id, imageRef);
+      const pinnedImage = await pinSessionSandboxImage(
+        database,
+        session.id,
+        sessionSandbox.name,
+        imageRef,
+      );
       if (pinnedImage === null) {
         throw new SandboxError("session image could not be pinned", { retryable: true });
       }
-      imageRef = pinnedImage;
+      imageRef = pinnedImage.imageRef;
+      sessionSandbox = providerFor(deps, sandbox, pinnedImage.provider);
     }
     const spec = {
       runId: run.id,
@@ -165,6 +171,21 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
   } catch (error) {
     await handleFailure(run, error, deps, log);
   }
+}
+
+function providerFor(
+  deps: ProvisionDeps,
+  sandbox: SandboxProvider,
+  providerName: string,
+): SandboxProvider {
+  if (providerName === sandbox.name) return sandbox;
+  const provider = deps.createProvider?.(providerName);
+  if (!provider) {
+    throw new SandboxError(`sandbox provider "${providerName}" is unavailable`, {
+      retryable: false,
+    });
+  }
+  return provider;
 }
 
 async function startSandbox(

@@ -50,13 +50,16 @@ describe("durable sessions", () => {
     const { session } = await seedSession(database);
 
     const [first, second] = await Promise.all([
-      pinSessionSandboxImage(database, session.id, "fake:image-a"),
-      pinSessionSandboxImage(database, session.id, "fake:image-b"),
+      pinSessionSandboxImage(database, session.id, "microsandbox", "micro:image-a"),
+      pinSessionSandboxImage(database, session.id, "e2b", "e2b:image-b"),
     ]);
 
     expect(first).not.toBeNull();
-    expect(second).toBe(first);
-    expect((await getSession(database, session.id))?.sandboxImageRef).toBe(first);
+    expect(second).toStrictEqual(first);
+    expect((await getSession(database, session.id))?.sandboxImageRef).toBe(first?.imageRef);
+    expect((await getSession(database, session.id))?.sandboxImageProvider).toBe(
+      first?.provider,
+    );
   });
 
   it("queues concurrent turns while preserving one active workspace owner", async () => {

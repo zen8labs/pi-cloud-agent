@@ -21,7 +21,7 @@ export interface SandboxProvider {
 
 Project images do not package the agent. Before executing the supplied command, built-in providers transfer the app-managed runtime archive and install it inside the isolated VM, without run credentials. Launch the command as the unprivileged app user with credentials scoped to that process. Preflight follows the same installation path. See [the runtime image contract](../packages/runtime/README.md#image-contract).
 
-`resolveImage` turns the empty image reference into the provider's effective default and may materialize a public OCI reference into a provider-native template. The controller stores that resolved value on the session before the first sandbox is created, so later configuration changes cannot silently alter a cold resume.
+`resolveImage` turns the empty image reference into the provider's effective default and may materialize a public OCI reference into a provider-native template. The controller stores that resolved value and its provider on the session before the first sandbox is created, so later configuration changes cannot silently alter a cold resume or send the alias to another backend.
 
 ## 1. Write it
 

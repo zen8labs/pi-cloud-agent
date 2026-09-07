@@ -1,12 +1,15 @@
+import { randomUUID } from "node:crypto";
 import type {
   RunDetail,
   SessionDetail,
   SessionListResponse,
   SessionSummary,
 } from "@pi-cloud-agent/protocol";
+import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Database } from "../db/client";
 import { completeRun, getRun } from "../db/runs";
+import { runs } from "../db/schema";
 import { getSession, parkSession } from "../db/sessions";
 import { fakeProvider } from "../reconcile/fake-sandbox-provider";
 import {
@@ -234,6 +237,75 @@ describe("durable session HTTP contract", () => {
         })
       ).status,
     ).toBe(404);
+  });
+
+  it("drains every pending checkpoint cleanup before deleting session history", async () => {
+    const session = await json<SessionSummary>(
+      await send("POST", "/sessions", {
+        repo: "acme/widgets",
+        prompt: "Delete all checkpoints",
+      }),
+    );
+    const firstRun = await getRun(database, session.latestRunId);
+    if (!firstRun) throw new Error("session run missing");
+    const pending = Array.from({ length: 26 }, (_, index) => ({
+      sourceId: `source-${index + 1}`,
+      checkpointId: `checkpoint-${index + 1}`,
+    }));
+    const firstPending = pending[0];
+    if (!firstPending) throw new Error("pending checkpoint missing");
+    await database
+      .update(runs)
+      .set({
+        status: "succeeded",
+        sandboxProvider: "fake",
+        sandboxId: firstPending.sourceId,
+        sandboxStoppedAt: new Date(),
+        sandboxFinalizationWorkspaceProvider: "fake",
+        sandboxFinalizationWorkspaceId: firstPending.checkpointId,
+      })
+      .where(eq(runs.id, firstRun.id));
+    await database.insert(runs).values(
+      pending.slice(1).map(({ sourceId, checkpointId }, index) => ({
+        id: randomUUID(),
+        userId: firstRun.userId,
+        sessionId: session.id,
+        turnNumber: index + 2,
+        status: "succeeded" as const,
+        provider: "github",
+        repoFullName: "acme/widgets",
+        trigger: { kind: "manual" as const, repo: firstRun.trigger.repo, prompt: "pending" },
+        model: firstRun.model,
+        modelConnectionId: firstRun.modelConnectionId,
+        callbackToken: randomUUID(),
+        sandboxProvider: "fake",
+        sandboxId: sourceId,
+        sandboxStoppedAt: new Date(),
+        sandboxFinalizationWorkspaceProvider: "fake",
+        sandboxFinalizationWorkspaceId: checkpointId,
+      })),
+    );
+    const provider = fakeProvider();
+    const finalized: string[] = [];
+    provider.finalizeSuspend = async (source) => {
+      finalized.push(source.id);
+    };
+    const cleanupApp = createApp({
+      config: testConfig(),
+      database,
+      log: silentLogger(),
+      sandbox: provider,
+      createSandboxProvider: () => provider,
+    });
+
+    const response = await cleanupApp.request(`/sessions/${session.id}`, {
+      method: "DELETE",
+      headers: { Cookie: `pca_session=${testCookie}` },
+    });
+
+    expect(response.status).toBe(200);
+    expect(finalized).toHaveLength(26);
+    expect(await getSession(database, session.id)).toBeNull();
   });
 
   it("refuses to delete while a turn is still running", async () => {

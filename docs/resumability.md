@@ -9,6 +9,7 @@ Runs are bounded executions; sessions are durable conversations that contain ord
 | Session identity, turn order, and retention state | Postgres | Until deleted |
 | Run lifecycle and event journal | Postgres | Audit history |
 | Stopped-source finalization marker | Postgres | Until the source is released |
+| Superseded-checkpoint deletion marker | Postgres | Until the old checkpoint is deleted |
 | Pi JSONL conversation checkpoint | Postgres | Until session deletion |
 | Repository workspace checkpoint | Sandbox provider | Until inactive/deleted |
 
@@ -19,7 +20,7 @@ The repository image mapping in Settings is a base image/template reference, not
 - microSandbox stops the VM and creates an integrity-checked local Snapshot under `MICROSANDBOX_SNAPSHOT_DIR`. The controller commits the snapshot path and the source-finalization marker before asking the provider to remove the stopped source VM, so a crash leaves recoverable state and a durable cleanup target. The reconciler retries finalization until it succeeds, then clears the marker. Resume creates a new VM from that snapshot.
 - E2B pauses the sandbox with `keepMemory: false`; E2B retains the filesystem checkpoint in its service and the session stores the sandbox id. A public OCI image reference is materialized into a unique E2B template alias; completed resolutions are not reused, so republished tags cannot change an existing session's pinned target.
 
-Providers boot one project image or restore one checkpoint, then install the deployment's app-managed runtime. The repository image replaces the default project environment. First provisioning freezes the resolved image reference on the session, so Settings changes affect new sessions. This freezes the reference, not the contents of mutable OCI tags or provider aliases; use immutable references when cold-start reproducibility matters. A checkpoint preserves the filesystem used to create it. Replacement removes the previous artifact after the new checkpoint is durable.
+Providers boot one project image or restore one checkpoint, then install the deployment's app-managed runtime. The repository image replaces the default project environment. First provisioning freezes the resolved image reference and its provider on the session, so Settings changes affect new sessions and a retry cannot send a provider-native alias to a different backend. This freezes the reference, not the contents of mutable OCI tags or provider aliases; use immutable references when cold-start reproducibility matters. A checkpoint preserves the filesystem used to create it. Replacement removes the previous artifact after the new checkpoint is durable, with failed deletions retained for reconciliation. If parking loses its session lease, the newly created but unowned checkpoint is marked for deletion before cleanup, so a provider failure remains retryable instead of becoming an orphan.
 
 Custom images supply project toolchains on a supported Debian/Ubuntu base. Providers install our Node, agent bundle, dependencies, user, and workspace inside the sandbox before each launch. Users do not package private runtime paths. Settings offers an optional installation and library-load diagnostic; it is not a full agent run. Repository setup scripts are not supported. See [the compatibility contract](../packages/runtime/README.md#image-contract).
 
@@ -38,6 +39,7 @@ The reconciler (`apps/controller/reconcile/loop.ts`) asks one question per branc
 | terminal standalone run | Stop sandbox and stamp it |
 | terminal session run | Suspend checkpoint, then promote oldest queued turn |
 | stopped session source with a finalization marker | Retry provider source cleanup and clear the marker |
+| replaced checkpoint with a deletion marker | Retry provider checkpoint deletion and clear the marker |
 | idle checkpoint past `workspace_expires_at` | Delete checkpoint and mark session inactive |
 | provisioning lease expired without sandbox | Return run to `queued` |
 

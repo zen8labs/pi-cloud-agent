@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { SandboxProvider } from "@pi-cloud-agent/protocol";
 import {
   createSessionTurnRequestSchema,
   type SessionDetail,
@@ -7,13 +8,19 @@ import {
   updateSessionPinRequestSchema,
 } from "@pi-cloud-agent/protocol";
 import { type Context, Hono } from "hono";
-import { findSessionSandboxesToFinalize, getRun } from "../db/runs";
+import {
+  findSessionSandboxesToFinalize,
+  findSessionSandboxReplacementsToDelete,
+  getRun,
+  markSessionSandboxFinalized,
+} from "../db/runs";
 import type { RunRow, SessionRow } from "../db/schema";
 import {
   claimSessionOperation,
   releaseSessionOperation,
   startSessionOperationHeartbeat,
 } from "../db/session-operations";
+import { markSessionSandboxReplacementDeleted } from "../db/session-workspace";
 import {
   createSessionTurn,
   createSessionWithRun,
@@ -191,7 +198,12 @@ async function deleteSession(
     return c.json({ error: "session has a queued run" }, 409);
   }
   const pendingFinalizations = await findSessionSandboxesToFinalize(database, 25, session.id);
-  if (!hasSandboxCleanup(deps, session, activeRun, pendingFinalizations)) {
+  const pendingReplacements = await findSessionSandboxReplacementsToDelete(
+    database,
+    25,
+    session.id,
+  );
+  if (!hasSandboxCleanup(deps, session, activeRun, pendingFinalizations, pendingReplacements)) {
     return c.json({ error: "sandbox cleanup is not available" }, 503);
   }
   const operationAt = await claimSessionOperation(database, session.id, "archiving", {
@@ -211,7 +223,14 @@ async function deleteSession(
       c.get("log").warn("session deletion heartbeat failed", { sessionId: session.id, error }),
   );
   try {
-    await cleanupSessionSandbox(deps, session, activeRun, pendingFinalizations);
+    await cleanupSessionSandbox(
+      database,
+      deps,
+      session,
+      activeRun,
+      pendingFinalizations,
+      pendingReplacements,
+    );
   } catch (error) {
     await releaseSessionOperation(database, session.id, "archiving", operationAt);
     c.get("log").error("session checkpoint deletion failed", { sessionId: session.id, error });
@@ -244,42 +263,36 @@ function hasSandboxCleanup(
   session: SessionRow,
   activeRun: RunRow | null,
   pendingFinalizations: RunRow[],
+  pendingReplacements: RunRow[],
 ): boolean {
   return (
-    (!session.sandboxId && !activeRun?.sandboxId && pendingFinalizations.length === 0) ||
+    (!session.sandboxId &&
+      !activeRun?.sandboxId &&
+      pendingFinalizations.length === 0 &&
+      pendingReplacements.length === 0) ||
     Boolean(deps.sandbox || deps.createSandboxProvider)
   );
 }
 
 async function cleanupSessionSandbox(
+  database: Parameters<typeof getRun>[0],
   deps: Pick<Deps, "sandbox" | "createSandboxProvider">,
   session: SessionRow,
   activeRun: RunRow | null,
   pendingFinalizations: RunRow[],
+  pendingReplacements: RunRow[],
 ): Promise<void> {
   const providerFor = (name: string | null | undefined) => {
     if (deps.sandbox?.name === name || !name) return deps.sandbox;
     return deps.createSandboxProvider?.(name);
   };
-  for (const run of pendingFinalizations) {
-    if (
-      !run.sandboxProvider ||
-      !run.sandboxId ||
-      !run.sandboxFinalizationWorkspaceProvider ||
-      !run.sandboxFinalizationWorkspaceId
-    ) {
-      continue;
-    }
-    const provider = providerFor(run.sandboxProvider);
-    if (!provider) throw new Error("sandbox cleanup is not available");
-    await provider.finalizeSuspend(
-      { provider: run.sandboxProvider, id: run.sandboxId },
-      {
-        provider: run.sandboxFinalizationWorkspaceProvider,
-        id: run.sandboxFinalizationWorkspaceId,
-      },
-    );
-  }
+  await cleanupPendingSessionArtifacts(
+    database,
+    session.id,
+    providerFor,
+    pendingFinalizations,
+    pendingReplacements,
+  );
   if (activeRun?.sandboxId && !activeRun.sandboxStoppedAt) {
     const provider = providerFor(activeRun.sandboxProvider);
     if (!provider) throw new Error("sandbox cleanup is not available");
@@ -296,6 +309,82 @@ async function cleanupSessionSandbox(
       id: session.sandboxId,
     });
   }
+}
+
+type ProviderFor = (name: string | null | undefined) => SandboxProvider | undefined;
+
+async function cleanupPendingSessionArtifacts(
+  database: Parameters<typeof getRun>[0],
+  sessionId: string,
+  providerFor: ProviderFor,
+  initialFinalizations: RunRow[],
+  initialReplacements: RunRow[],
+): Promise<void> {
+  let finalizations = initialFinalizations;
+  let replacements = initialReplacements;
+  while (finalizations.length > 0 || replacements.length > 0) {
+    await cleanupPendingFinalizations(database, providerFor, finalizations);
+    await cleanupPendingReplacements(database, providerFor, replacements);
+    finalizations = await findSessionSandboxesToFinalize(database, 25, sessionId);
+    replacements = await findSessionSandboxReplacementsToDelete(database, 25, sessionId);
+  }
+}
+
+async function cleanupPendingFinalizations(
+  database: Parameters<typeof getRun>[0],
+  providerFor: ProviderFor,
+  pending: RunRow[],
+): Promise<void> {
+  for (const run of pending) {
+    const refs = finalizationRefs(run);
+    if (!refs) continue;
+    const provider = providerFor(refs.source.provider);
+    if (!provider) throw new Error("sandbox cleanup is not available");
+    await provider.finalizeSuspend(refs.source, refs.workspace);
+    await markSessionSandboxFinalized(database, run.id, refs.source, refs.workspace);
+  }
+}
+
+async function cleanupPendingReplacements(
+  database: Parameters<typeof getRun>[0],
+  providerFor: ProviderFor,
+  pending: RunRow[],
+): Promise<void> {
+  for (const run of pending) {
+    const workspace = replacementRef(run);
+    if (!workspace) continue;
+    const provider = providerFor(workspace.provider);
+    if (!provider) throw new Error("sandbox cleanup is not available");
+    await provider.deleteWorkspace(workspace);
+    await markSessionSandboxReplacementDeleted(database, run.id, workspace);
+  }
+}
+
+function finalizationRefs(run: RunRow) {
+  if (
+    !run.sandboxProvider ||
+    !run.sandboxId ||
+    !run.sandboxFinalizationWorkspaceProvider ||
+    !run.sandboxFinalizationWorkspaceId
+  ) {
+    return null;
+  }
+  return {
+    source: { provider: run.sandboxProvider, id: run.sandboxId },
+    workspace: {
+      provider: run.sandboxFinalizationWorkspaceProvider,
+      id: run.sandboxFinalizationWorkspaceId,
+    },
+  };
+}
+
+function replacementRef(run: RunRow) {
+  if (!run.sandboxReplacementWorkspaceProvider || !run.sandboxReplacementWorkspaceId)
+    return null;
+  return {
+    provider: run.sandboxReplacementWorkspaceProvider,
+    id: run.sandboxReplacementWorkspaceId,
+  };
 }
 
 type SessionTurnResult =

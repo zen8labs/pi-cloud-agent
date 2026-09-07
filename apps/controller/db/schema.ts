@@ -167,6 +167,8 @@ export const sessions = pgTable(
 
     /** Repository image/template selected for this session's cold starts. */
     sandboxImageRef: text("sandbox_image_ref"),
+    /** Provider that resolved the pinned repository image reference. */
+    sandboxImageProvider: text("sandbox_image_provider"),
 
     /** Provider that owns the checkpoint, retained after expiry for cold resumes. */
     sandboxProvider: text("sandbox_provider"),
@@ -244,6 +246,9 @@ export const runs = pgTable(
     /** Original checkpoint retained until the stopped source is finalized. */
     sandboxFinalizationWorkspaceProvider: text("sandbox_finalization_workspace_provider"),
     sandboxFinalizationWorkspaceId: text("sandbox_finalization_workspace_id"),
+    /** Previous checkpoint retained until replacement cleanup succeeds. */
+    sandboxReplacementWorkspaceProvider: text("sandbox_replacement_workspace_provider"),
+    sandboxReplacementWorkspaceId: text("sandbox_replacement_workspace_id"),
 
     /**
      * Monotonic event counter. Incremented in the same transaction that inserts

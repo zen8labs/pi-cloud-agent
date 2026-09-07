@@ -176,6 +176,13 @@
       "when": 1788774654200,
       "tag": "0024_free_hellfire_club",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788785280375,
+      "tag": "0025_organic_molly_hayes",
+      "breakpoints": true
     }
   ]
 }

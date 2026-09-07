@@ -71,13 +71,13 @@ Configure a public project image per connected repository in Settings > Environm
 
 After each completed session turn, microSandbox stores an integrity-checked local snapshot, commits its path and source-finalization marker, and then releases the stopped source VM; E2B pauses the filesystem. If source release fails, the marker remains and the reconciler retries it on a later pass. The previous checkpoint is deleted after its replacement is durable, so a session keeps one warm artifact. Warm follow-ups resume that checkpoint without cloning. Checkpoints expire after `SESSION_WORKSPACE_RETENTION_SECONDS` (seven days by default); the reconciler deletes them and marks the session inactive while retaining the provider identity, so the next turn cold-clones from the correct provider's pinned image while restoring Pi history. See [resumability.md](resumability.md).
 
-The first provisioning also pins the resolved repository image on the session. Changing the Settings mapping therefore affects new sessions; an existing session keeps its original image if it ever needs a cold resume.
+The first provisioning also pins the resolved repository image and provider on the session. Changing the Settings mapping therefore affects new sessions; an existing session keeps its original provider/image pair if it ever needs a cold resume.
 
 Delete and retention expiry claim the session before provider cleanup. A follow-up submitted during cleanup receives `409`; cleanup renews its heartbeat while the provider call runs, and only a claim stale for ten minutes can be reclaimed after a crash. Pending stopped-source finalizations are retained on their terminal run and retried by the reconciler. The guarded delete or clear then verifies the immutable operation token before changing the session.
 
-E2B materializes each public OCI image resolution under a unique template alias and fails a build instead of reusing an older alias. A session stores the resolved alias once, so a republished registry tag affects only later sessions.
+E2B materializes each public OCI image resolution under a unique template alias and fails a build instead of reusing an older alias. A session stores the resolved provider/alias pair once, so a republished registry tag affects only later sessions.
 
-Session artifacts are filesystem checkpoints rather than full Docker image commits. Keep `MICROSANDBOX_SNAPSHOT_DIR` on durable storage, monitor that storage directly, and use delete or retention expiry as the normal reclamation paths. The controller keeps one checkpoint per session and deletes the old one only after the replacement is durable. If a provider delete temporarily fails during replacement, the new checkpoint remains usable and the old artifact is reported in controller logs for provider-side/manual cleanup.
+Session artifacts are filesystem checkpoints rather than full Docker image commits. Keep `MICROSANDBOX_SNAPSHOT_DIR` on durable storage, monitor that storage directly, and use delete or retention expiry as the normal reclamation paths. The controller keeps one checkpoint per session and deletes the old one only after the replacement is durable. If a provider delete temporarily fails during replacement, the new checkpoint remains usable and the old reference stays on the terminal run for reconciler retry.
 
 ## Watching a run
 

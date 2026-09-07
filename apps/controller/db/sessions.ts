@@ -10,6 +10,11 @@ import { and, desc, eq, inArray, isNotNull, isNull, lt, or, type SQL, sql } from
 import { CHANNELS, type Database, notify } from "./client";
 import { type RunRow, runs, type SessionOperation, type SessionRow, sessions } from "./schema";
 import { CLEARED_SESSION_OPERATION, isSessionOperationStale } from "./session-operations";
+import {
+  buildFinalizationUpdate,
+  buildReplacementUpdate,
+  buildWorkspaceUpdate,
+} from "./session-workspace";
 
 export interface CreateSessionInput {
   userId?: string | null;
@@ -251,7 +256,6 @@ export async function saveSessionCheckpoint(
   return updated.length > 0;
 }
 
-/** Pin the repository image used if this session later needs a cold start. */
 /** Set the immutable original revision when the first turn reports its baseline or diff. */
 export async function saveSessionDiffBaseSha(
   database: Database,
@@ -280,6 +284,7 @@ export async function parkSession(
   run: RunRow,
   workspace: WorkspaceRef | null | undefined,
   expiresAt: Date | null,
+  replacedWorkspace?: WorkspaceRef | null,
 ): Promise<boolean> {
   const sessionId = run.sessionId;
   if (!sessionId) return false;
@@ -332,6 +337,7 @@ export async function parkSession(
       .set({
         sandboxStoppedAt: new Date(),
         ...buildFinalizationUpdate(workspace),
+        ...buildReplacementUpdate(replacedWorkspace),
         updatedAt: new Date(),
       })
       .where(and(eq(runs.id, run.id), isNull(runs.sandboxStoppedAt)));
@@ -346,40 +352,6 @@ function ownsParkLease(
   runId: string,
 ): boolean {
   return owner?.activeRunId === runId && owner.sessionOperation === null;
-}
-
-function buildWorkspaceUpdate(
-  workspace: WorkspaceRef | null | undefined,
-  expiresAt: Date | null,
-) {
-  if (workspace === undefined) return {};
-  if (workspace === null) {
-    return {
-      sandboxId: null,
-      workspaceExpiresAt: expiresAt,
-      retentionStatus: "inactive" as const,
-    };
-  }
-  return {
-    sandboxProvider: workspace.provider,
-    sandboxId: workspace.id,
-    workspaceExpiresAt: expiresAt,
-    retentionStatus: "active" as const,
-  };
-}
-
-function buildFinalizationUpdate(workspace: WorkspaceRef | null | undefined) {
-  if (workspace === undefined) return {};
-  if (workspace === null) {
-    return {
-      sandboxFinalizationWorkspaceProvider: null,
-      sandboxFinalizationWorkspaceId: null,
-    };
-  }
-  return {
-    sandboxFinalizationWorkspaceProvider: workspace.provider,
-    sandboxFinalizationWorkspaceId: workspace.id,
-  };
 }
 
 export async function findExpiredSessionWorkspaces(
