@@ -8,6 +8,7 @@ Runs are bounded executions; sessions are durable conversations that contain ord
 |---|---|---|
 | Session identity, turn order, and retention state | Postgres | Until deleted |
 | Run lifecycle and event journal | Postgres | Audit history |
+| Stopped-source finalization marker | Postgres | Until the source is released |
 | Pi JSONL conversation checkpoint | Postgres | Until session deletion |
 | Repository workspace checkpoint | Sandbox provider | Until inactive/deleted |
 
@@ -15,7 +16,7 @@ The repository image mapping in Settings is a base image/template reference, not
 
 `retentionStatus=active` means a turn is in progress or a warm checkpoint is retained; `inactive` means the provider artifact has been deleted and only the Postgres conversation checkpoint remains. The session retains the last checkpoint provider identity even when `sandbox_id` is cleared, because its provider-native image alias may only be valid with that backend.
 
-- microSandbox stops the VM and creates an integrity-checked local Snapshot under `MICROSANDBOX_SNAPSHOT_DIR`. The controller commits the snapshot path before asking the provider to remove the stopped source VM, so a crash leaves recoverable state instead of an orphaned checkpoint. Resume creates a new VM from that snapshot.
+- microSandbox stops the VM and creates an integrity-checked local Snapshot under `MICROSANDBOX_SNAPSHOT_DIR`. The controller commits the snapshot path and the source-finalization marker before asking the provider to remove the stopped source VM, so a crash leaves recoverable state and a durable cleanup target. The reconciler retries finalization until it succeeds, then clears the marker. Resume creates a new VM from that snapshot.
 - E2B pauses the sandbox with `keepMemory: false`; E2B retains the filesystem checkpoint in its service and the session stores the sandbox id. A public OCI image reference is materialized into a unique E2B template alias; completed resolutions are not reused, so republished tags cannot change an existing session's pinned target.
 
 Providers therefore boot one image plus one checkpoint. The built-in image and the repository image are not two concurrent roots; the repository image replaces the base image for that repository. The first provisioning pins the resolved repository image on the session, so later Settings changes affect new sessions but cannot silently change a cold resume. A checkpoint also pins the base image used to create it. When a turn replaces a provider checkpoint, the controller deletes the previous artifact, so each session retains at most one warm checkpoint (plus short-lived in-flight compute). `checkpoint_size_bytes` is recorded when the provider reports it, so operators can measure disk/quota growth and alert before the retention policy is reached.
@@ -36,6 +37,7 @@ The reconciler (`apps/controller/reconcile/loop.ts`) asks one question per branc
 | in-flight past deadline or silent | Fail, then stop sandbox |
 | terminal standalone run | Stop sandbox and stamp it |
 | terminal session run | Suspend checkpoint, then promote oldest queued turn |
+| stopped session source with a finalization marker | Retry provider source cleanup and clear the marker |
 | idle checkpoint past `workspace_expires_at` | Delete checkpoint and mark session inactive |
 | provisioning lease expired without sandbox | Return run to `queued` |
 
@@ -60,7 +62,7 @@ queued → provisioning → running → terminal
                   inactive (checkpoint deleted)
 ```
 
-Only the run named by `sessions.active_run_id` may own a session. Follow-ups submitted while another turn is active are queued rows. Parking atomically stores the checkpoint and promotes the oldest surviving queued row.
+Only the run named by `sessions.active_run_id` may own a session. Follow-ups submitted while another turn is active are queued rows. Parking atomically stores the checkpoint, records the original workspace needed for source cleanup, and promotes the oldest surviving queued row. If source cleanup fails after that commit, the run remains visible to the reconciler until finalization succeeds.
 
 An active session has a provider checkpoint and can resume without cloning or installing dependencies. After the configured retention period (the existing `sessionWorkspaceRetentionSeconds` setting, seven days by default), the reconciler deletes that checkpoint and marks the session `inactive`; its Postgres Pi checkpoint remains. The next turn cold-starts from the repository's configured base image, removes only its derived `/workspace/<repo>` path, clones the repository, and restores only the Pi conversation. This is explicit in `WORKSPACE_RESUMED=false` and never pretends filesystem state survived.
 
@@ -75,10 +77,10 @@ Each turn receives fresh callback, forge, model, and plugin credentials. The pro
 ## Failure behavior
 
 - A missing or corrupt checkpoint clears the stale reference and cold-starts from the repository image while retaining Pi history.
-- A suspension failure destroys the live sandbox, clears the session reference, and leaves the Pi checkpoint available for a cold continuation. If microSandbox has already created a valid snapshot but cannot remove the stopped source VM, it keeps and returns that snapshot; the source is safe to reclaim later and the session does not fall back to a cold start.
+- A suspension failure destroys the live sandbox, clears the session reference, and leaves the Pi checkpoint available for a cold continuation. If microSandbox has already created a valid snapshot but cannot remove the stopped source VM, it keeps and returns that snapshot; the committed finalization marker makes the source safe to reclaim on a later reconciliation pass and the session does not fall back to a cold start.
 - A runtime failure is terminal; the reconciler still attempts to preserve its filesystem checkpoint.
 - A run is not resumable mid-turn. The next turn continues from the last completed Pi checkpoint.
-- Provider stop/delete operations are idempotent; provider timeouts are the final resource backstop.
+- Provider stop/delete/finalize operations are idempotent; provider timeouts are the final resource backstop.
 
 ## Event sequence numbers
 
@@ -94,4 +96,4 @@ The SQL race/ownership properties are covered by `apps/controller/db/sessions.in
 
 ## Provider contract
 
-`SandboxProvider.resolveImage` returns the effective provider-native base image for a requested mapping, including the provider default for an empty mapping. `suspend` returns an opaque `WorkspaceRef` (optionally with `sizeBytes`), `finalizeSuspend` releases any stopped source only after the controller commits that reference, `resume` restores it, and `deleteWorkspace` permanently removes it. The controller never parses provider ids or assumes Docker/OCI details. See [adding-a-sandbox-provider.md](adding-a-sandbox-provider.md).
+`SandboxProvider.resolveImage` returns the effective provider-native base image for a requested mapping, including the provider default for an empty mapping. `suspend` returns an opaque `WorkspaceRef` (optionally with `sizeBytes`), `finalizeSuspend` releases any stopped source only after the controller commits that reference and is safe to retry, `resume` restores it, and `deleteWorkspace` permanently removes it. The controller never parses provider ids or assumes Docker/OCI details. See [adding-a-sandbox-provider.md](adding-a-sandbox-provider.md).

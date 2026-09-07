@@ -4,6 +4,7 @@ import { bindTestDatabase, seedSession } from "../test-support";
 import type { Database } from "./client";
 import { claimNextRun, completeRun } from "./runs";
 import { sessions } from "./schema";
+import { pinSessionSandboxImage } from "./session-images";
 import { claimSessionOperation, renewSessionOperation } from "./session-operations";
 import {
   clearSessionWorkspace,
@@ -45,6 +46,19 @@ async function waitForSessionLockWaiters(count: number): Promise<void> {
 }
 
 describe("durable sessions", () => {
+  it("returns one canonical image when concurrent workers pin a session", async () => {
+    const { session } = await seedSession(database);
+
+    const [first, second] = await Promise.all([
+      pinSessionSandboxImage(database, session.id, "fake:image-a"),
+      pinSessionSandboxImage(database, session.id, "fake:image-b"),
+    ]);
+
+    expect(first).not.toBeNull();
+    expect(second).toBe(first);
+    expect((await getSession(database, session.id))?.sandboxImageRef).toBe(first);
+  });
+
   it("queues concurrent turns while preserving one active workspace owner", async () => {
     const { session, run } = await seedSession(database);
     await completeRun(database, run.id, "succeeded", null);

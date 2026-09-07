@@ -7,7 +7,7 @@ import {
   updateSessionPinRequestSchema,
 } from "@pi-cloud-agent/protocol";
 import { type Context, Hono } from "hono";
-import { getRun } from "../db/runs";
+import { findSessionSandboxesToFinalize, getRun } from "../db/runs";
 import type { RunRow, SessionRow } from "../db/schema";
 import {
   claimSessionOperation,
@@ -190,7 +190,8 @@ async function deleteSession(
   if (sessionRuns.some((run) => run.id !== activeRun?.id && !isTerminalRun(run))) {
     return c.json({ error: "session has a queued run" }, 409);
   }
-  if (!hasSandboxCleanup(deps, session, activeRun)) {
+  const pendingFinalizations = await findSessionSandboxesToFinalize(database, 25, session.id);
+  if (!hasSandboxCleanup(deps, session, activeRun, pendingFinalizations)) {
     return c.json({ error: "sandbox cleanup is not available" }, 503);
   }
   const operationAt = await claimSessionOperation(database, session.id, "archiving", {
@@ -210,7 +211,7 @@ async function deleteSession(
       c.get("log").warn("session deletion heartbeat failed", { sessionId: session.id, error }),
   );
   try {
-    await cleanupSessionSandbox(deps, session, activeRun);
+    await cleanupSessionSandbox(deps, session, activeRun, pendingFinalizations);
   } catch (error) {
     await releaseSessionOperation(database, session.id, "archiving", operationAt);
     c.get("log").error("session checkpoint deletion failed", { sessionId: session.id, error });
@@ -242,9 +243,10 @@ function hasSandboxCleanup(
   deps: Pick<Deps, "sandbox" | "createSandboxProvider">,
   session: SessionRow,
   activeRun: RunRow | null,
+  pendingFinalizations: RunRow[],
 ): boolean {
   return (
-    (!session.sandboxId && !activeRun?.sandboxId) ||
+    (!session.sandboxId && !activeRun?.sandboxId && pendingFinalizations.length === 0) ||
     Boolean(deps.sandbox || deps.createSandboxProvider)
   );
 }
@@ -253,11 +255,31 @@ async function cleanupSessionSandbox(
   deps: Pick<Deps, "sandbox" | "createSandboxProvider">,
   session: SessionRow,
   activeRun: RunRow | null,
+  pendingFinalizations: RunRow[],
 ): Promise<void> {
   const providerFor = (name: string | null | undefined) => {
     if (deps.sandbox?.name === name || !name) return deps.sandbox;
     return deps.createSandboxProvider?.(name);
   };
+  for (const run of pendingFinalizations) {
+    if (
+      !run.sandboxProvider ||
+      !run.sandboxId ||
+      !run.sandboxFinalizationWorkspaceProvider ||
+      !run.sandboxFinalizationWorkspaceId
+    ) {
+      continue;
+    }
+    const provider = providerFor(run.sandboxProvider);
+    if (!provider) throw new Error("sandbox cleanup is not available");
+    await provider.finalizeSuspend(
+      { provider: run.sandboxProvider, id: run.sandboxId },
+      {
+        provider: run.sandboxFinalizationWorkspaceProvider,
+        id: run.sandboxFinalizationWorkspaceId,
+      },
+    );
+  }
   if (activeRun?.sandboxId && !activeRun.sandboxStoppedAt) {
     const provider = providerFor(activeRun.sandboxProvider);
     if (!provider) throw new Error("sandbox cleanup is not available");

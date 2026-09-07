@@ -69,11 +69,11 @@ docker run --rm --entrypoint bash pi-cloud-agent:local -lc \
 
 Configure an OCI image (microSandbox) or E2B template per connected repository in Settings > Environments. Use **Test image** to run the runtime-contract check in a disposable sandbox before saving it. The image must provide `/app/run.js`, `/app/package.json` with its runtime dependencies (including `tsx`), `/workspace`, Node.js, git, gh, and an unprivileged `node` user. Leaving it empty uses the bundled image. Dependencies and toolchains are built into the image; no arbitrary setup script runs after checkout.
 
-After each completed session turn, microSandbox stores an integrity-checked local snapshot, commits its path, and then releases the stopped source VM; E2B pauses the filesystem. The previous checkpoint is deleted after its replacement is durable, so a session keeps one warm artifact. Warm follow-ups resume that checkpoint without cloning. Checkpoints expire after `SESSION_WORKSPACE_RETENTION_SECONDS` (seven days by default); the reconciler deletes them and marks the session inactive while retaining the provider identity, so the next turn cold-clones from the correct provider's pinned image while restoring Pi history. See [resumability.md](resumability.md).
+After each completed session turn, microSandbox stores an integrity-checked local snapshot, commits its path and source-finalization marker, and then releases the stopped source VM; E2B pauses the filesystem. If source release fails, the marker remains and the reconciler retries it on a later pass. The previous checkpoint is deleted after its replacement is durable, so a session keeps one warm artifact. Warm follow-ups resume that checkpoint without cloning. Checkpoints expire after `SESSION_WORKSPACE_RETENTION_SECONDS` (seven days by default); the reconciler deletes them and marks the session inactive while retaining the provider identity, so the next turn cold-clones from the correct provider's pinned image while restoring Pi history. See [resumability.md](resumability.md).
 
 The first provisioning also pins the resolved repository image on the session. Changing the Settings mapping therefore affects new sessions; an existing session keeps its original image if it ever needs a cold resume.
 
-Delete and retention expiry claim the session before provider cleanup. A follow-up submitted during cleanup receives `409`; cleanup renews its heartbeat while the provider call runs, and only a claim stale for ten minutes can be reclaimed after a crash. The guarded delete or clear then verifies the immutable operation token before changing the session.
+Delete and retention expiry claim the session before provider cleanup. A follow-up submitted during cleanup receives `409`; cleanup renews its heartbeat while the provider call runs, and only a claim stale for ten minutes can be reclaimed after a crash. Pending stopped-source finalizations are retained on their terminal run and retried by the reconciler. The guarded delete or clear then verifies the immutable operation token before changing the session.
 
 E2B materializes each public OCI image resolution under a unique template alias and fails a build instead of reusing an older alias. A session stores the resolved alias once, so a republished registry tag affects only later sessions.
 
@@ -161,6 +161,7 @@ The terminal evidence is a `status` event followed by the run row reaching `succ
 | `git.clone_branch_failed` then a successful clone | the named branch is gone; fell back to the default | benign |
 | `attempt` climbing | retryable provisioning failures | the provider's error in the logs |
 | session stays `parking` | reconciler has not suspended or released the terminal turn | controller logs and `runs.sandbox_stopped_at` |
+| stopped source remains after a checkpoint commit | provider finalization failed and is waiting for reconciliation | controller logs and `runs.sandbox_finalization_workspace_id` |
 | follow-up clones again | parked workspace expired or disappeared | `sessions.workspace_expires_at`, `git.cloned`; Pi history still resumes |
 
 ## Cancelling and cleanup

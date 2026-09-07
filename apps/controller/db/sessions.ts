@@ -252,25 +252,6 @@ export async function saveSessionCheckpoint(
 }
 
 /** Pin the repository image used if this session later needs a cold start. */
-export async function pinSessionSandboxImage(
-  database: Database,
-  sessionId: string,
-  imageRef: string,
-): Promise<boolean> {
-  const updated = await database
-    .update(sessions)
-    .set({ sandboxImageRef: imageRef, updatedAt: new Date() })
-    .where(
-      and(
-        eq(sessions.id, sessionId),
-        isNull(sessions.sandboxImageRef),
-        isNull(sessions.sessionOperation),
-      ),
-    )
-    .returning({ id: sessions.id });
-  return updated.length > 0;
-}
-
 /** Set the immutable original revision when the first turn reports its baseline or diff. */
 export async function saveSessionDiffBaseSha(
   database: Database,
@@ -348,7 +329,11 @@ export async function parkSession(
     if (updated.length === 0) return { parked: false, nextRunId: null };
     await tx
       .update(runs)
-      .set({ sandboxStoppedAt: new Date(), updatedAt: new Date() })
+      .set({
+        sandboxStoppedAt: new Date(),
+        ...buildFinalizationUpdate(workspace),
+        updatedAt: new Date(),
+      })
       .where(and(eq(runs.id, run.id), isNull(runs.sandboxStoppedAt)));
     return { parked: true, nextRunId: next?.id ?? null };
   });
@@ -382,6 +367,20 @@ function buildWorkspaceUpdate(
     workspaceExpiresAt: expiresAt,
     retentionStatus: "active" as const,
     checkpointSizeBytes: workspace.sizeBytes ?? null,
+  };
+}
+
+function buildFinalizationUpdate(workspace: WorkspaceRef | null | undefined) {
+  if (workspace === undefined) return {};
+  if (workspace === null) {
+    return {
+      sandboxFinalizationWorkspaceProvider: null,
+      sandboxFinalizationWorkspaceId: null,
+    };
+  }
+  return {
+    sandboxFinalizationWorkspaceProvider: workspace.provider,
+    sandboxFinalizationWorkspaceId: workspace.id,
   };
 }
 

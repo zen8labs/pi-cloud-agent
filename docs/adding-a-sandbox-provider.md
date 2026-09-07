@@ -11,13 +11,13 @@ export interface SandboxProvider {
   execute?(spec: SandboxSpec): Promise<SandboxExecutionResult>;
   resume(ref: WorkspaceRef, spec: SandboxSpec): Promise<SandboxRef>;
   suspend(ref: SandboxRef): Promise<WorkspaceRef>;
-  finalizeSuspend(ref: SandboxRef, workspace: WorkspaceRef): Promise<void>;
+  finalizeSuspend(ref: SandboxRef, workspace: WorkspaceRef): Promise<void>; // idempotent
   deleteWorkspace(ref: WorkspaceRef): Promise<void>;
   stop(ref: SandboxRef): Promise<void>;
 }
 ```
 
-`create`/`stop` are the standalone lifecycle. `suspend`/`finalizeSuspend`/`resume`/`deleteWorkspace` are the durable-session lifecycle. A backend may implement the latter with a filesystem-only pause, snapshot, archive, or detached volume. `finalizeSuspend` is called only after the controller commits the returned workspace, which closes the crash window between creating a snapshot and releasing its source. The optional `execute` method powers the Settings image preflight and must run a disposable foreground command, return its output, and reclaim the machine before returning. The opaque `WorkspaceRef` (optionally including `sizeBytes`) is the only provider-specific state stored by the controller.
+`create`/`stop` are the standalone lifecycle. `suspend`/`finalizeSuspend`/`resume`/`deleteWorkspace` are the durable-session lifecycle. A backend may implement the latter with a filesystem-only pause, snapshot, archive, or detached volume. `finalizeSuspend` is called only after the controller commits the returned workspace, is retried until it succeeds, and must be idempotent; this closes the crash window between creating a snapshot and releasing its source. The optional `execute` method powers the Settings image preflight and must run a disposable foreground command, return its output, and reclaim the machine before returning. The opaque `WorkspaceRef` (optionally including `sizeBytes`) is the only provider-specific state stored by the controller.
 
 `resolveImage` turns the empty image reference into the provider's effective default and may materialize a public OCI reference into a provider-native template. The controller stores that resolved value on the session before the first sandbox is created, so later configuration changes cannot silently alter a cold resume.
 
@@ -120,7 +120,7 @@ Select it with `SANDBOX_PROVIDER=my-backend`. Nothing else in the system changes
 
 **`suspend` retains filesystem state, not credentials in process memory.** A later turn receives fresh secrets. If a provider cannot discard memory independently, its implementation needs a snapshot or volume boundary that does.
 
-**`finalizeSuspend` runs after the checkpoint is durable.** Release a stopped source here, not at the end of `suspend`; a controller crash between those operations must leave a resumable source and checkpoint.
+**`finalizeSuspend` runs after the checkpoint is durable and is idempotent.** Release a stopped source here, not at the end of `suspend`; a controller crash or provider error leaves a durable marker that the reconciler retries without losing the checkpoint.
 
 **`resume` starts exactly one new runtime command.** Report a missing or expired reference with `WorkspaceNotFoundError`; the controller will clear it and cold-create from the durable Pi checkpoint. Do not classify a missing workspace as a generic permanent failure.
 

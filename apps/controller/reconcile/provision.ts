@@ -20,11 +20,8 @@ import {
   setRunPlugins,
 } from "../db/runs";
 import type { RunRow } from "../db/schema";
-import {
-  clearSessionWorkspace,
-  getSessionForRun,
-  pinSessionSandboxImage,
-} from "../db/sessions";
+import { pinSessionSandboxImage } from "../db/session-images";
+import { clearSessionWorkspace, getSessionForRun } from "../db/sessions";
 import type { Logger } from "../logger";
 import { buildTaskPrompt, resolvePluginsForRun } from "../plugins/catalog";
 import type { CredentialBroker } from "../secrets/broker";
@@ -116,11 +113,15 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
         ? (deps.createProvider?.(session.sandboxProvider) ?? sandbox)
         : sandbox;
     const requestedImageRef = session?.sandboxImageRef || environment?.imageRef || "";
-    const imageRef = session?.sandboxImageRef
+    let imageRef = session?.sandboxImageRef
       ? session.sandboxImageRef
       : await sessionSandbox.resolveImage(requestedImageRef);
     if (session && session.sandboxImageRef === null) {
-      await pinSessionSandboxImage(database, session.id, imageRef);
+      const pinnedImage = await pinSessionSandboxImage(database, session.id, imageRef);
+      if (pinnedImage === null) {
+        throw new SandboxError("session image could not be pinned", { retryable: true });
+      }
+      imageRef = pinnedImage;
     }
     const spec = {
       runId: run.id,

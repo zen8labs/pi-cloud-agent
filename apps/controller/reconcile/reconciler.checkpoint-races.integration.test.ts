@@ -98,4 +98,28 @@ describe("session checkpoint races", () => {
     expect(provider.resumeSpecs[0]?.image).toBe("fake:default-v1");
     expect((await runs.getRun(database, followUp.id))?.status).toBe("running");
   });
+
+  it("retries source finalization after the checkpoint commit survives a failure", async () => {
+    const { session, run } = await support.seedSession(database);
+    const provider = fakeProvider();
+    let attempts = 0;
+    provider.finalizeSuspend = async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("provider cleanup unavailable");
+    };
+    const loop = reconciler(provider);
+
+    await tick(loop);
+    await runs.completeRun(database, run.id, "succeeded");
+    await tick(loop);
+
+    expect(attempts).toBe(1);
+    expect((await sessionDb.getSession(database, session.id))?.sandboxId).toBe("sb-1");
+    expect((await runs.getRun(database, run.id))?.sandboxFinalizationWorkspaceId).toBe("sb-1");
+
+    await tick(loop);
+
+    expect(attempts).toBe(2);
+    expect((await runs.getRun(database, run.id))?.sandboxFinalizationWorkspaceId).toBeNull();
+  });
 });

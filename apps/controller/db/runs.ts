@@ -199,6 +199,33 @@ export async function markSandboxStopped(database: Database, runId: string): Pro
     .where(eq(runs.id, runId));
 }
 
+/** Clear the durable source-cleanup marker after finalization succeeds. */
+export async function markSessionSandboxFinalized(
+  database: Database,
+  runId: string,
+  source: { provider: string; id: string },
+  workspace: { provider: string; id: string },
+): Promise<boolean> {
+  const updated = await database
+    .update(runs)
+    .set({
+      sandboxFinalizationWorkspaceProvider: null,
+      sandboxFinalizationWorkspaceId: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(runs.id, runId),
+        eq(runs.sandboxProvider, source.provider),
+        eq(runs.sandboxId, source.id),
+        eq(runs.sandboxFinalizationWorkspaceProvider, workspace.provider),
+        eq(runs.sandboxFinalizationWorkspaceId, workspace.id),
+      ),
+    )
+    .returning({ id: runs.id });
+  return updated.length > 0;
+}
+
 /**
  * Append one event and return its sequence number.
  *
@@ -377,6 +404,30 @@ export async function findSandboxesToStop(
         isNull(runs.sessionId),
         isNotNull(runs.sandboxId),
         isNull(runs.sandboxStoppedAt),
+      ),
+    )
+    .limit(limit);
+}
+
+/** Parked session sources whose post-checkpoint cleanup still needs a retry. */
+export async function findSessionSandboxesToFinalize(
+  database: Database,
+  limit: number,
+  sessionId?: string,
+): Promise<RunRow[]> {
+  return database
+    .select()
+    .from(runs)
+    .where(
+      and(
+        isNotNull(runs.sessionId),
+        ...(sessionId ? [eq(runs.sessionId, sessionId)] : []),
+        inArray(runs.status, [...TERMINAL_STATUSES]),
+        isNotNull(runs.sandboxProvider),
+        isNotNull(runs.sandboxId),
+        isNotNull(runs.sandboxStoppedAt),
+        isNotNull(runs.sandboxFinalizationWorkspaceProvider),
+        isNotNull(runs.sandboxFinalizationWorkspaceId),
       ),
     )
     .limit(limit);

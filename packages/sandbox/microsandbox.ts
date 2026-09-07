@@ -211,8 +211,13 @@ export function createMicroSandboxProvider(
     async finalizeSuspend(ref) {
       // The controller calls this only after the snapshot path is committed to
       // Postgres. That ordering makes a controller crash leave a recoverable
-      // stopped source rather than an unreachable snapshot.
-      await removePersistedSandbox(ref.id);
+      // stopped source rather than an unreachable snapshot. Cleanup is
+      // idempotent because reconciliation may retry after a successful removal
+      // whose database marker update was interrupted.
+      await removePersistedSandbox(ref.id).catch((cause) => {
+        if (cause instanceof SandboxNotFoundError) return;
+        throw cause;
+      });
     },
 
     async deleteWorkspace(ref): Promise<void> {

@@ -28,6 +28,11 @@ import {
 import type { Logger } from "../logger";
 import type { CredentialBroker } from "../secrets/broker";
 import { type ProvisionDeps, provisionRun } from "./provision";
+import {
+  finalizeSuspendedSource,
+  retryPendingSessionFinalizations,
+  type SessionFinalizationDeps,
+} from "./session-finalization";
 
 /**
  * The reconciler: one loop that reads durable state and repairs it.
@@ -118,6 +123,12 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
     createProvider,
     log,
   };
+  const finalizationDeps: SessionFinalizationDeps = {
+    database,
+    sandbox,
+    createProvider,
+    log,
+  };
 
   let running = false;
   let timer: NodeJS.Timeout | null = null;
@@ -178,7 +189,14 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
       const parked = await parkSession(database, run, workspace, expiresAt);
       if (parked) {
         await deleteReplacedWorkspace(provider, previous, workspace, log, run.sessionId);
-        await finalizeSuspendedSource(provider, ref, workspace, log, run.sessionId);
+        await finalizeSuspendedSource(
+          finalizationDeps,
+          provider,
+          ref,
+          workspace,
+          run.sessionId,
+          run.id,
+        );
         log.info("session workspace suspended", {
           sessionId: run.sessionId,
           runId: run.id,
@@ -199,7 +217,13 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
               error,
             }),
           );
-          await finalizeSuspendedSource(provider, ref, workspace, log, run.sessionId);
+          await finalizeSuspendedSource(
+            finalizationDeps,
+            provider,
+            ref,
+            workspace,
+            run.sessionId,
+          );
         }
       }
     } catch (error) {
@@ -211,27 +235,6 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
       await provider.stop(ref).catch(() => undefined);
       const parked = await parkSession(database, run, null, null);
       await cleanupFailedSuspension(provider, previous, ref, parked, run.sessionId);
-    }
-  }
-
-  async function finalizeSuspendedSource(
-    provider: SandboxProvider,
-    source: { provider: string; id: string },
-    workspace: { provider: string; id: string },
-    sessionLog: Logger,
-    sessionId: string,
-  ): Promise<void> {
-    try {
-      await provider.finalizeSuspend(source, workspace);
-    } catch (error) {
-      // The checkpoint is already durable. A later provider timeout or manual
-      // cleanup can reclaim a stopped source without risking workspace loss.
-      sessionLog.error("suspended source cleanup failed", {
-        sessionId,
-        sourceId: source.id,
-        workspaceId: workspace.id,
-        error,
-      });
     }
   }
 
@@ -387,6 +390,8 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
   async function tick(): Promise<void> {
     // Ordered cheapest-first, and teardown before new work so a busy queue can
     // never starve reclamation of machines that are still costing money.
+    await retryPendingSessionFinalizations(finalizationDeps);
+
     for (const run of await findSandboxesToStop(database, BATCH)) {
       await reclaim(run, "run finished");
     }

@@ -243,6 +243,10 @@ export const runs = pgTable(
     sandboxId: text("sandbox_id"),
     sandboxStoppedAt: timestamptz("sandbox_stopped_at"),
 
+    /** Original checkpoint retained until the stopped source is finalized. */
+    sandboxFinalizationWorkspaceProvider: text("sandbox_finalization_workspace_provider"),
+    sandboxFinalizationWorkspaceId: text("sandbox_finalization_workspace_id"),
+
     /**
      * Monotonic event counter. Incremented in the same transaction that inserts
      * an event, which is what makes `seq` gapless without a second source of
