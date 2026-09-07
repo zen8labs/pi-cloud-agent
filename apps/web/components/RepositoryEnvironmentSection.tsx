@@ -56,8 +56,8 @@ export function RepositoryEnvironmentSection({ onNotice }: { onNotice: NoticeHan
         <div>
           <h3 className="text-sm font-medium">Repository environments</h3>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Choose the base OCI image (microSandbox) or template (E2B) for this repository. Each
-            session keeps its own provider-native checkpoint after a completed turn.
+            Set a public container image for this repository. Each session keeps its own
+            checkpoint after a completed turn.
           </p>
         </div>
       </div>
@@ -195,20 +195,20 @@ function EnvironmentEditor({
           className="block text-xs font-medium text-muted-foreground"
           htmlFor="environment-image"
         >
-          Image or template reference
+          Container image reference
         </label>
         <input
           id="environment-image"
           value={imageRef}
           onChange={(event) => setImageRef(event.target.value)}
-          placeholder="ghcr.io/acme/my-agent-env:latest"
+          placeholder="docker.io/acme/my-agent-env:latest"
           className="mt-2 h-9 w-full rounded-lg border border-input bg-background px-2.5 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           spellCheck={false}
         />
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
-          The image must include the runtime contract: <code>/app/run.js</code>, its runtime
-          dependencies, <code>/workspace</code>, Node.js, git, and gh. Leave blank to use the
-          bundled image.
+          Paste a public Docker or OCI image reference. It must include the runtime contract:{" "}
+          <code>/app/run.js</code>, its runtime dependencies, <code>/workspace</code>, Node.js,
+          git, and gh. Leave blank to use the bundled image.
         </p>
       </div>
       {testResult && <ImageTestResult result={testResult} />}
