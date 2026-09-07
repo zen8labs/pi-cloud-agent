@@ -54,10 +54,10 @@ export function RepositoryEnvironmentSection({ onNotice }: { onNotice: NoticeHan
           <TerminalSquareIcon className="size-4 text-muted-foreground" />
         </div>
         <div>
-          <h3 className="text-sm font-medium">Repository environments</h3>
+          <h3 className="text-sm font-medium">Repository container image</h3>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Set a public container image for this repository. Each session keeps its own
-            checkpoint after a completed turn.
+            Choose the starting environment for new sessions in this repository. Each new
+            session starts an isolated sandbox from this image.
           </p>
         </div>
       </div>
@@ -195,7 +195,7 @@ function EnvironmentEditor({
           className="block text-xs font-medium text-muted-foreground"
           htmlFor="environment-image"
         >
-          Container image reference
+          Container image (optional)
         </label>
         <input
           id="environment-image"
@@ -206,16 +206,20 @@ function EnvironmentEditor({
           spellCheck={false}
         />
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
-          Paste a public Docker or OCI image reference. It must include the runtime contract:{" "}
-          <code>/app/run.js</code>, its runtime dependencies, <code>/workspace</code>, Node.js,
-          git, and gh. Leave blank to use the bundled image.
+          Enter a public Docker or OCI image that already contains the language runtimes and
+          tools your project needs. It must be able to run the app and provide a writable
+          workspace with Node.js, git, and GitHub CLI. Use <strong>Test image</strong> to check
+          it before saving. Each new session for this repository starts an isolated sandbox from
+          this image. Leave blank to use the default environment.
         </p>
       </div>
       {testResult && <ImageTestResult result={testResult} />}
       <div className="flex items-center justify-between gap-3">
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
           {configured && <CheckCircle2Icon className="size-3.5 text-emerald-500" />}
-          {configured ? "Custom image enabled" : "Bundled image only"}
+          {configured
+            ? "Custom image will be used for new sessions"
+            : "Default environment will be used for new sessions"}
         </span>
         <div className="flex items-center gap-2">
           <Button
@@ -235,7 +239,7 @@ function EnvironmentEditor({
             disabled={busy || testing}
           >
             {busy && <LoaderCircleIcon className="animate-spin" />}
-            {busy ? "Saving…" : "Save image"}
+            {busy ? "Saving…" : "Save container image"}
           </Button>
         </div>
       </div>
