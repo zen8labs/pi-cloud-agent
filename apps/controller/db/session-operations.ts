@@ -4,6 +4,12 @@ import { type SessionOperation, sessions } from "./schema";
 
 const SESSION_OPERATION_STALE_MS = 10 * 60 * 1000;
 
+export function isSessionOperationStale(operationAt: Date | null): boolean {
+  return (
+    operationAt === null || operationAt.getTime() < Date.now() - SESSION_OPERATION_STALE_MS
+  );
+}
+
 export async function claimSessionOperation(
   database: Database,
   sessionId: string,

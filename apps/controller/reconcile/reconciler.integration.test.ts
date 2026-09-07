@@ -205,6 +205,23 @@ describe("completion and teardown", () => {
     expect((await getSession(database, session.id))?.sandboxId).toBe("checkpoint-2");
   });
 
+  it("releases a stopped source only after the checkpoint is committed", async () => {
+    const { session, run } = await seedSession(database);
+    const provider = fakeProvider();
+    let checkpointCommitted = false;
+    provider.finalizeSuspend = async (_source, workspace) => {
+      checkpointCommitted =
+        (await getSession(database, session.id))?.sandboxId === workspace.id;
+    };
+
+    const loop = reconciler(provider);
+    await tick(loop);
+    await completeRun(database, run.id, "succeeded");
+    await tick(loop);
+
+    expect(checkpointCommitted).toBe(true);
+  });
+
   it("cold-starts from the durable checkpoint when a parked workspace disappeared", async () => {
     const user = await seedTestUser(database, testConfig());
     const { session, run } = await seedSession(database, user.userId);

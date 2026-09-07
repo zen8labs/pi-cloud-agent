@@ -43,6 +43,7 @@ const sandbox: SandboxProvider = {
   async suspend(ref) {
     return ref;
   },
+  async finalizeSuspend() {},
   async deleteWorkspace(ref) {
     deletedWorkspaces.push(ref.id);
   },

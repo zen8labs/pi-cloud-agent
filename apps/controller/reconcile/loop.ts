@@ -174,6 +174,7 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
       const parked = await parkSession(database, run, workspace, expiresAt);
       if (parked) {
         await deleteReplacedWorkspace(provider, previous, workspace, log, run.sessionId);
+        await finalizeSuspendedSource(provider, ref, workspace, log, run.sessionId);
         log.info("session workspace suspended", {
           sessionId: run.sessionId,
           runId: run.id,
@@ -186,7 +187,16 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
         // snapshotting. If the CAS lost, the newly-created artifact is not the
         // checkpoint the follow-up owns and must be reclaimed immediately.
         const stillOwned = current?.sandboxId === workspace.id;
-        if (!stillOwned) await provider.deleteWorkspace(workspace);
+        if (!stillOwned) {
+          await provider.deleteWorkspace(workspace).catch((error) =>
+            log.error("unowned session workspace cleanup failed", {
+              sessionId: run.sessionId,
+              workspaceId: workspace.id,
+              error,
+            }),
+          );
+          await finalizeSuspendedSource(provider, ref, workspace, log, run.sessionId);
+        }
       }
     } catch (error) {
       log.error("session workspace suspension failed; continuing cold", {
@@ -197,6 +207,27 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
       await provider.stop(ref).catch(() => undefined);
       const parked = await parkSession(database, run, null, null);
       await cleanupFailedSuspension(provider, previous, ref, parked, run.sessionId);
+    }
+  }
+
+  async function finalizeSuspendedSource(
+    provider: SandboxProvider,
+    source: { provider: string; id: string },
+    workspace: { provider: string; id: string },
+    sessionLog: Logger,
+    sessionId: string,
+  ): Promise<void> {
+    try {
+      await provider.finalizeSuspend(source, workspace);
+    } catch (error) {
+      // The checkpoint is already durable. A later provider timeout or manual
+      // cleanup can reclaim a stopped source without risking workspace loss.
+      sessionLog.error("suspended source cleanup failed", {
+        sessionId,
+        sourceId: source.id,
+        workspaceId: workspace.id,
+        error,
+      });
     }
   }
 

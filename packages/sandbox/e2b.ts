@@ -36,22 +36,21 @@ export function createE2BProvider(
   if (apiKey === "") {
     throw new Error("E2B_API_KEY is required by the e2b sandbox provider");
   }
-  const templateCache = new Map<string, Promise<string>>();
+  const templateResolutions = new Map<string, Promise<string>>();
 
   const resolveTemplate = (imageRef: string): Promise<string> => {
     const requested = imageRef || defaultTemplate;
-    const cached = templateCache.get(requested);
-    if (cached) return cached;
-    const template = resolveTemplateReference(requested, defaultTemplate, apiKey).catch(
-      (error) => {
-        // Do not poison the process-wide cache after a transient registry/API
-        // failure; the reconciler may retry the same run.
-        templateCache.delete(requested);
-        throw error;
+    const pending = templateResolutions.get(requested);
+    if (pending) return pending;
+    const resolution = resolveTemplateReference(requested, defaultTemplate, apiKey).finally(
+      () => {
+        // Cache only work already in progress. A tag may be republished in the
+        // registry, so a completed resolution must not become a permanent pin.
+        templateResolutions.delete(requested);
       },
     );
-    templateCache.set(requested, template);
-    return template;
+    templateResolutions.set(requested, resolution);
+    return resolution;
   };
 
   return {
@@ -159,6 +158,11 @@ export function createE2BProvider(
       return { provider: "e2b", id: ref.id };
     },
 
+    async finalizeSuspend() {
+      // E2B's paused sandbox id is itself the durable workspace reference; it
+      // has no separate source resource to release after the database commit.
+    },
+
     async deleteWorkspace(ref): Promise<void> {
       await Sandbox.kill(ref.id, { apiKey });
     },
@@ -195,10 +199,9 @@ function isContainerImageReference(imageRef: string): boolean {
 async function buildTemplateFromImage(imageRef: string, apiKey: string): Promise<string> {
   const suffix = createHash("sha256").update(imageRef).digest("hex").slice(0, 16);
   const name = `pi-cloud-agent-${suffix}`;
-  if (await Template.exists(name, { apiKey })) return name;
   const template = Template().fromImage(imageRef).setStartCmd("sleep infinity", "true");
   try {
-    await Template.build(template, name, { apiKey });
+    await Template.build(template, name, { apiKey, skipCache: true });
   } catch (cause) {
     // Multiple controller replicas may race to materialize the same image.
     // If another replica won, the deterministic template is still usable.

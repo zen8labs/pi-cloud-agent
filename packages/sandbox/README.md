@@ -13,7 +13,7 @@ It stays this small because of one constraint: **the sandbox is outbound-only.**
 
 `execute` is optional and is used only by the Settings preflight test. It creates a disposable sandbox, runs one foreground command, returns bounded output, and destroys the machine. It is not a general controller-side shell or an inbound channel into agent workspaces.
 
-`resolveImage` maps a repository setting to the provider-native image or template and returns the configured default for an empty setting. The controller pins this resolved value on the session before the first create, so a later settings change cannot change an existing session's cold resume.
+`resolveImage` maps a repository setting to the provider-native image or template and returns the configured default for an empty setting. The controller pins this resolved value on the session before the first create, so a later settings change cannot change an existing session's cold resume. `finalizeSuspend` releases a stopped source only after the controller commits the checkpoint returned by `suspend`.
 
 Durable chat sessions additionally use `resume`, `suspend`, and `deleteWorkspace`. These remain provider control-plane operations; they do not open an inbound application connection to the sandbox. See [../../docs/resumability.md](../../docs/resumability.md).
 
@@ -36,6 +36,7 @@ Durable chat sessions additionally use `resume`, `suspend`, and `deleteWorkspace
 - **`suspend` retains filesystem state, not process memory.** Per-run credentials must not survive into the next turn.
 - **`deleteWorkspace` is idempotent.** Expiry can race another reconciler pass.
 - **`resolveImage` returns a non-empty provider-native reference.** The controller persists it on the session for deterministic cold resumes.
+- **`finalizeSuspend` runs after the checkpoint is durable.** Providers that create a separate snapshot release the stopped source here, not before returning from `suspend`.
 - **Classify failures with `SandboxError.retryable`.** `true` returns the run to the queue (up to three attempts); `false` fails it immediately. Getting this wrong means either burning attempts on a missing image or failing runs on a transient blip.
 - **Secrets are opened here and only here.** `spec.secrets` holds `Secret` objects; `expose()` is called at the boundary where they must become plain strings to cross into the machine.
 - **Never derive behavior from `spec.runId`.** It is correlation only. A provider that special-cases a run is a provider that cannot be swapped.
@@ -47,7 +48,7 @@ microSandbox consumes an OCI image. Build the repository's local runtime image w
 
 microSandbox persists a session by stopping the VM, creating an integrity-checked Snapshot under `MICROSANDBOX_SNAPSHOT_DIR`, and removing the live sandbox. Resume boots from that Snapshot, so process memory and per-run credentials do not survive. The default directory is `.pi-cloud-agent-snapshots` in the controller working directory; mount it on durable local storage in production and monitor its size.
 
-E2B remains selectable with `SANDBOX_PROVIDER=e2b` and uses its hosted template workflow. If Settings contains a public OCI reference, the provider builds a deterministically named E2B template from that image and reuses it on later runs. A simple name is first checked as an existing E2B template alias and, if it does not exist, is treated as an untagged Docker Hub image.
+E2B remains selectable with `SANDBOX_PROVIDER=e2b` and uses its hosted template workflow. If Settings contains a public OCI reference, the provider builds a deterministically named E2B template from that image and refreshes completed resolutions so republished tags are observed. A simple name is first checked as an existing E2B template alias and, if it does not exist, is treated as an untagged Docker Hub image.
 
 For deployment, build the image with an immutable registry tag and push it to an OCI-compatible registry. Set `MICROSANDBOX_IMAGE` to that reference on the machine that runs the controller and microSandbox, or pre-load the image with `msb load` on that machine. The local `pi-cloud-agent:local` tag is not a production artifact name and is not automatically visible on another host.
 

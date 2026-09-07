@@ -21,6 +21,8 @@ export interface SandboxProvider {
   resume(ref: WorkspaceRef, spec: SandboxSpec): Promise<SandboxRef>;
   /** Persist the filesystem without retaining process memory or credentials. */
   suspend(ref: SandboxRef): Promise<WorkspaceRef>;
+  /** Release the stopped source after the controller durably records the workspace. */
+  finalizeSuspend(ref: SandboxRef, workspace: WorkspaceRef): Promise<void>;
   /** Permanently remove a suspended workspace. Must be idempotent. */
   deleteWorkspace(ref: WorkspaceRef): Promise<void>;
   /** Must be idempotent: the reconciler may call it for an already-dead box. */

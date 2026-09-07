@@ -234,4 +234,40 @@ describe("durable sessions", () => {
     expect(stored?.activeRunId).toBe(followUp.id);
     expect(stored?.sandboxId).toBe("workspace-1");
   });
+
+  it("reclaims a stale cleanup claim so a crashed archive cannot block a follow-up", async () => {
+    const { session, run } = await seedSession(database);
+    await completeRun(database, run.id, "succeeded", null);
+    await parkSession(database, run, null, null);
+    await database
+      .update(sessions)
+      .set({
+        sessionOperation: "archiving",
+        sessionOperationAt: new Date(Date.now() - 11 * 60 * 1000),
+      })
+      .where(eq(sessions.id, session.id));
+
+    const followUp = await createSessionTurn(
+      database,
+      session.id,
+      "Continue after the archive worker crashed.",
+      "token-recovery",
+      null,
+      { model: session.model, modelConnectionId: session.modelConnectionId },
+    );
+
+    expect(followUp.turnNumber).toBe(2);
+    expect((await getSession(database, session.id))?.sessionOperation).toBeNull();
+  });
+
+  it("retains the provider identity when a workspace checkpoint is cleared", async () => {
+    const { session, run } = await seedSession(database);
+    await completeRun(database, run.id, "succeeded", null);
+    await parkSession(database, run, { provider: "e2b", id: "checkpoint-1" }, null);
+
+    expect(await clearSessionWorkspace(database, session.id, "checkpoint-1", null)).toBe(true);
+    const stored = await getSession(database, session.id);
+    expect(stored?.sandboxProvider).toBe("e2b");
+    expect(stored?.sandboxId).toBeNull();
+  });
 });

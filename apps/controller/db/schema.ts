@@ -168,7 +168,7 @@ export const sessions = pgTable(
     /** Repository image/template selected for this session's cold starts. */
     sandboxImageRef: text("sandbox_image_ref"),
 
-    /** Provider-owned checkpoint retained while the session is idle. */
+    /** Provider that owns the checkpoint, retained after expiry for cold resumes. */
     sandboxProvider: text("sandbox_provider"),
     sandboxId: text("sandbox_id"),
     workspaceExpiresAt: timestamptz("workspace_expires_at"),

@@ -197,11 +197,6 @@ export function createMicroSandboxProvider(
           cause,
         });
       }
-      // Snapshot creation is the durability boundary. If removing the stopped
-      // source sandbox fails, keep the valid snapshot and return it so the
-      // session can still resume without losing uncommitted work. The source is
-      // no longer running; provider lifecycle cleanup can reclaim it later.
-      await removePersistedSandbox(ref.id).catch(() => undefined);
       return {
         provider: "microsandbox",
         id: snapshot.path,
@@ -210,6 +205,13 @@ export function createMicroSandboxProvider(
             ? undefined
             : Number(snapshot.sizeBytes),
       };
+    },
+
+    async finalizeSuspend(ref) {
+      // The controller calls this only after the snapshot path is committed to
+      // Postgres. That ordering makes a controller crash leave a recoverable
+      // stopped source rather than an unreachable snapshot.
+      await removePersistedSandbox(ref.id);
     },
 
     async deleteWorkspace(ref): Promise<void> {

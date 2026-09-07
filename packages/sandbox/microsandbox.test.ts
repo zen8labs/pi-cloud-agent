@@ -67,6 +67,9 @@ describe("microSandbox checkpoints", () => {
       id: "/snapshots/session-test",
       sizeBytes: 1024,
     });
+    await expect(
+      provider.finalizeSuspend({ provider: "microsandbox", id: "live-1" }, workspace),
+    ).rejects.toThrow("source cleanup unavailable");
     expect(snapshotRemove).not.toHaveBeenCalled();
   });
 });

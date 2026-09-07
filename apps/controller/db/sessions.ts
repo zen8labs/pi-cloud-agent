@@ -9,6 +9,7 @@ import {
 import { and, desc, eq, inArray, isNotNull, isNull, lt, or, type SQL, sql } from "drizzle-orm";
 import { CHANNELS, type Database, notify } from "./client";
 import { type RunRow, runs, type SessionOperation, type SessionRow, sessions } from "./schema";
+import { isSessionOperationStale } from "./session-operations";
 
 export interface CreateSessionInput {
   userId?: string | null;
@@ -36,6 +37,8 @@ export class SessionBusyError extends Error {
     this.name = "SessionBusyError";
   }
 }
+
+type SessionTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 export async function createSessionWithRun(
   database: Database,
@@ -103,7 +106,7 @@ export async function createSessionTurn(
       .limit(1)
       .for("update");
     if (!session) throw new SessionNotFoundError();
-    if (session.sessionOperation) throw new SessionBusyError();
+    await clearStaleSessionOperation(tx, session, sessionId);
 
     const turnNumber = session.turnCount + 1;
     const startsImmediately = session.activeRunId === null;
@@ -143,6 +146,30 @@ export async function createSessionTurn(
   });
   if (result.startsImmediately) await notify(database, CHANNELS.runQueued, result.run.id);
   return result.run;
+}
+
+async function clearStaleSessionOperation(
+  tx: SessionTransaction,
+  session: SessionRow,
+  sessionId: string,
+): Promise<void> {
+  if (!session.sessionOperation) return;
+  if (!isSessionOperationStale(session.sessionOperationAt)) throw new SessionBusyError();
+  const marker = session.sessionOperationAt
+    ? eq(sessions.sessionOperationAt, session.sessionOperationAt)
+    : isNull(sessions.sessionOperationAt);
+  const reclaimed = await tx
+    .update(sessions)
+    .set({ sessionOperation: null, sessionOperationAt: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(sessions.id, sessionId),
+        eq(sessions.sessionOperation, session.sessionOperation),
+        marker,
+      ),
+    )
+    .returning({ id: sessions.id });
+  if (reclaimed.length === 0) throw new SessionBusyError();
 }
 
 export async function getSession(
@@ -289,16 +316,7 @@ export async function parkSession(
       .orderBy(runs.turnNumber)
       .limit(1)
       .for("update");
-    const workspaceUpdate =
-      workspace === undefined
-        ? {}
-        : {
-            sandboxProvider: workspace?.provider ?? null,
-            sandboxId: workspace?.id ?? null,
-            workspaceExpiresAt: expiresAt,
-            retentionStatus: workspace ? ("active" as const) : ("inactive" as const),
-            checkpointSizeBytes: workspace?.sizeBytes ?? null,
-          };
+    const workspaceUpdate = buildWorkspaceUpdate(workspace, expiresAt);
     const updated = await tx
       .update(sessions)
       .set({
@@ -330,6 +348,28 @@ function ownsParkLease(
   runId: string,
 ): boolean {
   return owner?.activeRunId === runId && owner.sessionOperation === null;
+}
+
+function buildWorkspaceUpdate(
+  workspace: WorkspaceRef | null | undefined,
+  expiresAt: Date | null,
+) {
+  if (workspace === undefined) return {};
+  if (workspace === null) {
+    return {
+      sandboxId: null,
+      workspaceExpiresAt: expiresAt,
+      retentionStatus: "inactive" as const,
+      checkpointSizeBytes: null,
+    };
+  }
+  return {
+    sandboxProvider: workspace.provider,
+    sandboxId: workspace.id,
+    workspaceExpiresAt: expiresAt,
+    retentionStatus: "active" as const,
+    checkpointSizeBytes: workspace.sizeBytes ?? null,
+  };
 }
 
 export async function findExpiredSessionWorkspaces(
@@ -382,7 +422,6 @@ export async function clearSessionWorkspace(
   const updated = await database
     .update(sessions)
     .set({
-      sandboxProvider: null,
       sandboxId: null,
       workspaceExpiresAt: null,
       retentionStatus: "inactive",
