@@ -186,9 +186,10 @@ export function createMicroSandboxProvider(
           await handle.stop();
         }
         await mkdir(snapshotDir, { recursive: true });
-        snapshot = await Snapshot.builder(`session-${randomUUID()}`)
+        snapshot = await Snapshot.builder(`session-${ref.id}`)
           .destDir(snapshotDir)
           .fromSandbox(ref.id)
+          .force()
           .recordIntegrity()
           .create();
       } catch (cause) {

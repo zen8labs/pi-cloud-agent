@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-const { snapshotRemove, sourceRemove } = vi.hoisted(() => ({
+const { snapshotForce, snapshotRemove, sourceRemove } = vi.hoisted(() => ({
   sourceRemove: vi.fn<() => Promise<void>>(),
+  snapshotForce: vi.fn(),
   snapshotRemove: vi.fn<() => Promise<void>>(),
 }));
 
@@ -26,12 +27,14 @@ vi.mock("microsandbox", () => {
   const snapshotBuilder = {
     destDir: () => snapshotBuilder,
     fromSandbox: () => snapshotBuilder,
+    force: snapshotForce,
     recordIntegrity: () => snapshotBuilder,
     create: vi.fn(async () => ({
       path: "/snapshots/session-test",
       sizeBytes: 1024n,
     })),
   };
+  snapshotForce.mockReturnValue(snapshotBuilder);
   const Snapshot = {
     builder: vi.fn(() => snapshotBuilder),
     remove: snapshotRemove,
@@ -70,6 +73,7 @@ describe("microSandbox checkpoints", () => {
     await expect(
       provider.finalizeSuspend({ provider: "microsandbox", id: "live-1" }, workspace),
     ).rejects.toThrow("source cleanup unavailable");
+    expect(snapshotForce).toHaveBeenCalled();
     expect(snapshotRemove).not.toHaveBeenCalled();
   });
 });
