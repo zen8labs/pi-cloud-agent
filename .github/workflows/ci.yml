@@ -103,6 +103,8 @@ jobs:
         run: pnpm --filter @pi-cloud-agent/web build
       - name: Sandbox runtime bundle
         run: pnpm --filter @pi-cloud-agent/runtime build
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
       - name: Linux amd64 runtime artifact
         run: docker buildx build --platform linux/amd64 --output type=local,dest=packages/runtime/dist -f packages/runtime/Dockerfile.runtime packages/runtime
       - name: Linux arm64 runtime artifact
