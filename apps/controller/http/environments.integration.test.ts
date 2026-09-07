@@ -148,6 +148,35 @@ describe("repository environments", () => {
     expect(executedSpec).toBeNull();
   });
 
+  it("does not expose provider-specific errors from image preflight", async () => {
+    const failingSandbox: SandboxProvider = {
+      ...sandbox,
+      async execute() {
+        throw new Error("e2b: template build failed for docker.io/acme/widgets:dev");
+      },
+    };
+    const failingApp = buildApp({
+      config: testConfig(),
+      database,
+      log: silentLogger(),
+      broker: createCredentialBroker(testConfig(), database, silentLogger()),
+      sandbox: failingSandbox,
+    });
+
+    const response = await failingApp.request("/environments/test", {
+      method: "POST",
+      headers: requestHeaders(),
+      body: JSON.stringify({
+        provider: "github",
+        repo: "acme/widgets",
+        imageRef: "docker.io/acme/widgets:dev",
+      }),
+    });
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ error: "could not test repository image" });
+  });
+
   it("archives a session and asks the provider to delete its checkpoint", async () => {
     const { session, run } = await seedSession(database, auth.userId);
     await completeRun(database, run.id, "succeeded");

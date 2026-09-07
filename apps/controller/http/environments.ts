@@ -80,10 +80,13 @@ async function testEnvironment(c: EnvironmentContext, deps: Pick<Deps, "sandbox"
       .slice(-20_000);
     return c.json({ ok: result.code === 0, code: result.code, output });
   } catch (error) {
-    return c.json(
-      { error: error instanceof Error ? error.message : "sandbox image test failed" },
-      502,
-    );
+    c.get("log").warn("repository image preflight failed", {
+      provider: request.provider,
+      repo: request.repo,
+      imageRef,
+      error,
+    });
+    return c.json({ error: "could not test repository image" }, 502);
   }
 }
 
