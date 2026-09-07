@@ -206,11 +206,12 @@ function EnvironmentEditor({
           spellCheck={false}
         />
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
-          Enter a public Docker or OCI image that already contains the language runtimes and
-          tools your project needs. It must be able to run the app and provide a writable
-          workspace with Node.js, git, and GitHub CLI. Use <strong>Test image</strong> to check
-          it before saving. Each new session for this repository starts an isolated sandbox from
-          this image. Leave blank to use the default environment.
+          Enter a public Docker image address, such as one from Docker Hub or GHCR, that already
+          contains the language runtimes and tools your project needs. It must be able to run
+          the app and provide a writable workspace with Node.js, git, and the GitHub
+          command-line tool. Use <strong>Test image</strong> to check it before saving. Each new
+          session for this repository starts an isolated sandbox from this image. Leave blank to
+          use the default environment.
         </p>
       </div>
       {testResult && <ImageTestResult result={testResult} />}
