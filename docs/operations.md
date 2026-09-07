@@ -69,11 +69,13 @@ docker run --rm --entrypoint bash pi-cloud-agent:local -lc \
 
 Configure an OCI image (microSandbox) or E2B template per connected repository in Settings > Environments. Use **Test image** to run the runtime-contract check in a disposable sandbox before saving it. The image must provide `/app/run.js`, `/app/package.json` with its runtime dependencies (including `tsx`), `/workspace`, Node.js, git, gh, and an unprivileged `node` user. Leaving it empty uses the bundled image. Dependencies and toolchains are built into the image; no arbitrary setup script runs after checkout.
 
-Migration `0018_session_checkpoints` removes the former setup-script column and clears those mappings because a script cannot be converted safely into an image reference. Migration `0019_nostalgic_krista_starr` adds the per-session image pin used for deterministic cold resumes. Re-enter image mappings in Settings after upgrading.
+Migration `0018_session_checkpoints` removes the former setup-script column and clears those mappings because a script cannot be converted safely into an image reference. Migration `0019_nostalgic_krista_starr` adds the per-session image pin used for deterministic cold resumes. Migration `0020_wise_black_bolt` adds durable session teardown claims and normalizes legacy empty image sentinels. Re-enter image mappings in Settings after upgrading.
 
 After each completed session turn, microSandbox stores an integrity-checked local snapshot and E2B pauses the filesystem. The previous checkpoint is deleted after its replacement is durable, so a session keeps one warm artifact. Warm follow-ups resume that checkpoint without cloning. Checkpoints expire after `SESSION_WORKSPACE_RETENTION_SECONDS`; the reconciler deletes them and marks the session inactive, so the next turn cold-clones from the repository image while restoring Pi history. See [resumability.md](resumability.md).
 
 The first provisioning also pins the resolved repository image on the session. Changing the Settings mapping therefore affects new sessions; an existing session keeps its original image if it ever needs a cold resume.
+
+Archive and retention expiry claim the session before provider cleanup. A follow-up submitted during cleanup receives `409` and can be retried after the operation finishes, which prevents a cold start from racing deletion of the previous checkpoint.
 
 Session artifacts are filesystem checkpoints rather than full Docker image commits. Keep `MICROSANDBOX_SNAPSHOT_DIR` on durable storage, monitor the `checkpoint_size_bytes` column, and use archive or retention expiry as the normal reclamation paths. The controller keeps one checkpoint per session and deletes the old one only after the replacement is durable. If a provider delete temporarily fails during replacement, the new checkpoint remains usable and the old artifact is reported in controller logs for provider-side/manual cleanup.
 

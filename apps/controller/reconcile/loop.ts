@@ -13,6 +13,7 @@ import {
   requeueRun,
 } from "../db/runs";
 import type { RunRow, SessionRow } from "../db/schema";
+import { claimSessionOperation, releaseSessionOperation } from "../db/session-operations";
 import {
   clearSessionWorkspace,
   findExpiredSessionWorkspaces,
@@ -262,8 +263,11 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
 
   async function expireWorkspace(session: SessionRow): Promise<void> {
     if (!session.sandboxId || !session.sandboxProvider) return;
-    const current = await getSession(database, session.id);
-    if (!current || current.activeRunId !== null || current.sandboxId !== session.sandboxId) {
+    const operationAt = await claimSessionOperation(database, session.id, "expiring", {
+      activeRunId: null,
+      workspaceId: session.sandboxId,
+    });
+    if (!operationAt) {
       return;
     }
     const provider =
@@ -284,9 +288,18 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
       // Keep the durable reference so the next reconciliation pass can retry.
       // Clearing it here would mark the session inactive while leaking the
       // provider artifact permanently.
+      await releaseSessionOperation(database, session.id, "expiring", operationAt);
       return;
     }
-    await clearSessionWorkspace(database, session.id, session.sandboxId, null);
+    const cleared = await clearSessionWorkspace(
+      database,
+      session.id,
+      session.sandboxId,
+      null,
+      "expiring",
+      operationAt,
+    );
+    if (!cleared) await releaseSessionOperation(database, session.id, "expiring", operationAt);
   }
 
   async function drainQueue(): Promise<void> {

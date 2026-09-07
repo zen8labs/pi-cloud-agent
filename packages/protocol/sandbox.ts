@@ -12,6 +12,8 @@ import type { Secret } from "./secret";
  */
 export interface SandboxProvider {
   readonly name: string;
+  /** Resolve an empty or provider-specific image reference before pinning it. */
+  resolveImage(imageRef: string): Promise<string>;
   create(spec: SandboxSpec): Promise<SandboxRef>;
   /** Run a disposable command and return its output; used for preflight checks. */
   execute?(spec: SandboxSpec): Promise<SandboxExecutionResult>;

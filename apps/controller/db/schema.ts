@@ -24,6 +24,8 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
+export type SessionOperation = "archiving" | "expiring";
+
 /**
  * Users and web sessions own the application identity boundary; runs and
  * sessions own execution state; connections own encrypted VCS tokens and
@@ -179,6 +181,10 @@ export const sessions = pgTable(
     lastActivityAt: timestamptz("last_activity_at").notNull().defaultNow(),
     /** Provider-reported checkpoint size for quota/retention accounting. */
     checkpointSizeBytes: bigint("checkpoint_size_bytes", { mode: "number" }),
+
+    /** Durable cleanup operation that blocks new turns until it completes. */
+    sessionOperation: text("session_operation").$type<SessionOperation>(),
+    sessionOperationAt: timestamptz("session_operation_at"),
 
     createdAt: timestamptz("created_at").notNull().defaultNow(),
     updatedAt: timestamptz("updated_at").notNull().defaultNow(),

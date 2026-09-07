@@ -57,6 +57,10 @@ export function createMicroSandboxProvider(
   return {
     name: "microsandbox",
 
+    async resolveImage(imageRef) {
+      return imageRef || defaultImage;
+    },
+
     async execute(spec: SandboxSpec): Promise<SandboxExecutionResult> {
       const id = `pi-test-${randomUUID().slice(0, 12)}`;
       let sandbox: Sandbox | undefined;
@@ -175,7 +179,7 @@ export function createMicroSandboxProvider(
     },
 
     async suspend(ref) {
-      let snapshot: Snapshot | undefined;
+      let snapshot: Snapshot;
       try {
         const handle = await Sandbox.get(ref.id);
         if (handle.status !== "stopped" && handle.status !== "crashed") {
@@ -187,15 +191,17 @@ export function createMicroSandboxProvider(
           .fromSandbox(ref.id)
           .recordIntegrity()
           .create();
-        await removePersistedSandbox(ref.id);
       } catch (cause) {
-        if (snapshot)
-          await Snapshot.remove(snapshot.path, { force: true }).catch(() => undefined);
         throw new SandboxError(`microsandbox: could not suspend workspace "${ref.id}"`, {
           retryable: isRetryable(cause),
           cause,
         });
       }
+      // Snapshot creation is the durability boundary. If removing the stopped
+      // source sandbox fails, keep the valid snapshot and return it so the
+      // session can still resume without losing uncommitted work. The source is
+      // no longer running; provider lifecycle cleanup can reclaim it later.
+      await removePersistedSandbox(ref.id).catch(() => undefined);
       return {
         provider: "microsandbox",
         id: snapshot.path,

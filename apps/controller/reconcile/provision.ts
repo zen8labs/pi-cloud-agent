@@ -111,7 +111,14 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
       run.provider,
       run.repoFullName,
     );
-    const imageRef = session?.sandboxImageRef ?? environment?.imageRef ?? "";
+    const sessionSandbox =
+      session?.sandboxProvider && session.sandboxProvider !== sandbox.name
+        ? (deps.createProvider?.(session.sandboxProvider) ?? sandbox)
+        : sandbox;
+    const requestedImageRef = session?.sandboxImageRef || environment?.imageRef || "";
+    const imageRef = session?.sandboxImageRef
+      ? session.sandboxImageRef
+      : await sessionSandbox.resolveImage(requestedImageRef);
     if (session && session.sandboxImageRef === null) {
       await pinSessionSandboxImage(database, session.id, imageRef);
     }
@@ -123,10 +130,6 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
       secrets,
       command: `node --import tsx ${SANDBOX_PATHS.app}/run.js`,
     };
-    const sessionSandbox =
-      session?.sandboxProvider && session.sandboxProvider !== sandbox.name
-        ? (deps.createProvider?.(session.sandboxProvider) ?? sandbox)
-        : sandbox;
     const ref = await startSandbox(session, spec, sessionSandbox, database, log);
 
     // First durable write after the machine exists. Until this commits, a crash

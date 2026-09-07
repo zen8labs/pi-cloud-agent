@@ -6,9 +6,9 @@ import {
   type Trigger,
   type WorkspaceRef,
 } from "@pi-cloud-agent/protocol";
-import { and, desc, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, lt, or, type SQL, sql } from "drizzle-orm";
 import { CHANNELS, type Database, notify } from "./client";
-import { type RunRow, runs, type SessionRow, sessions } from "./schema";
+import { type RunRow, runs, type SessionOperation, type SessionRow, sessions } from "./schema";
 
 export interface CreateSessionInput {
   userId?: string | null;
@@ -27,6 +27,13 @@ export class SessionNotFoundError extends Error {
   constructor() {
     super("session not found");
     this.name = "SessionNotFoundError";
+  }
+}
+
+export class SessionBusyError extends Error {
+  constructor() {
+    super("session cleanup is in progress; retry shortly");
+    this.name = "SessionBusyError";
   }
 }
 
@@ -96,6 +103,7 @@ export async function createSessionTurn(
       .limit(1)
       .for("update");
     if (!session) throw new SessionNotFoundError();
+    if (session.sessionOperation) throw new SessionBusyError();
 
     const turnNumber = session.turnCount + 1;
     const startsImmediately = session.activeRunId === null;
@@ -192,7 +200,13 @@ export async function saveSessionCheckpoint(
   const updated = await database
     .update(sessions)
     .set({ agentCheckpoint: content, lastActivityAt: new Date(), updatedAt: new Date() })
-    .where(and(eq(sessions.id, sessionId), eq(sessions.activeRunId, run.id)))
+    .where(
+      and(
+        eq(sessions.id, sessionId),
+        eq(sessions.activeRunId, run.id),
+        isNull(sessions.sessionOperation),
+      ),
+    )
     .returning({ id: sessions.id });
   return updated.length > 0;
 }
@@ -206,7 +220,13 @@ export async function pinSessionSandboxImage(
   const updated = await database
     .update(sessions)
     .set({ sandboxImageRef: imageRef, updatedAt: new Date() })
-    .where(and(eq(sessions.id, sessionId), isNull(sessions.sandboxImageRef)))
+    .where(
+      and(
+        eq(sessions.id, sessionId),
+        isNull(sessions.sandboxImageRef),
+        isNull(sessions.sessionOperation),
+      ),
+    )
     .returning({ id: sessions.id });
   return updated.length > 0;
 }
@@ -227,6 +247,7 @@ export async function saveSessionDiffBaseSha(
         eq(sessions.id, sessionId),
         eq(sessions.activeRunId, run.id),
         isNull(sessions.diffBaseSha),
+        isNull(sessions.sessionOperation),
       ),
     )
     .returning({ id: sessions.id });
@@ -243,12 +264,17 @@ export async function parkSession(
   if (!sessionId) return false;
   const result = await database.transaction(async (tx) => {
     const [owner] = await tx
-      .select({ activeRunId: sessions.activeRunId })
+      .select({
+        activeRunId: sessions.activeRunId,
+        sessionOperation: sessions.sessionOperation,
+      })
       .from(sessions)
       .where(eq(sessions.id, sessionId))
       .limit(1)
       .for("update");
-    if (owner?.activeRunId !== run.id) return { parked: false, nextRunId: null };
+    if (!ownsParkLease(owner, run.id)) {
+      return { parked: false, nextRunId: null };
+    }
 
     const [next] = await tx
       .select({ id: runs.id })
@@ -280,7 +306,13 @@ export async function parkSession(
         ...workspaceUpdate,
         updatedAt: new Date(),
       })
-      .where(and(eq(sessions.id, sessionId), eq(sessions.activeRunId, run.id)))
+      .where(
+        and(
+          eq(sessions.id, sessionId),
+          eq(sessions.activeRunId, run.id),
+          isNull(sessions.sessionOperation),
+        ),
+      )
       .returning({ id: sessions.id });
     if (updated.length === 0) return { parked: false, nextRunId: null };
     await tx
@@ -291,6 +323,13 @@ export async function parkSession(
   });
   if (result.nextRunId) await notify(database, CHANNELS.runQueued, result.nextRunId);
   return result.parked;
+}
+
+function ownsParkLease(
+  owner: { activeRunId: string | null; sessionOperation: SessionOperation | null } | undefined,
+  runId: string,
+): boolean {
+  return owner?.activeRunId === runId && owner.sessionOperation === null;
 }
 
 export async function findExpiredSessionWorkspaces(
@@ -306,6 +345,7 @@ export async function findExpiredSessionWorkspaces(
         isNotNull(sessions.sandboxId),
         isNotNull(sessions.workspaceExpiresAt),
         lt(sessions.workspaceExpiresAt, new Date()),
+        or(isNull(sessions.sessionOperation), eq(sessions.sessionOperation, "expiring")),
       ),
     )
     .limit(limit);
@@ -335,15 +375,10 @@ export async function clearSessionWorkspace(
   sessionId: string,
   workspaceId: string,
   expectedActiveRunId?: string | null,
+  expectedOperation?: SessionOperation | null,
+  expectedOperationAt?: Date,
 ): Promise<boolean> {
-  const head =
-    expectedActiveRunId === undefined
-      ? []
-      : [
-          expectedActiveRunId === null
-            ? isNull(sessions.activeRunId)
-            : eq(sessions.activeRunId, expectedActiveRunId),
-        ];
+  const guards = sessionGuards(expectedActiveRunId, expectedOperation, expectedOperationAt);
   const updated = await database
     .update(sessions)
     .set({
@@ -354,7 +389,7 @@ export async function clearSessionWorkspace(
       checkpointSizeBytes: null,
       updatedAt: new Date(),
     })
-    .where(and(eq(sessions.id, sessionId), eq(sessions.sandboxId, workspaceId), ...head))
+    .where(and(eq(sessions.id, sessionId), eq(sessions.sandboxId, workspaceId), ...guards))
     .returning({ id: sessions.id });
   return updated.length > 0;
 }
@@ -367,26 +402,41 @@ export async function deleteSession(
   expectedActiveRunId?: string | null,
   /** Prevent an archive from deleting a turn queued after its initial read. */
   expectedLatestRunId?: string,
+  expectedOperation?: SessionOperation | null,
+  expectedOperationAt?: Date,
 ): Promise<boolean> {
   const ownership = userId ? [eq(sessions.userId, userId)] : [];
-  const head =
-    expectedActiveRunId === undefined
-      ? []
-      : [
-          expectedActiveRunId === null
-            ? isNull(sessions.activeRunId)
-            : eq(sessions.activeRunId, expectedActiveRunId),
-        ];
+  const guards = sessionGuards(expectedActiveRunId, expectedOperation, expectedOperationAt);
   const deleted = await database
     .delete(sessions)
     .where(
       and(
         eq(sessions.id, sessionId),
         ...ownership,
-        ...head,
+        ...guards,
         ...(expectedLatestRunId ? [eq(sessions.latestRunId, expectedLatestRunId)] : []),
       ),
     )
     .returning({ id: sessions.id });
   return deleted.length > 0;
+}
+
+function sessionGuards(
+  expectedActiveRunId: string | null | undefined,
+  expectedOperation: SessionOperation | null | undefined,
+  expectedOperationAt: Date | undefined,
+): SQL[] {
+  const operation =
+    expectedOperation === undefined || expectedOperation === null
+      ? isNull(sessions.sessionOperation)
+      : eq(sessions.sessionOperation, expectedOperation);
+  const operationAt = expectedOperationAt
+    ? [eq(sessions.sessionOperationAt, expectedOperationAt)]
+    : [];
+  if (expectedActiveRunId === undefined) return [operation, ...operationAt];
+  const activeRun =
+    expectedActiveRunId === null
+      ? isNull(sessions.activeRunId)
+      : eq(sessions.activeRunId, expectedActiveRunId);
+  return [activeRun, operation, ...operationAt];
 }

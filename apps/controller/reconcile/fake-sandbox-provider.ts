@@ -24,6 +24,9 @@ export function fakeProvider(
   const deleted: string[] = [];
   return {
     name: "fake",
+    async resolveImage(imageRef) {
+      return imageRef || "fake:default";
+    },
     created,
     resumeSpecs,
     stopped,

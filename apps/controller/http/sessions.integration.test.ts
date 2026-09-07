@@ -8,8 +8,15 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { Database } from "../db/client";
 import { completeRun, getRun } from "../db/runs";
 import { getSession, parkSession } from "../db/sessions";
-import { bindTestApp, seedTestUser, testConfig, withTestModel } from "../test-support";
-import type { createApp } from "./app";
+import { fakeProvider } from "../reconcile/fake-sandbox-provider";
+import {
+  bindTestApp,
+  seedTestUser,
+  silentLogger,
+  testConfig,
+  withTestModel,
+} from "../test-support";
+import { createApp } from "./app";
 
 let database: Database;
 let app: ReturnType<typeof createApp>;
@@ -240,5 +247,60 @@ describe("durable session HTTP contract", () => {
     expect(archive.status).toBe(409);
     const stored = await getSession(database, session.id);
     expect(stored?.latestRunId).not.toBe(run.id);
+  });
+
+  it("serializes archive cleanup against a concurrent follow-up", async () => {
+    const session = await json<SessionSummary>(
+      await send("POST", "/sessions", {
+        repo: "acme/widgets",
+        prompt: "Archive race",
+      }),
+    );
+    const run = await getRun(database, session.latestRunId);
+    if (!run) throw new Error("session run missing");
+    await completeRun(database, run.id, "succeeded");
+    await parkSession(database, run, { provider: "fake", id: "checkpoint-archive" }, null);
+
+    const provider = fakeProvider();
+    let cleanupStarted = () => {};
+    const cleanupEntered = new Promise<void>((resolve) => {
+      cleanupStarted = resolve;
+    });
+    let releaseCleanup = () => {};
+    const cleanupReleased = new Promise<void>((resolve) => {
+      releaseCleanup = resolve;
+    });
+    provider.deleteWorkspace = async () => {
+      cleanupStarted();
+      await cleanupReleased;
+    };
+    const raceApp = createApp({
+      config: testConfig(),
+      database,
+      log: silentLogger(),
+      sandbox: provider,
+      createSandboxProvider: () => provider,
+    });
+    const archive = raceApp.request(`/sessions/${session.id}`, {
+      method: "DELETE",
+      headers: { Cookie: `pca_session=${testCookie}` },
+    });
+    await cleanupEntered;
+
+    const followUp = raceApp.request(`/sessions/${session.id}/turns`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `pca_session=${testCookie}`,
+      },
+      body: JSON.stringify(
+        withTestModel({ prompt: "Must not start during archive" }, testModelConnectionId),
+      ),
+    });
+    expect((await followUp).status).toBe(409);
+
+    releaseCleanup();
+    expect((await archive).status).toBe(200);
+    expect(await getSession(database, session.id)).toBeNull();
   });
 });

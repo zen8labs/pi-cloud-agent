@@ -57,6 +57,8 @@ export function createE2BProvider(
   return {
     name: "e2b",
 
+    resolveImage: (imageRef) => resolveTemplate(imageRef),
+
     async execute(spec: SandboxSpec): Promise<SandboxExecutionResult> {
       const envs = flattenSecrets(spec);
       const timeoutMs = spec.timeoutSeconds * 1000;

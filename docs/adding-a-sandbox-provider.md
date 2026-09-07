@@ -5,6 +5,8 @@ A sandbox provider answers two questions: *where does this turn's compute come f
 ```ts
 export interface SandboxProvider {
   readonly name: string;
+  /** Resolve the configured or provider-default base image before a session pins it. */
+  resolveImage(imageRef: string): Promise<string>;
   create(spec: SandboxSpec): Promise<SandboxRef>;
   execute?(spec: SandboxSpec): Promise<SandboxExecutionResult>;
   resume(ref: WorkspaceRef, spec: SandboxSpec): Promise<SandboxRef>;
@@ -15,6 +17,8 @@ export interface SandboxProvider {
 ```
 
 `create`/`stop` are the standalone lifecycle. `suspend`/`resume`/`deleteWorkspace` are the durable-session lifecycle. A backend may implement the latter with a filesystem-only pause, snapshot, archive, or detached volume. The optional `execute` method powers the Settings image preflight and must run a disposable foreground command, return its output, and reclaim the machine before returning. The opaque `WorkspaceRef` (optionally including `sizeBytes`) is the only provider-specific state stored by the controller.
+
+`resolveImage` turns the empty image reference into the provider's effective default and may materialize a public OCI reference into a provider-native template. The controller stores that resolved value on the session before the first sandbox is created, so later configuration changes cannot silently alter a cold resume.
 
 ## 1. Write it
 
@@ -42,6 +46,9 @@ export function createMyBackendProvider(
 
   return {
     name: "my-backend",
+    async resolveImage(imageRef) {
+      return imageRef || "my-backend-default";
+    },
 
     async create(spec: SandboxSpec) {
       const envs = { ...spec.env };
@@ -104,6 +111,8 @@ Select it with `SANDBOX_PROVIDER=my-backend`. Nothing else in the system changes
 
 **`deleteWorkspace` is idempotent.** Expiry and a concurrent follow-up can race. Deleting an already-missing workspace must resolve.
 
+**`resolveImage` is deterministic for a session.** Return the provider-native reference that should be pinned for future cold starts; do not return an empty sentinel.
+
 **`suspend` retains filesystem state, not credentials in process memory.** A later turn receives fresh secrets. If a provider cannot discard memory independently, its implementation needs a snapshot or volume boundary that does.
 
 **`resume` starts exactly one new runtime command.** Report a missing or expired reference with `WorkspaceNotFoundError`; the controller will clear it and cold-create from the durable Pi checkpoint. Do not classify a missing workspace as a generic permanent failure.
@@ -132,7 +141,7 @@ If you ever find yourself needing an application route, polling bridge, or agent
 
 ## The image
 
-`spec.image` is provider-specific: an E2B template name, a Docker/OCI tag, a Modal image reference. An empty string means "use this provider's configured default". The E2B implementation turns public OCI references into a cached template before creating a sandbox.
+`spec.image` is provider-specific: an E2B template name, a Docker/OCI tag, a Modal image reference. `resolveImage("")` must return the provider's configured default. The E2B implementation turns public OCI references into a cached template before creating a sandbox, while microSandbox passes the Docker reference directly to its local runtime.
 
 Whatever it points at needs Node, `git`, `gh`, the `tsx` loader, `/app/run.js`, and `/app/package.json` with the runtime dependencies. `packages/runtime/Dockerfile.sandbox` is the reference; a provider that consumes plain Dockerfiles can use it unchanged.
 

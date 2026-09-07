@@ -27,6 +27,9 @@ let executedSpec: SandboxSpec | null = null;
 const deletedWorkspaces: string[] = [];
 const sandbox: SandboxProvider = {
   name: "fake",
+  async resolveImage(imageRef) {
+    return imageRef || "fake:default";
+  },
   async execute(spec) {
     executedSpec = spec;
     return { code: 0, stdout: "node v22.23.2\nPython 3.11.2", stderr: "" };

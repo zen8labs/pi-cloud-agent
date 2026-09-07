@@ -141,6 +141,13 @@
       "when": 1788413287069,
       "tag": "0019_nostalgic_krista_starr",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788756748560,
+      "tag": "0020_wise_black_bolt",
+      "breakpoints": true
     }
   ]
 }

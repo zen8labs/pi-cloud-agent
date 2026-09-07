@@ -26,6 +26,8 @@ Custom images must include the runtime contract (`/app/run.js`, its `/app/packag
 
 Every transition is one guarded SQL statement. A transition that loses a race updates zero rows instead of overwriting another worker's decision. There is no in-memory run state: provisioning claims a row, creates a sandbox, records its id, and returns; callbacks and the reconciler write the later facts.
 
+Session teardown uses a durable `session_operation` claim. Archive and expiry claim the row before deleting a provider checkpoint, and follow-up turns, checkpoint writes, and parking refuse to proceed while that claim is held. The claim is released on provider failure and stale claims can be retried, so a controller crash cannot leave a session permanently busy. The guarded delete or clear then verifies the operation and the previously observed run/workspace ids before changing Postgres.
+
 The reconciler (`apps/controller/reconcile/loop.ts`) asks one question per branch:
 
 | Durable condition | Action |
@@ -73,7 +75,7 @@ Each turn receives fresh callback, forge, model, and plugin credentials. The pro
 ## Failure behavior
 
 - A missing or corrupt checkpoint clears the stale reference and cold-starts from the repository image while retaining Pi history.
-- A suspension failure destroys the live sandbox, clears the session reference, and leaves the Pi checkpoint available for a cold continuation.
+- A suspension failure destroys the live sandbox, clears the session reference, and leaves the Pi checkpoint available for a cold continuation. If microSandbox has already created a valid snapshot but cannot remove the stopped source VM, it keeps and returns that snapshot; the source is safe to reclaim later and the session does not fall back to a cold start.
 - A runtime failure is terminal; the reconciler still attempts to preserve its filesystem checkpoint.
 - A run is not resumable mid-turn. The next turn continues from the last completed Pi checkpoint.
 - Provider stop/delete operations are idempotent; provider timeouts are the final resource backstop.
@@ -92,4 +94,4 @@ The SQL race/ownership properties are covered by `apps/controller/db/sessions.in
 
 ## Provider contract
 
-`SandboxProvider.suspend` returns an opaque `WorkspaceRef` (optionally with `sizeBytes`), `resume` restores it, and `deleteWorkspace` permanently removes it. The controller never parses provider ids or assumes Docker/OCI details. See [adding-a-sandbox-provider.md](adding-a-sandbox-provider.md).
+`SandboxProvider.resolveImage` returns the effective provider-native base image for a requested mapping, including the provider default for an empty mapping. `suspend` returns an opaque `WorkspaceRef` (optionally with `sizeBytes`), `resume` restores it, and `deleteWorkspace` permanently removes it. The controller never parses provider ids or assumes Docker/OCI details. See [adding-a-sandbox-provider.md](adding-a-sandbox-provider.md).

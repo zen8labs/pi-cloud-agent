@@ -1,8 +1,9 @@
 # @pi-cloud-agent/sandbox
 
-Where a run's compute comes from. The default backend is local microSandbox; hosted E2B remains available as an explicit alternative. Standalone runs use two methods:
+Where a run's compute comes from. The default backend is local microSandbox; hosted E2B remains available as an explicit alternative. Standalone runs use image resolution plus two lifecycle methods:
 
 ```ts
+resolveImage(imageRef: string): Promise<string>
 create(spec: SandboxSpec): Promise<SandboxRef>
 stop(ref: SandboxRef): Promise<void>
 execute?(spec: SandboxSpec): Promise<SandboxExecutionResult>
@@ -11,6 +12,8 @@ execute?(spec: SandboxSpec): Promise<SandboxExecutionResult>
 It stays this small because of one constraint: **the sandbox is outbound-only.** The controller never dials in, so no backend has to expose port forwarding, tunnels, or reachability. Snapshots and warm pools are optimizations *behind* these two methods, not additions to them.
 
 `execute` is optional and is used only by the Settings preflight test. It creates a disposable sandbox, runs one foreground command, returns bounded output, and destroys the machine. It is not a general controller-side shell or an inbound channel into agent workspaces.
+
+`resolveImage` maps a repository setting to the provider-native image or template and returns the configured default for an empty setting. The controller pins this resolved value on the session before the first create, so a later settings change cannot change an existing session's cold resume.
 
 Durable chat sessions additionally use `resume`, `suspend`, and `deleteWorkspace`. These remain provider control-plane operations; they do not open an inbound application connection to the sandbox. See [../../docs/resumability.md](../../docs/resumability.md).
 
@@ -32,6 +35,7 @@ Durable chat sessions additionally use `resume`, `suspend`, and `deleteWorkspace
 - **`resume` starts one fresh runtime process.** If the opaque workspace no longer exists, throw `WorkspaceNotFoundError` so the controller can continue cold from the Pi checkpoint.
 - **`suspend` retains filesystem state, not process memory.** Per-run credentials must not survive into the next turn.
 - **`deleteWorkspace` is idempotent.** Expiry can race another reconciler pass.
+- **`resolveImage` returns a non-empty provider-native reference.** The controller persists it on the session for deterministic cold resumes.
 - **Classify failures with `SandboxError.retryable`.** `true` returns the run to the queue (up to three attempts); `false` fails it immediately. Getting this wrong means either burning attempts on a missing image or failing runs on a transient blip.
 - **Secrets are opened here and only here.** `spec.secrets` holds `Secret` objects; `expose()` is called at the boundary where they must become plain strings to cross into the machine.
 - **Never derive behavior from `spec.runId`.** It is correlation only. A provider that special-cases a run is a provider that cannot be swapped.

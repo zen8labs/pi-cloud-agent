@@ -4,9 +4,9 @@ import { describe, expect, it } from "vitest";
 import type { Database } from "../db/client";
 import { saveRepositorySandboxImage } from "../db/environments";
 import { appendEvent, attachSandbox, claimNextRun, completeRun, getRun } from "../db/runs";
+import type { RunRow } from "../db/schema";
 import { runs } from "../db/schema";
 import { createSessionTurn, getSession, parkSession } from "../db/sessions";
-import type { CredentialBroker } from "../secrets/broker";
 import {
   bindTestDatabase,
   seedRun,
@@ -14,6 +14,7 @@ import {
   seedTestUser,
   silentLogger,
   testConfig,
+  testCredentialBroker,
 } from "../test-support";
 import { fakeProvider } from "./fake-sandbox-provider";
 import { createReconciler, type Reconciler } from "./loop";
@@ -25,31 +26,6 @@ bindTestDatabase((value) => {
   database = value;
 });
 
-const broker: CredentialBroker = {
-  async mintForRepository() {
-    return { secrets: {}, env: {} };
-  },
-  async mintForRun() {
-    return {
-      model: {
-        connectionId: "00000000-0000-4000-8000-000000000099",
-        authType: "api_key",
-        provider: "test-provider",
-        name: "test-model",
-        api: "openai-completions",
-        baseUrl: "https://model.example.test/v1",
-        contextWindow: 16_384,
-        maxTokens: 2_048,
-        apiKey: "test-key",
-        authJson: null,
-        thinkingLevels: ["off", "medium"],
-      },
-      secrets: {},
-      env: {},
-    };
-  },
-};
-
 function reconciler(
   provider: SandboxProvider,
   options: { silenceTimeoutSeconds?: number; claimLeaseSeconds?: number } = {},
@@ -57,7 +33,7 @@ function reconciler(
   return createReconciler({
     config: testConfig({ SANDBOX_PROVIDER: "fake" }),
     database,
-    broker,
+    broker: testCredentialBroker,
     log: silentLogger(),
     createProvider: () => provider,
     ...options,
@@ -68,6 +44,12 @@ function reconciler(
 async function tick(loop: Reconciler): Promise<void> {
   await loop.tick();
   await loop.drain();
+}
+
+async function completeAndReclaim(loop: Reconciler, run: RunRow): Promise<void> {
+  await tick(loop);
+  await completeRun(database, run.id, "succeeded");
+  await tick(loop);
 }
 
 describe("provisioning", () => {
@@ -198,9 +180,7 @@ describe("completion and teardown", () => {
       return { provider: "fake", id: `checkpoint-${provider.suspended.length}` };
     };
 
-    await tick(loop);
-    await completeRun(database, run.id, "succeeded");
-    await tick(loop);
+    await completeAndReclaim(loop, run);
     expect((await getSession(database, session.id))?.sandboxId).toBe("checkpoint-1");
 
     const followUp = await createSessionTurn(
@@ -312,8 +292,7 @@ describe("completion and teardown", () => {
     const provider = fakeProvider();
     const loop = reconciler(provider);
 
-    await tick(loop);
-    await completeRun(database, run.id, "succeeded");
+    await completeAndReclaim(loop, run);
     await tick(loop);
 
     expect(provider.stopped).toEqual(["sb-1"]);
@@ -468,7 +447,7 @@ describe("concurrency", () => {
     const loop = createReconciler({
       config: testConfig({ SANDBOX_PROVIDER: "fake" }),
       database,
-      broker,
+      broker: testCredentialBroker,
       log: silentLogger(),
       createProvider: () => provider,
       maxConcurrentProvisions: 2,

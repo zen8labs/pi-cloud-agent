@@ -8,6 +8,7 @@ import {
 import { type Context, Hono } from "hono";
 import { getRun } from "../db/runs";
 import type { RunRow, SessionRow } from "../db/schema";
+import { claimSessionOperation, releaseSessionOperation } from "../db/session-operations";
 import {
   createSessionTurn,
   createSessionWithRun,
@@ -15,6 +16,7 @@ import {
   getSession,
   listSessionRuns,
   listSessions,
+  SessionBusyError,
   SessionNotFoundError,
 } from "../db/sessions";
 import type { resolveLlmModel } from "../llm/connections";
@@ -155,9 +157,18 @@ async function archiveSession(
   ) {
     return c.json({ error: "sandbox cleanup is not available" }, 503);
   }
+  const operationAt = await claimSessionOperation(database, session.id, "archiving", {
+    activeRunId: activeRun?.id ?? null,
+    latestRunId: session.latestRunId,
+    userId: user.id,
+  });
+  if (!operationAt) {
+    return c.json({ error: "session changed while it was being archived; retry" }, 409);
+  }
   try {
     await cleanupSessionSandbox(deps, session, activeRun);
   } catch (error) {
+    await releaseSessionOperation(database, session.id, "archiving", operationAt);
     c.get("log").error("session checkpoint cleanup failed", { sessionId: session.id, error });
     return c.json({ error: "could not delete session checkpoint" }, 502);
   }
@@ -167,8 +178,11 @@ async function archiveSession(
     user.id,
     activeRun?.id ?? null,
     session.latestRunId,
+    "archiving",
+    operationAt,
   );
   if (!deleted) {
+    await releaseSessionOperation(database, session.id, "archiving", operationAt);
     return c.json({ error: "session changed while it was being archived; retry" }, 409);
   }
   return c.json({ ok: true });
@@ -207,7 +221,7 @@ async function cleanupSessionSandbox(
 
 type SessionTurnResult =
   | { ok: true; run: RunRow }
-  | { ok: false; error: string; status: 404 | 422 };
+  | { ok: false; error: string; status: 404 | 409 | 422 };
 
 async function queueSessionTurn(
   database: Parameters<typeof getRun>[0],
@@ -248,6 +262,9 @@ async function queueSessionTurn(
   } catch (error) {
     if (error instanceof SessionNotFoundError) {
       return { ok: false, error: error.message, status: 404 };
+    }
+    if (error instanceof SessionBusyError) {
+      return { ok: false, error: error.message, status: 409 };
     }
     throw error;
   }
