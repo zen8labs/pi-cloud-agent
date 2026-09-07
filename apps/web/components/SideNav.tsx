@@ -201,7 +201,7 @@ function SessionGroup({
           <div
             key={session.id}
             className={cn(
-              "history-link group",
+              "history-link group overflow-hidden",
               pathname === `/sessions/${session.id}` && "is-active",
             )}
           >
@@ -223,7 +223,7 @@ function SessionGroup({
             {session.status !== "idle" && (
               <span className="size-1.5 shrink-0 animate-pulse-dot rounded-full bg-emerald-500" />
             )}
-            <div className="flex shrink-0 items-center gap-0.5 border-l border-transparent pl-1 opacity-0 transition-opacity group-hover:border-border/70 group-hover:opacity-100 group-focus-within:border-border/70 group-focus-within:opacity-100">
+            <div className="flex w-0 shrink-0 items-center gap-0.5 overflow-hidden border-l border-transparent bg-inherit pl-1 opacity-0 transition-[width,opacity,border-color] duration-150 group-hover:w-14 group-hover:border-border/70 group-hover:opacity-100 group-focus-within:w-14 group-focus-within:border-border/70 group-focus-within:opacity-100">
               <button
                 type="button"
                 aria-label={session.pinned ? "Unpin session" : "Pin session"}
