@@ -83,5 +83,3 @@ For E2B, select `SANDBOX_PROVIDER=e2b` and use `pnpm sandbox:template` instead.
 The repository must be public or cloneable by the configured forge credential. Without `LIVE_TEST_REPO`, the paid test is skipped.
 
 See [operations.md](operations.md) for what a healthy run looks like.
-
-Use [e2e-custom-image-test-plan.md](e2e-custom-image-test-plan.md) for the repeatable live workflow that proves image selection, warm and cold session resume, retention, archive cleanup, provider abstraction, and hosted-image materialization.

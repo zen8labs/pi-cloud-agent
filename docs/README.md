@@ -19,7 +19,6 @@ None of these require touching the controller.
 | [secrets.md](secrets.md) | credentials, tokens, and anything that gets logged |
 | [model-connections.md](model-connections.md) | per-user model endpoints, Pi OAuth, and the vault migration seam |
 | [testing.md](testing.md) | what deserves a test, and the three test projects |
-| [e2e-custom-image-test-plan.md](e2e-custom-image-test-plan.md) | repeatable end-to-end coverage for repository images and session checkpoints |
 | [operations.md](operations.md) | running it, debugging a run by symptom, live validation |
 
 ## Elsewhere
