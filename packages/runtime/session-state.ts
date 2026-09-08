@@ -7,6 +7,7 @@ import type { Reporter } from "./reporter";
 
 const CHECKPOINT_FILE = join(SANDBOX_PATHS.state, "session.jsonl");
 const TIMEOUT_MS = 20_000;
+const CHECKPOINT_ATTEMPTS = 4;
 
 export async function loadSessionManager(
   config: RuntimeConfig,
@@ -15,14 +16,7 @@ export async function loadSessionManager(
   if (!config.sessionId) return SessionManager.inMemory(config.repo.path);
   await mkdir(SANDBOX_PATHS.state, { recursive: true });
 
-  const response = await fetch(
-    `${config.controlPlaneUrl}/internal/runs/${config.runId}/checkpoint`,
-    {
-      headers: { Authorization: `Bearer ${config.callbackToken}` },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    },
-  );
-  if (!response.ok) throw new Error(`could not restore Pi checkpoint: HTTP ${response.status}`);
+  const response = await fetchCheckpoint(config, { method: "GET" });
   const body = (await response.json()) as { content: string | null };
   if (body.content) {
     await writeFile(CHECKPOINT_FILE, body.content, { encoding: "utf8", mode: 0o600 });
@@ -42,21 +36,42 @@ export async function saveSessionCheckpoint(
   if (!config.sessionId) return;
   if (!sessionFile) throw new Error("Pi did not create a persistent session file");
   const content = await readFile(sessionFile, "utf8");
-  const response = await fetch(
-    `${config.controlPlaneUrl}/internal/runs/${config.runId}/checkpoint`,
-    {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${config.callbackToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ content }),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    },
-  );
-  if (!response.ok) throw new Error(`could not persist Pi checkpoint: HTTP ${response.status}`);
+  await fetchCheckpoint(config, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
   reporter.log("agent.session_checkpointed", {
     sessionId: config.sessionId,
     bytes: Buffer.byteLength(content),
   });
+}
+
+async function fetchCheckpoint(
+  config: RuntimeConfig,
+  init: RequestInit & { method: "GET" | "PUT" },
+): Promise<Response> {
+  const url = `${config.controlPlaneUrl}/internal/runs/${config.runId}/checkpoint`;
+  const headers = { Authorization: `Bearer ${config.callbackToken}`, ...init.headers };
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= CHECKPOINT_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        ...init,
+        headers,
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      if (response.ok) return response;
+      lastError = new Error(`HTTP ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt < CHECKPOINT_ATTEMPTS) {
+      await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** (attempt - 1)));
+    }
+  }
+  const action = init.method === "GET" ? "restore" : "persist";
+  throw new Error(
+    `could not ${action} Pi checkpoint: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
+  );
 }

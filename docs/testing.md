@@ -33,6 +33,7 @@ Integration tests share one database and truncate between tests, so they run in 
 | `packages/protocol/secret.test.ts` | a credential cannot reach output by accident |
 | `packages/sandbox/registry.test.ts` | a misconfigured provider fails at startup, naming the variable and the alternatives |
 | `packages/runtime/reporter.test.ts` | secrets do not leave the sandbox; telemetry loss cannot fail a run; the terminal status retries |
+| `packages/runtime/session-state.test.ts` | a transient control-plane 502 does not fail Pi checkpoint restore |
 | `packages/runtime/workspace.test.ts` | Git checkout reuse and diff capture stay bounded |
 | `packages/sandbox/project-image.live.test.ts` | app runtime installation into plain Debian and file preservation through a real microSandbox snapshot/resume; no model credentials |
 | `apps/controller/http/environments.integration.test.ts` | per-repository image mappings, preflight, and clearing |

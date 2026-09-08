@@ -38,6 +38,9 @@ export function runtimeInstallCommand(archive: string): string {
     `rm -rf ${SANDBOX_PATHS.app}`,
     `mkdir -p ${SANDBOX_PATHS.app} /workspace/.pi-cloud-agent /workspace/.tmp`,
     `tar -xzf '${archive}' -C ${SANDBOX_PATHS.app} --no-same-owner`,
+    // The unprivileged runtime user must be able to traverse this tree. A
+    // locally repacked archive can otherwise extract as mode 700.
+    `chmod -R a+rX ${SANDBOX_PATHS.app}`,
     `rm -f '${archive}'`,
     "chmod 1777 /workspace /workspace/.tmp",
     `chown ${runtimeUser}:${runtimeUser} /workspace/.pi-cloud-agent`,
