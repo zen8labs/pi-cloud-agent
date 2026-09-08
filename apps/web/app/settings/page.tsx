@@ -8,11 +8,12 @@ import {
   UnplugIcon,
   XIcon,
 } from "lucide-react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { LlmConnectionSection } from "@/components/LlmConnectionSection";
 import { AzureDevOpsMarkIcon, GithubMarkIcon } from "@/components/ProviderIcons";
-import { RepositoryEnvironmentSection } from "@/components/RepositoryEnvironmentSection";
+import { RepositorySettings } from "@/components/RepositorySettings";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api } from "@/lib/api";
@@ -27,6 +28,8 @@ export default function SettingsPage() {
 
 function SettingsContent() {
   const searchParams = useSearchParams();
+  const repositoriesTab = searchParams.get("tab") === "repositories";
+  const [installationVersion, setInstallationVersion] = useState(0);
   const [connections, setConnections] = useState<VcsConnectionSummary[]>([]);
   const [llmConnections, setLlmConnections] = useState<LlmConnectionSummary[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -82,7 +85,8 @@ function SettingsContent() {
         if (!active) return;
         setConnections(await api.listConnections());
         notify("GitHub App installation connected.", "success");
-        window.history.replaceState(null, "", "/settings");
+        setInstallationVersion((value) => value + 1);
+        window.history.replaceState(null, "", "/settings?tab=repositories");
       })
       .catch((cause) => {
         if (!active) return;
@@ -114,46 +118,44 @@ function SettingsContent() {
       <header className="sticky top-0 z-10 flex h-12 items-center border-b border-border bg-background px-5">
         <h1 className="text-[13px] font-medium">Settings</h1>
       </header>
-      <main className="mx-auto max-w-3xl px-5 py-10 sm:px-8">
-        <div className="mb-8">
-          <h2 className="text-xl font-medium tracking-[-0.02em]">Git Connections</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Repository access for your tasks.
-          </p>
-        </div>
+      <main className="mx-auto max-w-4xl px-5 py-8 sm:px-8">
+        <SettingsTabs repositoriesTab={repositoriesTab} />
+        {repositoriesTab ? (
+          <RepositorySettings key={installationVersion} />
+        ) : (
+          <>
+            <div className="mb-8">
+              <h2 className="text-xl font-medium tracking-[-0.02em]">Git Connections</h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Repository access for your tasks.
+              </p>
+            </div>
 
-        <div className="space-y-3">
-          {connections.map((connection) => (
-            <ConnectionCard
-              key={connection.provider}
-              connection={connection}
-              busy={busy === connection.provider}
-              onDisconnect={() => disconnect(connection.provider)}
+            <div className="space-y-3">
+              {connections.map((connection) => (
+                <ConnectionCard
+                  key={connection.provider}
+                  connection={connection}
+                  busy={busy === connection.provider}
+                  onDisconnect={() => disconnect(connection.provider)}
+                />
+              ))}
+            </div>
+
+            <div className="mb-8 mt-12">
+              <h2 className="text-xl font-medium tracking-[-0.02em]">Models</h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Choose your default model and manage provider connections.
+              </p>
+            </div>
+
+            <LlmConnectionSection
+              connections={llmConnections}
+              onChanged={refreshLlm}
+              onNotice={notify}
             />
-          ))}
-        </div>
-
-        <div className="mb-8 mt-12">
-          <h2 className="text-xl font-medium tracking-[-0.02em]">Environments</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Choose the environment each new session starts from.
-          </p>
-        </div>
-
-        <RepositoryEnvironmentSection onNotice={notify} />
-
-        <div className="mb-8 mt-12">
-          <h2 className="text-xl font-medium tracking-[-0.02em]">Models</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Choose your default model and manage provider connections.
-          </p>
-        </div>
-
-        <LlmConnectionSection
-          connections={llmConnections}
-          onChanged={refreshLlm}
-          onNotice={notify}
-        />
+          </>
+        )}
       </main>
       {noticeMessage && !dismissedNotice && (
         <ConnectionNotice
@@ -271,5 +273,26 @@ function ConnectionCard({
         onConfirm={() => void onDisconnect().finally(() => setConfirming(false))}
       />
     </section>
+  );
+}
+
+function SettingsTabs({ repositoriesTab }: { repositoriesTab: boolean }) {
+  return (
+    <nav aria-label="Settings" className="mb-8 flex gap-6 border-b border-border text-sm">
+      <Link
+        href="/settings"
+        aria-current={!repositoriesTab ? "page" : undefined}
+        className={`pb-3 ${!repositoriesTab ? "border-b-2 border-foreground font-medium" : "text-muted-foreground"}`}
+      >
+        General
+      </Link>
+      <Link
+        href="/settings?tab=repositories"
+        aria-current={repositoriesTab ? "page" : undefined}
+        className={`pb-3 ${repositoriesTab ? "border-b-2 border-foreground font-medium" : "text-muted-foreground"}`}
+      >
+        Repositories
+      </Link>
+    </nav>
   );
 }

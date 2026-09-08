@@ -6,7 +6,7 @@ import {
   type Trigger,
   type WorkspaceRef,
 } from "@pi-cloud-agent/protocol";
-import { and, desc, eq, inArray, isNotNull, isNull, lt, or, type SQL, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lt, or, type SQL, sql } from "drizzle-orm";
 import { CHANNELS, type Database, notify } from "./client";
 import { bindExternalThread } from "./integrations";
 import { type RunRow, runs, type SessionOperation, type SessionRow, sessions } from "./schema";
@@ -16,6 +16,8 @@ import {
   buildReplacementUpdate,
   buildWorkspaceUpdate,
 } from "./session-workspace";
+
+export { listSessions } from "./session-list";
 
 export interface CreateSessionInput {
   userId?: string | null;
@@ -197,19 +199,6 @@ export async function getSession(
     .where(and(eq(sessions.id, sessionId), ...(userId ? [eq(sessions.userId, userId)] : [])))
     .limit(1);
   return row ?? null;
-}
-
-export async function listSessions(
-  database: Database,
-  limit: number,
-  userId?: string | null,
-): Promise<SessionRow[]> {
-  return database
-    .select()
-    .from(sessions)
-    .where(userId ? eq(sessions.userId, userId) : undefined)
-    .orderBy(desc(sessions.pinned), desc(sessions.updatedAt))
-    .limit(limit);
 }
 
 export async function setSessionPinned(

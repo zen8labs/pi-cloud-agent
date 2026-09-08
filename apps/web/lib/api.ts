@@ -8,8 +8,11 @@ import type {
   LlmConnectionsResponse,
   PluginCatalogEntry,
   PluginCatalogResponse,
+  PullRequestReviewsResponse,
   RepositoryEnvironmentSummary,
   RepositoryEnvironmentsResponse,
+  ReviewRepositoriesResponse,
+  ReviewRepositoryRequest,
   RunDetail,
   RunEvent,
   RunEventsResponse,
@@ -113,8 +116,23 @@ export const api = {
   createRun: (body: CreateRunRequest): Promise<RunSummary> =>
     request<RunSummary>("/runs", { method: "POST", body: JSON.stringify(body) }),
 
-  listSessions: (limit = 100): Promise<SessionSummary[]> =>
-    request<SessionListResponse>(`/sessions?limit=${limit}`).then((r) => r.sessions),
+  listSessions: (limit = 100, mode?: "tasks" | "reviews"): Promise<SessionSummary[]> =>
+    request<SessionListResponse>(`/sessions?limit=${limit}${mode ? `&mode=${mode}` : ""}`).then(
+      (r) => r.sessions,
+    ),
+
+  listReviewRepositories: (): Promise<ReviewRepositoriesResponse> =>
+    request("/reviews/repositories"),
+  saveReviewRepository: (body: ReviewRepositoryRequest): Promise<{ ok: boolean }> =>
+    request("/reviews/repositories", { method: "PUT", body: JSON.stringify(body) }),
+  listReviews: (): Promise<PullRequestReviewsResponse> => request("/reviews"),
+
+  testRepositoryEnvironment: (body: {
+    provider: string;
+    repo: string;
+    imageRef: string;
+  }): Promise<{ ok: boolean; code: number; output: string }> =>
+    request("/environments/test", { method: "POST", body: JSON.stringify(body) }),
 
   getSession: (id: string): Promise<SessionDetail> => request<SessionDetail>(`/sessions/${id}`),
 
@@ -163,16 +181,6 @@ export const api = {
       "/environments",
       { method: "PUT", body: JSON.stringify(body) },
     ),
-
-  testRepositoryEnvironment: (body: {
-    provider: string;
-    repo: string;
-    imageRef: string;
-  }): Promise<{ ok: boolean; code: number; output: string }> =>
-    request<{ ok: boolean; code: number; output: string }>("/environments/test", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
 
   listConnections: (): Promise<VcsConnectionSummary[]> =>
     request<VcsConnectionsResponse>("/vcs/connections").then((r) => r.connections),

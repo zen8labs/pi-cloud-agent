@@ -31,7 +31,7 @@ Expected response: `202` with `{ "accepted": true, "duplicate": false }`; repeat
 
 The first review run for a PR is keyed by `github:pr:<owner>/<repo>:<number>`. Later `@pi-cloud-agent` issue or inline review comments append turns to that same session. Review runs always use a fresh sandbox workspace, clone the head repository, reset to the exact head SHA from the event, fetch the base SHA, and publish through the controller's structured review callback. This avoids reviewing a newer main branch or posting comments from an untrusted `gh` process.
 
-The GitHub App Setup URL is intentionally public. If the browser does not have a controller-host session cookie (the usual localhost-dashboard plus ngrok-controller setup), it redirects to dashboard Settings with the installation id. Settings then calls the authenticated setup endpoint to verify the installation through the connected GitHub user token and persist the binding.
+The GitHub App Setup URL is intentionally public. It redirects to dashboard Settings with the installation id. Settings then calls the authenticated setup endpoint to verify the installation through the connected GitHub user token and persist the binding.
 
 ### The one setting people get wrong
 
@@ -90,7 +90,7 @@ docker run --rm --entrypoint bash pi-cloud-agent:local -lc \
 
 ## Repository images and checkpoints
 
-Configure a public project image per connected repository in Settings > Environments. It supplies project toolchains on a supported Debian/Ubuntu base; the provider installs the app runtime, its Node, git/gh prerequisites, and unprivileged user inside the VM. No private runtime paths need to be packaged in the image. **Test environment** optionally checks installation and library loading without running a model task. Leaving the mapping empty uses the default project environment. Build and deploy the app archives with `pnpm sandbox:runtime`; see [compatibility and deployment](../packages/runtime/README.md#image-contract).
+Configure a public project image per connected repository in Settings > Repositories. It supplies project toolchains on a supported Debian/Ubuntu base; the provider installs the app runtime, its Node, git/gh prerequisites, and unprivileged user inside the VM. No private runtime paths need to be packaged in the image. **Test** checks installation and library loading without running a model task. Leaving the mapping empty uses the default project environment. Build and deploy the app archives with `pnpm sandbox:runtime`; see [compatibility and deployment](../packages/runtime/README.md#image-contract).
 
 After each completed session turn, microSandbox stores an integrity-checked local snapshot, commits its path and source-finalization marker, and then releases the stopped source VM; E2B pauses the filesystem. If source release fails, the marker remains and the reconciler retries it on a later pass. The previous checkpoint is deleted after its replacement is durable, so a session keeps one warm artifact. Warm follow-ups resume that checkpoint without cloning. Checkpoints expire after `SESSION_WORKSPACE_RETENTION_SECONDS` (seven days by default); the reconciler deletes them and marks the session inactive while retaining the provider identity, so the next turn cold-clones from the correct provider's pinned image while restoring Pi history. See [resumability.md](resumability.md).
 
@@ -179,7 +179,7 @@ The terminal evidence is a `status` event followed by the run row reaching `succ
 | stuck in `queued` | reconciler not running, or `SANDBOX_PROVIDER` misconfigured | controller logs at startup |
 | `failed` immediately, "could not create a sandbox" | bad provider configuration, missing local image, or missing E2B template | `pnpm sandbox:image` or `pnpm sandbox:template` |
 | `running`, no events, fails with "stopped reporting" | `CONTROL_PLANE_URL` is unreachable from the sandbox, or the detached runtime failed before it could report | the controller log, `msb logs <sandbox-id>`, `msb exec <sandbox-id> -- cat /tmp/pi-cloud-agent-runtime.log` while the microSandbox is running, and the selected provider's network path |
-| image compatibility failure before the agent starts | image lacks the runtime contract or cannot boot | Settings **Test environment** output and provider logs |
+| image compatibility failure before the agent starts | image lacks the runtime contract or cannot boot | Settings **Test** output and provider logs |
 | events stop mid-run, then "wall-clock budget" | the agent genuinely ran long | `RUN_WALL_CLOCK_SECONDS` |
 | `git.clone_branch_failed` then a successful clone | the named branch is gone; fell back to the default | benign |
 | `attempt` climbing | retryable provisioning failures | the provider's error in the logs |
@@ -238,3 +238,9 @@ Yanked versions cannot newly attach; in-flight runs keep the plugin set pinned o
 Create the session from the dashboard after signing in with GitHub, then use its conversation UI for the follow-up turn.
 
 The live test performs this as two real turns and verifies the Pi session id, uncommitted file, provider workspace id, and absence of a second clone. Run it after changing the sandbox image, runtime, session checkpointing, provider lifecycle, or model configuration.
+
+### Missing personal repositories or webhook deliveries
+
+Settings discovers every accessible installation of the configured GitHub App, even if its setup callback was missed. Enabling auto-review binds an unowned installation to the current user; discovery never transfers an installation from another user. GitHub permissions are checked again when enabling.
+
+For local development, the App webhook URL must point to the **current** public controller tunnel at `/webhooks/github`. An expired ngrok hostname can return 404 before the controller receives anything. Check `/healthz` through the public hostname, then inspect GitHub App delivery responses. A successful delivery returns 202; opening, reopening, or updating a non-draft PR in an enabled repository should create a review session. An already-open PR is visible in Reviews before any webhook is received.

@@ -319,7 +319,7 @@ function apiHeaders(accessToken: string): Record<string, string> {
   };
 }
 
-function signGithubAppJwt(appId: string, privateKey: string): string {
+export function signGithubAppJwt(appId: string, privateKey: string): string {
   const now = Math.floor(Date.now() / 1000);
   const header = encodeBase64Url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
   const payload = encodeBase64Url(

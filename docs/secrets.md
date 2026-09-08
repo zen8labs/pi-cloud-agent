@@ -8,7 +8,7 @@ Users authenticate through the configured GitHub App. The controller creates a l
 
 The current broker injects the token into the sandbox as `SCM_TOKEN` and provider-specific aliases. GitHub webhook-triggered runs use the same connected-user token for checkout. When the controller has `GITHUB_APP_ID` plus its private key, controller-owned reviews and comment replies use a short-lived installation token, so GitHub attributes automation to the App rather than the connected user; if those App credentials cannot mint a token, publication fails instead of falling back silently. The connected user token is used for publication only when App credentials are intentionally not configured. The private key never crosses into the sandbox. The checkout token remains intentionally temporary: repository code and the agent run in the same untrusted machine, so a malicious repository can read or exfiltrate a token visible to its process.
 
-Repository-specific dependencies belong in a user-selected base image/template. The Settings **Test environment** action runs a disposable compatibility check and destroys it. The image executes in the same untrusted sandbox as repository code, so image authors must be trusted. Provider checkpoints are filesystem-only and must not retain credential values.
+Repository-specific dependencies belong in a user-selected base image/template. Settings **Test** runs a disposable compatibility check and destroys it. The image executes in the same untrusted sandbox as repository code, so image authors must be trusted. Provider checkpoints are filesystem-only and must not retain credential values.
 
 ## Security concerns
 

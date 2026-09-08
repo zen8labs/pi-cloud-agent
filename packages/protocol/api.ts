@@ -91,6 +91,8 @@ export type SessionRetentionStatus = "active" | "inactive";
 
 export interface SessionSummary {
   id: string;
+  /** A PR conversation remains in Reviews even after a manual follow-up. */
+  hasReviews: boolean;
   status: SessionStatus;
   retentionStatus: SessionRetentionStatus;
   /** Seconds without activity before the provider checkpoint is released. */

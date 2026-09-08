@@ -13,6 +13,7 @@ The sandbox still has no VCS client. GitHub reviews and comment replies are narr
 | `index.ts` | the `FACTORIES` registry, `createVcsProvider`, `vcsProviderNames` |
 | `http.ts` | `fetchJson` with a timeout and error context |
 | `github.ts` | GitHub user-token identity, installation verification, App-token minting, and review/comment actuators |
+| `github-repositories.ts` | paginated installation/repository/open PR reads; errors remain explicit for review diagnostics |
 | `azure-devops.ts` | Azure DevOps through Microsoft Entra delegated OAuth |
 | `oauth.ts` | OAuth authorization, exchange, refresh, and identity lookup |
 | `index.test.ts` | the provider registry |

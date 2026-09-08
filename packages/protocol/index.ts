@@ -7,6 +7,7 @@
  * controller, the sandbox runtime, and the browser all agree on one vocabulary.
  */
 export * from "./api";
+export * from "./api-reviews";
 export * from "./env";
 export * from "./events";
 export * from "./github-review";

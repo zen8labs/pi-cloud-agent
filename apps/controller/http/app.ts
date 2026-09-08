@@ -11,6 +11,7 @@ import { internalRoutes } from "./internal";
 import { llmRoutes } from "./llm";
 import { metaRoutes } from "./meta";
 import { pluginRoutes } from "./plugins";
+import { reviewRoutes } from "./reviews";
 import { runRoutes } from "./runs";
 import { sessionRoutes } from "./sessions";
 import { vcsRoutes } from "./vcs";
@@ -94,6 +95,7 @@ export function createApp(deps: Deps): Hono<AppEnv> {
   app.route("/integrations/github", githubSetupRoutes());
   app.route("/runs", runRoutes());
   app.route("/sessions", sessionRoutes(deps));
+  app.route("/reviews", reviewRoutes(deps));
   app.route("/plugins", pluginRoutes());
   app.route("/internal", internalRoutes(deps.observability));
   app.route("/environments", environmentRoutes(deps));

@@ -24,6 +24,8 @@ import {
 } from "drizzle-orm/pg-core";
 import { type AttachedPluginRef, definePluginTables } from "./schema-plugins";
 
+import { defineReviewRepositories } from "./schema-reviews";
+
 export type { AttachedPluginRef } from "./schema-plugins";
 
 export type SessionOperation = "archiving" | "expiring" | "parking" | "replacing";
@@ -379,6 +381,10 @@ export const githubInstallations = pgTable(
 );
 
 export type GithubReviewPublicationStatus = "processing" | "published" | "failed";
+
+export const githubReviewRepositories = defineReviewRepositories(
+  () => githubInstallations.installationId,
+);
 
 const githubPublicationIdentityColumns = {
   runId: uuid("run_id")

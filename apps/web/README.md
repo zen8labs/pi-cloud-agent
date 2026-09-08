@@ -12,7 +12,10 @@ Next.js App Router, React, Tailwind 4, Base UI, and local-source [AI Elements](h
 |---|---|
 | `app/page.tsx` | redirects the root route to the chat-first workspace |
 | `app/chat/page.tsx` | choose a repository and start a task |
-| `app/settings/page.tsx` | connect and disconnect GitHub and Azure DevOps identities |
+| `app/settings/page.tsx` | General connection/model settings and a Repositories tab for images and automatic reviews |
+| `app/reviews/page.tsx` | open PRs from GitHub joined with delivery, run, and publication status |
+| `components/RepositorySettings.tsx` | repository images and explicit auto-review opt-in |
+| `components/WorkspaceMode.tsx` | Tasks/Reviews navigation and session context |
 | `app/plugins/page.tsx` | browse, install, configure marketplace plugins |
 | `app/sessions/[id]/page.tsx` | ordered turns: merged activity, live latest run, real follow-up |
 | `components/ActivityFeed.tsx` | renders the folded activity feed |
@@ -51,3 +54,15 @@ pnpm --filter @pi-cloud-agent/web build
 Needs a controller running on `:8080`. Because the protocol package ships TypeScript rather than build output, it is listed in `transpilePackages` in `next.config.mjs`.
 
 Biome does not parse Tailwind 4's `@theme` at-rule, so `**/*.css` is excluded from linting; `app/globals.css` is checked by nothing but review.
+
+## Review MVP
+
+Tasks and Reviews share the existing session viewer. Review history includes any session
+with a review turn; later chat turns do not move it into Tasks. The Reviews list fetches
+open PRs from GitHub, including PRs with no webhook, and updates through **Refresh**.
+Settings → Repositories combines environment images and auto-review toggles. Problems
+appear inline; there is no separate readiness page, score, or diagnostic drawer.
+
+The organization follows [Bugbot's repository opt-in](https://cursor.com/docs/bugbot)
+and [Devin Review's PR inbox](https://docs.devin.ai/work-with-devin/devin-review).
+Environment edits save on blur or Enter; they apply to new sessions, not parked workspaces.

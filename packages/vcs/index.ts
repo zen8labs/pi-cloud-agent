@@ -34,6 +34,8 @@ export {
   fetchGithubPullRequestRevision,
   verifyGithubInstallation,
 } from "./github";
+export type { GithubOpenPull, GithubReviewReader } from "./github-repositories";
+export { createGithubReviewReader, githubAppInstallUrl } from "./github-repositories";
 export { createVcsOAuthProvider } from "./oauth";
 
 export function vcsProviderNames(): string[] {

@@ -1,4 +1,7 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { verifyGithubSignature } from "./github-signature";
+
+export { verifyGithubSignature } from "./github-signature";
+
 import {
   type RepoRef,
   type SessionCommandIntent,
@@ -20,6 +23,7 @@ import {
 import type { AppEnv } from "../http/deps";
 import type { Logger } from "../logger";
 import { getVcsAccessToken } from "../vcs/connections";
+import { integrationThinkingLevel, reviewSkipReason } from "./review-policy";
 
 const MAX_WEBHOOK_BYTES = 2 * 1024 * 1024;
 const REVIEW_ACTIONS = new Set(["opened", "reopened", "ready_for_review", "synchronize"]);
@@ -74,12 +78,9 @@ export function githubSetupRoutes(): Hono<AppEnv> {
   app.get("/setup", async (c) => {
     const installationId = c.req.query("installation_id")?.trim();
     if (!installationId) return c.json({ error: "installation_id is required" }, 400);
-    if (!c.get("user")) {
-      return c.redirect(
-        `${c.get("config").web.url}/settings?github=install&installation_id=${encodeURIComponent(installationId)}`,
-      );
-    }
-    return bindGithubInstallation(c, installationId);
+    return c.redirect(
+      `${c.get("config").web.url}/settings?github=install&installation_id=${encodeURIComponent(installationId)}`,
+    );
   });
 
   app.post("/setup", async (c) => {
@@ -173,6 +174,7 @@ export async function processPendingGithubDeliveries(
         eventType: delivery.eventType,
         status: projection.status,
         runId: projection.runId ?? null,
+        error: projection.error,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -180,20 +182,6 @@ export async function processPendingGithubDeliveries(
       log.error("GitHub delivery failed", { deliveryId: delivery.deliveryId, error });
     }
   }
-}
-
-export function verifyGithubSignature(
-  body: string,
-  signature: string | undefined,
-  secret: string,
-): boolean {
-  if (!signature?.startsWith("sha256=")) return false;
-  const expected = Buffer.from(
-    `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`,
-    "utf8",
-  );
-  const actual = Buffer.from(signature, "utf8");
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
 /** GitHub webhook payloads encode installation ids as JSON numbers. */
@@ -210,14 +198,26 @@ async function projectGithubDelivery(
   deliveryId: string,
 ): Promise<{ status: "processed" | "ignored"; runId?: string | null; error?: string }> {
   const payload = githubPayloadSchema.parse(rawPayload);
-  if (isBotSender(payload)) return { status: "ignored" };
+  if (isBotSender(payload))
+    return { status: "ignored", error: "Events from bots are skipped." };
   const installationId = githubInstallationId(payload);
-  if (!installationId) return { status: "ignored" };
+  if (!installationId)
+    return { status: "ignored", error: "Event has no GitHub App installation." };
   const installation = await getGithubInstallation(database, installationId);
-  if (!installation) return { status: "ignored" };
+  if (!installation)
+    return {
+      status: "ignored",
+      error: "GitHub App installation is not connected to an app user.",
+    };
+
+  if (eventType === "pull_request") {
+    const reason = await reviewSkipReason(database, installationId, payload);
+    if (reason) return { status: "ignored", error: reason };
+  }
 
   const projection = projectGithubEvent(payload, eventType, config.github.mention);
-  if (!projection) return { status: "ignored" };
+  if (!projection)
+    return { status: "ignored", error: "Event did not request a review or mention the agent." };
   const resolved = await resolveTaskRevision(database, config, installation.userId, projection);
 
   const command = sessionCommandSchema.parse({
@@ -225,7 +225,7 @@ async function projectGithubDelivery(
     prompt: resolved.prompt,
     mode: "new_session",
     intent: projection.intent,
-    thinkingLevel: "medium",
+    thinkingLevel: await integrationThinkingLevel(database, config, installation.userId),
     provenance: {
       source: "github",
       deliveryId,

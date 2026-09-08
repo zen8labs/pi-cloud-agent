@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 import { AccountMenu } from "@/components/AccountMenu";
 import { useNavCollapse } from "@/components/nav-collapse";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useWorkspaceMode, WorkspaceModeSwitch } from "@/components/WorkspaceMode";
 import { api } from "@/lib/api";
 import { formatDuration } from "@/lib/format";
 import { loadSessionTitles } from "@/lib/session-titles";
@@ -17,6 +18,8 @@ import { cn } from "@/lib/utils";
 export function SideNav() {
   const pathname = usePathname();
   const router = useRouter();
+  const mode = useWorkspaceMode();
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [titles, setTitles] = useState<Record<string, string>>({});
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
@@ -25,23 +28,27 @@ export function SideNav() {
 
   useEffect(() => {
     let alive = true;
+    setSessions([]);
     const load = () =>
       api
-        .listSessions(100)
+        .listSessions(100, mode)
         .then((items) => {
           if (alive) {
             setSessions(items);
+            setLoadError(null);
             setTitles(loadSessionTitles(items.map((item) => item.id)));
           }
         })
-        .catch(() => {});
+        .catch(() => {
+          if (alive) setLoadError("Could not refresh session history.");
+        });
     void load();
     const timer = setInterval(load, 5000);
     return () => {
       alive = false;
       clearInterval(timer);
     };
-  }, []);
+  }, [mode]);
 
   const active = sessions.filter((session) => session.status !== "idle");
   const pinned = sessions.filter((session) => session.status === "idle" && session.pinned);
@@ -87,7 +94,7 @@ export function SideNav() {
   return (
     <>
       <header className="mobile-nav">
-        <Brand />
+        <WorkspaceModeSwitch />
         <div className="flex items-center gap-1">
           <MobileLink href="/chat" label="New task" active={pathname === "/chat"}>
             <PlusIcon />
@@ -102,16 +109,24 @@ export function SideNav() {
           <CollapseButton />
         </div>
         <div className="px-2.5">
-          <Link
-            href="/chat"
-            className={cn("side-nav-link", pathname === "/chat" && "is-active")}
-          >
-            <PlusIcon className="size-3.5" />
-            New task
-          </Link>
+          <WorkspaceModeSwitch />
+          {mode === "tasks" && (
+            <Link
+              href="/chat"
+              className={cn("side-nav-link", pathname === "/chat" && "is-active")}
+            >
+              <PlusIcon className="size-3.5" />
+              New task
+            </Link>
+          )}
         </div>
 
         <div className="mt-4 min-h-0 flex-1 overflow-y-auto px-2.5 pb-4">
+          {loadError && (
+            <p role="alert" className="px-2 py-2 text-xs text-destructive">
+              {loadError}
+            </p>
+          )}
           {active.length > 0 && (
             <SessionGroup
               label="Running"

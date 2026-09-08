@@ -27,6 +27,8 @@ Decides what runs and when, resolves connected identities, mints run credentials
 | `http/plugins.ts` | marketplace catalog, install, configure, OAuth connect/callback, operator publish/review |
 | `http/internal.ts` | events, terminal status, checkpoint, model-credential, and structured GitHub publication callbacks, authenticated per run |
 | `integrations/github.ts` | signed webhook intake, installation binding, durable delivery projection, exact PR-head resolution, and mention routing |
+| `http/reviews.ts` | owned repository opt-in and open PRs with delivery/run/publication evidence |
+| `db/reviews.ts` | review policies and user-scoped evidence reads |
 | `http/environments.ts` | dashboard API for repository image mappings and preflight |
 | `observability.ts` | projects completed run journals into vendor-neutral OTLP traces from the trusted side |
 | `observability-projection.ts` | reconstructs run, step, turn, and tool span nesting from the durable journal |

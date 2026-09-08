@@ -23,6 +23,7 @@ Nothing here executes anything or touches the network.
 | `env.ts` | `SANDBOX_ENV` and `SANDBOX_PATHS`: the controller/sandbox environment contract |
 | `sandbox.ts` | `SandboxProvider` image resolution, lifecycle and disposable preflight execution, `SandboxSpec`, `SandboxRef`, `WorkspaceRef`, `SandboxError` |
 | `vcs.ts` | `VCSProvider` |
+| `api-reviews.ts` | repository opt-in and PR review status HTTP shapes |
 | `api.ts` | the controller's HTTP request/response shapes, shared with the dashboard |
 
 ## Invariants

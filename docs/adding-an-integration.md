@@ -82,3 +82,25 @@ For Slack, Linear, Azure DevOps, or another source:
 Today, integration secrets are process environment variables read by `apps/controller/config.ts`. This is an MVP deployment boundary, not the final organization model. A future trusted admin web and RBAC layer should store organization-scoped integration configuration (for example the GitHub App private key, webhook secret, App id, and allowed installations), encrypt values at rest, restrict read/write access by role, and hand a typed configuration snapshot to the controller. Runs should continue to receive only the short-lived operation capability they need; admin UI data must never be copied into `packages/runtime` or exposed in run events.
 
 Until that layer exists, keep secrets in the server environment, rotate them through deployment configuration, and treat `GITHUB_APP_PRIVATE_KEY` as a controller-only secret.
+
+## GitHub review controls
+
+After installation, the setup callback returns to Settings and the authenticated browser
+binds the installation. Settings also discovers installations whose callback was missed; enabling a repository binds an unowned installation without transferring another user's ownership. Enable each repository under **Settings → Repositories**; the
+controller verifies current installation access, Contents read and Pull requests write
+permissions, server configuration, and the default model before saving. The generated
+`github_review_repositories` table is explicit opt-in: no row means off. Deployment of
+this MVP therefore requires enabling repositories previously reviewed implicitly.
+
+Automatic reviews handle opened, reopened, ready-for-review and synchronize events,
+skipping drafts and bot senders. Turning off stops new automatic review events; queued
+or running work continues. Enabling does not backfill existing PRs: open a non-draft PR
+or push a new commit to exercise the webhook. Integration runs prefer medium thinking
+when the selected model supports it, otherwise off.
+
+**Reviews → Refresh** reads open PRs from GitHub and joins owned delivery/run/publication
+records. A missing delivery appears as not reviewed; ignored events retain their reason;
+publication failure differs from execution failure. Only a published review for the
+current head is labelled Reviewed. Older commits appear Outdated. GitHub read failures
+remain visible and never become a successful empty list. There is no background PR
+poller, automatic catch-up, manual review endpoint, or publication retry UI in this MVP.

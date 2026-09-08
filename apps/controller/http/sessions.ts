@@ -8,6 +8,7 @@ import {
 } from "@pi-cloud-agent/protocol";
 import { type Context, Hono } from "hono";
 import { queueSessionCommand } from "../commands/session";
+import { sessionHasReviews, sessionsWithReviews } from "../db/reviews";
 import {
   findSessionSandboxesToFinalize,
   findSessionSandboxReplacementsToDelete,
@@ -48,13 +49,24 @@ export function sessionRoutes(
 
   app.get("/", async (c) => {
     const limit = Math.min(Number(c.req.query("limit") ?? 100) || 100, 200);
-    const rows = await listSessions(c.get("database"), limit, c.get("user")?.id);
+    const mode = c.req.query("mode");
+    const rows = await listSessions(
+      c.get("database"),
+      limit,
+      c.get("user")?.id,
+      mode === "reviews" || mode === "tasks" ? mode : undefined,
+    );
+    const reviewSessions = await sessionsWithReviews(
+      c.get("database"),
+      rows.map((row) => row.id),
+    );
     const summaries = await Promise.all(
       rows.map((row) =>
         toSessionSummary(
           c.get("database"),
           row,
           c.get("config").sessionWorkspaceRetentionSeconds,
+          reviewSessions.has(row.id),
         ),
       ),
     );
@@ -406,10 +418,12 @@ async function toSessionSummary(
   database: Parameters<typeof getRun>[0],
   session: SessionRow,
   inactiveAfterSeconds: number,
+  hasReviews?: boolean,
 ): Promise<SessionSummary> {
   const activeRun = session.activeRunId ? await getRun(database, session.activeRunId) : null;
   return {
     id: session.id,
+    hasReviews: hasReviews ?? (await sessionHasReviews(database, session.id)),
     status: sessionStatus(activeRun),
     title: session.title,
     inactiveAfterSeconds,
