@@ -29,6 +29,16 @@ const envSchema = z.object({
   SANDBOX_RUNTIME_DIR: z.string().default(""),
 });
 
+/** Same size as microSandbox's defaults (`MICROSANDBOX_CPUS` / `MICROSANDBOX_MEMORY_MB`). */
+const TEMPLATE_CPU_COUNT = 2;
+const TEMPLATE_MEMORY_MB = 4096;
+
+function sessionOpts(apiKey: string, timeoutMs: number) {
+  // The SDK's 60s request timeout is too short for a 120MB runtime upload,
+  // especially after a filesystem-only pause that cold-boots the VM.
+  return { apiKey, timeoutMs, requestTimeoutMs: timeoutMs };
+}
+
 export function createE2BProvider(
   env: Readonly<Record<string, string | undefined>>,
 ): SandboxProvider {
@@ -80,11 +90,12 @@ export function createE2BProvider(
             ownedTemplate = name;
           },
         );
-        sandbox = await Sandbox.create(template, { apiKey, timeoutMs });
+        sandbox = await Sandbox.create(template, sessionOpts(apiKey, timeoutMs));
         await installRuntime(sandbox, runtimeDirectory, timeoutMs);
         const result = await sandbox.commands.run(spec.command, {
           envs,
           timeoutMs,
+          requestTimeoutMs: timeoutMs,
           user: runtimeUser,
         });
         return { code: result.exitCode, stdout: result.stdout, stderr: result.stderr };
@@ -109,7 +120,7 @@ export function createE2BProvider(
       let sandbox: Sandbox;
       try {
         const template = await resolveTemplate(spec.image);
-        sandbox = await Sandbox.create(template, { apiKey, timeoutMs });
+        sandbox = await Sandbox.create(template, sessionOpts(apiKey, timeoutMs));
       } catch (cause) {
         const requested = spec.image || defaultTemplate;
         throw new SandboxError(`e2b: could not create a sandbox from "${requested}"`, {
@@ -125,6 +136,7 @@ export function createE2BProvider(
           background: true,
           envs,
           timeoutMs,
+          requestTimeoutMs: timeoutMs,
           user: runtimeUser,
         });
       } catch (cause) {
@@ -145,13 +157,14 @@ export function createE2BProvider(
       const timeoutMs = spec.timeoutSeconds * 1000;
       let sandbox: Sandbox | undefined;
       try {
-        sandbox = await Sandbox.connect(ref.id, { apiKey, timeoutMs });
+        sandbox = await Sandbox.connect(ref.id, sessionOpts(apiKey, timeoutMs));
         await spec.onAllocated?.({ provider: "e2b", id: sandbox.sandboxId });
         await installRuntime(sandbox, runtimeDirectory, timeoutMs);
         await sandbox.commands.run(spec.command, {
           background: true,
           envs,
           timeoutMs,
+          requestTimeoutMs: timeoutMs,
           user: runtimeUser,
         });
       } catch (cause) {
@@ -200,11 +213,22 @@ export function createE2BProvider(
 }
 
 async function installRuntime(sandbox: Sandbox, directory: string, timeoutMs: number) {
-  const machine = await sandbox.commands.run("uname -m", { user: "root", timeoutMs });
+  const machine = await sandbox.commands.run("uname -m", {
+    user: "root",
+    timeoutMs,
+    requestTimeoutMs: timeoutMs,
+  });
   const archive = await readRuntimeArchive(directory, machine.stdout);
   const target = `/tmp/pi-runtime-${randomUUID()}.tar.gz`;
-  await sandbox.files.write(target, new Uint8Array(archive).buffer, { user: "root" });
-  await sandbox.commands.run(runtimeInstallCommand(target), { user: "root", timeoutMs });
+  await sandbox.files.write(target, new Uint8Array(archive).buffer, {
+    user: "root",
+    requestTimeoutMs: timeoutMs,
+  });
+  await sandbox.commands.run(runtimeInstallCommand(target), {
+    user: "root",
+    timeoutMs,
+    requestTimeoutMs: timeoutMs,
+  });
 }
 
 async function resolveTemplateReference(
@@ -243,7 +267,12 @@ async function buildTemplateFromImage(
   const template = Template().fromImage(imageRef).setStartCmd("sleep infinity", "true");
   // Every materialization gets its own immutable alias. A registry tag can be
   // republished, and a failed build must never silently reuse an older alias.
-  await Template.build(template, name, { apiKey, skipCache: true });
+  await Template.build(template, name, {
+    apiKey,
+    skipCache: true,
+    cpuCount: TEMPLATE_CPU_COUNT,
+    memoryMB: TEMPLATE_MEMORY_MB,
+  });
   return name;
 }
 

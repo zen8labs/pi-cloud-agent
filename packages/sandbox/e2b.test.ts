@@ -10,6 +10,7 @@ const {
   sandboxCreate,
   templateLookup,
   templateDelete,
+  readRuntimeArchive,
 } = vi.hoisted(() => {
   const builder = {
     fromImage: vi.fn(),
@@ -30,6 +31,7 @@ const {
       response: { status: 200 },
     })),
     templateDelete: vi.fn(async () => ({ response: { status: 204 } })),
+    readRuntimeArchive: vi.fn(async () => Buffer.from("runtime")),
   };
 });
 
@@ -44,6 +46,12 @@ vi.mock("e2b", () => ({
     build: buildTemplate,
     exists: templateExists,
   }),
+}));
+
+vi.mock("./runtime-install.js", () => ({
+  readRuntimeArchive,
+  runtimeInstallCommand: (archive: string) => `install ${archive}`,
+  runtimeUser: "pi-agent",
 }));
 
 import { createE2BProvider } from "./e2b";
@@ -121,6 +129,16 @@ describe("E2B image resolution", () => {
     await expect(provider.execute?.(preflightSpec)).rejects.toThrow("cleanup unavailable");
   });
 
+  it("sizes materialized templates like microSandbox", async () => {
+    const provider = createE2BProvider({ E2B_API_KEY: "test-key" });
+    await provider.resolveImage("ghcr.io/acme/widgets:latest");
+    expect(buildTemplate).toHaveBeenCalledWith(
+      templateBuilder,
+      expect.any(String),
+      expect.objectContaining({ cpuCount: 2, memoryMB: 4096 }),
+    );
+  });
+
   it("refreshes a republished image tag instead of permanently reusing its old template", async () => {
     const provider = createE2BProvider({ E2B_API_KEY: "test-key" });
     const image = "ghcr.io/acme/widgets:latest";
@@ -134,7 +152,7 @@ describe("E2B image resolution", () => {
       1,
       templateBuilder,
       expect.stringMatching(/^pi-cloud-agent-[0-9a-f]{16}-[0-9a-f]{12}$/),
-      { apiKey: "test-key", skipCache: true },
+      { apiKey: "test-key", skipCache: true, cpuCount: 2, memoryMB: 4096 },
     );
   });
 
@@ -189,5 +207,48 @@ describe("E2B image resolution", () => {
       ),
     ).rejects.toMatchObject({ name: "SandboxError" });
     expect(sandboxKill).not.toHaveBeenCalled();
+    expect(sandboxConnect).toHaveBeenCalledWith("paused-1", {
+      apiKey: "test-key",
+      timeoutMs: 60_000,
+      requestTimeoutMs: 60_000,
+    });
+  });
+
+  it("gives runtime uploads the sandbox timeout instead of the SDK 60s default", async () => {
+    const write = vi.fn(async () => undefined);
+    const run = vi
+      .fn()
+      .mockResolvedValueOnce({ stdout: "x86_64\n", exitCode: 0 })
+      .mockRejectedValueOnce(new Error("install failed"));
+    sandboxConnect.mockResolvedValueOnce({
+      sandboxId: "paused-1",
+      commands: { run },
+      files: { write },
+    });
+    const provider = createE2BProvider({ E2B_API_KEY: "test-key" });
+
+    await expect(
+      provider.resume(
+        { provider: "e2b", id: "paused-1" },
+        {
+          runId: "run-1",
+          image: "template-1",
+          timeoutSeconds: 3600,
+          env: {},
+          secrets: {},
+          command: "cd /opt/pi-cloud-agent && ./bin/node --import tsx ./run.js",
+        },
+      ),
+    ).rejects.toMatchObject({ name: "SandboxError" });
+    expect(write).toHaveBeenCalledWith(
+      expect.stringMatching(/^\/tmp\/pi-runtime-/),
+      expect.any(ArrayBuffer),
+      { user: "root", requestTimeoutMs: 3_600_000 },
+    );
+    expect(run).toHaveBeenCalledWith("uname -m", {
+      user: "root",
+      timeoutMs: 3_600_000,
+      requestTimeoutMs: 3_600_000,
+    });
   });
 });
