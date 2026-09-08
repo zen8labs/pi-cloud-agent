@@ -16,12 +16,12 @@
   "dependencies": {
     "@earendil-works/pi-coding-agent": "catalog:",
     "@pi-cloud-agent/protocol": "workspace:*",
-    "pi-mcp-adapter": "2.18.0"
+    "pi-mcp-adapter": "2.31.0"
   },
   "devDependencies": {
     "@pi-cloud-agent/tsconfig": "workspace:*",
     "@types/node": "catalog:",
-    "esbuild": "0.28.1",
+    "esbuild": "0.28.2",
     "typescript": "catalog:"
   }
 }
