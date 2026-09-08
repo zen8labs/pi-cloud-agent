@@ -84,7 +84,7 @@ Eight tables. That is the entire persistent state of the system.
 | `app_users` | stable application users established by GitHub App authorization |
 | `web_sessions` | hashed, expiring browser sessions |
 
-Session state and runtime lifetime are deliberately separate. Postgres owns the conversation checkpoint; the sandbox provider owns a filesystem reference; live compute exists only while a turn runs. If the parked workspace expires, the next turn cold-clones the repository and still opens the same Pi session. See [docs/sessions.md](docs/sessions.md).
+Session state and runtime lifetime are deliberately separate. Postgres owns the conversation checkpoint; the sandbox provider owns a filesystem checkpoint; live compute exists only while a turn runs. If the checkpoint expires, the next turn cold-clones the repository and still opens the same Pi session. See [docs/resumability.md](docs/resumability.md).
 
 ## Observability
 
@@ -114,4 +114,4 @@ Each factory validates its own slice of the environment, which is why adding a p
 
 The HTTP surface and the reconciler share a process because it is simpler, not because they must. They exchange nothing in memory (all coordination is through Postgres), so splitting them across machines is a deployment decision that needs no code change. That is the payoff for not having an in-process event bus.
 
-The sandbox runtime image is built separately (`pnpm sandbox:image`) and pins the agent harness to the version its bundle was typechecked against. The default local provider is microSandbox; hosted E2B remains available with `SANDBOX_PROVIDER=e2b` and uses `pnpm sandbox:template`. Controller-only changes need a restart, not an image rebuild.
+The project environment and app runtime are separate artifacts. `pnpm sandbox:image` builds the default project toolchains; `pnpm sandbox:runtime` builds Linux archives containing our Node, agent bundle, and dependencies. Both providers transfer and install the app archive inside the isolated VM before launching each turn, including warm resumes. Project images need no private runtime files or app user. Runtime updates require rebuilding and deploying the archives, not rebuilding users' images. The local provider is microSandbox; hosted E2B remains available with `SANDBOX_PROVIDER=e2b` and uses `pnpm sandbox:template` for the default project environment.

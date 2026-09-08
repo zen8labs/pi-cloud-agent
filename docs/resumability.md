@@ -1,117 +1,103 @@
-# Resumability
+# Runs, sessions, and checkpoints
 
-A cloud agent's runs outlive the process that started them. A run can take thirty minutes; a deploy takes seconds. So the controller must be able to stop at any instant and be replaced without losing work, and without needing an operator to sort out what was in flight.
+Runs are bounded executions; sessions are durable conversations that contain ordered runs. The controller stores every fact needed for recovery in Postgres, while each sandbox provider owns the filesystem checkpoint used for a fast warm resume.
 
-This is normally where a workflow engine goes. We do not use one. Three rules plus one loop are enough, and the whole mechanism is about 150 lines.
+## Durable state
 
-## The rules
+| State | Owner | Lifetime |
+|---|---|---|
+| Session identity, turn order, and retention state | Postgres | Until deleted |
+| Run lifecycle and event journal | Postgres | Audit history |
+| Stopped-source finalization marker | Postgres | Until the source is released |
+| Superseded-checkpoint deletion marker | Postgres | Until the old checkpoint is deleted |
+| Pi JSONL conversation checkpoint | Postgres | Until session deletion |
+| Repository workspace checkpoint | Sandbox provider | Until inactive/deleted |
 
-### 1. Every state transition is a single guarded statement
+The repository image mapping in Settings is a base image/template reference, not executable setup code. A custom image can be hosted in any registry. The controller passes it to the selected provider when a session is created or cold-started. After a completed turn, the provider persists the session's writable layer using its native checkpoint mechanism. These session artifacts are intentionally provider-native filesystem checkpoints, not `docker commit` images. A full OCI image per turn would copy toolchains and make local garbage collection much more expensive, while E2B cannot place its cloud sandbox filesystem on the controller's disk. The checkpoint abstraction gives both providers the same warm-resume contract while keeping the base image immutable.
 
-```sql
-update runs set status = 'running'
-where id = $1 and status = 'provisioning'
-```
+`retentionStatus=active` means a turn is in progress or a warm checkpoint is retained; `inactive` means the provider artifact has been deleted and only the Postgres conversation checkpoint remains. The session retains the last checkpoint provider identity even when `sandbox_id` is cleared, because its provider-native image alias may only be valid with that backend.
 
-The state the transition expects is in the `WHERE` clause, and the function returns whether it changed a row:
+- microSandbox stops the VM and creates an integrity-checked local Snapshot under `MICROSANDBOX_SNAPSHOT_DIR`. The controller commits the snapshot path and the source-finalization marker before asking the provider to remove the stopped source VM, so a crash leaves recoverable state and a durable cleanup target. The reconciler retries finalization until it succeeds, then clears the marker. Resume creates a new VM from that snapshot.
+- E2B pauses the sandbox with `keepMemory: false`; E2B retains the filesystem checkpoint in its service and the session stores the sandbox id. A public OCI image reference is materialized into a unique E2B template alias; completed resolutions are not reused, so republished tags cannot change an existing session's pinned target.
 
-```ts
-export async function markRunning(database: Database, runId: string): Promise<boolean> {
-  const updated = await database
-    .update(runs)
-    .set({ status: "running", updatedAt: new Date() })
-    .where(and(eq(runs.id, runId), eq(runs.status, "provisioning")))
-    .returning({ id: runs.id });
-  return updated.length > 0;
-}
-```
+Providers boot one project image or restore one checkpoint, then install the deployment's app-managed runtime. The repository image replaces the default project environment. First provisioning freezes the resolved image reference and its provider on the session, so Settings changes affect new sessions and a retry cannot send a provider-native alias to a different backend. This freezes the reference, not the contents of mutable OCI tags or provider aliases; use immutable references when cold-start reproducibility matters. A checkpoint preserves the filesystem used to create it. Replacement removes the previous artifact after the new checkpoint is durable, with failed deletions retained for reconciliation. If parking loses its session lease, the newly created but unowned checkpoint is marked for deletion before cleanup, so a provider failure remains retryable instead of becoming an orphan.
 
-No read-then-write, no transaction held open across network I/O, no application lock. A transition that loses a race updates zero rows and says so, rather than overwriting a decision another worker already made.
+Custom images supply project toolchains on a supported Debian/Ubuntu base. Providers install our Node, agent bundle, dependencies, user, and workspace inside the sandbox before each launch. Users do not package private runtime paths. Settings offers an optional installation and library-load diagnostic; it is not a full agent run. Repository setup scripts are not supported. See [the compatibility contract](../packages/runtime/README.md#image-contract).
 
-This matters most for completion. A sandbox posting `done` and the reconciler timing the same run out genuinely race, and whichever lands first must win permanently, so `completeRun` guards on *not already terminal*.
+## Run state machine
 
-### 2. No in-memory run state
+Every transition is one guarded SQL statement. A transition that loses a race updates zero rows instead of overwriting another worker's decision. Provisioning renews its claim while resolving images and allocating a sandbox. Before installation or runtime launch, the provider reports the allocated id; the controller attaches it only if the attempt still owns an unexpired claim. An expired worker cannot launch or fail a newer attempt. Callbacks and the reconciler write the later facts.
 
-If the controller needs a fact to resume a run, that fact is a column. This is the rule that removes the event bus: nothing waits in memory for a run to finish, so there is nothing to wait *with*.
+Parking and replacement deletion share the session-operation claim with teardown. Cleanup re-reads its durable marker under that claim before deleting anything; a stale cleanup pass cannot overlap creation of a checkpoint at the same provider path. Failed suspension retains a separate previous checkpoint instead of deleting the last good copy. Failed deletion of a superseded checkpoint keeps its marker for retry.
 
-Provisioning is therefore a short transaction (claim, build the task, mint credentials, create the sandbox, write its id, return) measured in seconds, not in the length of the run. `attachSandbox` is the first durable write after a machine exists, and it is deliberately the first thing that happens:
+Session teardown uses a durable `session_operation` claim with an immutable operation token and a heartbeat renewed during provider cleanup. Delete and expiry claim the row before deleting a provider checkpoint, and follow-up turns, checkpoint writes, and parking refuse to proceed while that claim is held. A follow-up can reclaim only a claim whose heartbeat has been stale for ten minutes, so a controller crash cannot leave a session permanently busy while a live cleanup continues to exclude new work. The guarded delete or clear then verifies the operation and the previously observed run/workspace ids before changing Postgres.
 
-- before it commits, a crash leaks a sandbox that nobody knows about
-- after it commits, the reconciler will always find and reclaim it
+The reconciler (`apps/controller/reconcile/loop.ts`) asks one question per branch:
 
-That is why provisioning owns the cleanup in the one case where `attachSandbox` refuses (the run was cancelled mid-create): the id was never stored, so the reconciler cannot learn about it.
-
-### 3. One writer per fact
-
-Events are written only by the sandbox callback route. Status only by the transition functions. `sandbox_stopped_at` only by the reconciler.
-
-## The loop
-
-`apps/controller/reconcile/loop.ts`. Each branch asks one question about durable state and takes exactly one action.
-
-| Condition in the database | Action |
+| Durable condition | Action |
 |---|---|
-| `status = 'queued'` | claim and provision |
-| in flight and `deadline_at < now()` | fail, then stop the machine |
-| in flight, has a sandbox, and `last_event_at` is stale | fail, then stop the machine |
-| terminal standalone run, has a sandbox, `sandbox_stopped_at is null` | stop the machine, stamp it |
-| terminal session turn, `sandbox_stopped_at is null` | suspend its filesystem, clear `active_run_id`, stamp the turn |
-| idle session, parked workspace expired | delete the workspace reference |
-| `provisioning`, no sandbox, `claim_expires_at < now()` | return to `queued` |
+| `queued` | Claim and provision |
+| in-flight past deadline or silent | Fail, then stop sandbox |
+| terminal standalone run | Stop sandbox and stamp it |
+| terminal session run | Suspend checkpoint, then promote oldest queued turn |
+| stopped session source with a finalization marker | Retry provider source cleanup and clear the marker |
+| replaced checkpoint with a deletion marker | Retry provider checkpoint deletion and clear the marker |
+| idle checkpoint past `workspace_expires_at` | Delete checkpoint and mark session inactive |
+| provisioning lease expired without sandbox | Return run to `queued` |
 
-Ordering is deliberate: teardown runs *before* new work, so a busy queue can never starve the reclamation of machines that are still costing money.
+Teardown runs before new provisioning so an idle queue cannot starve resource reclamation. Restarting the controller simply makes the same queries return again; no startup sweep or forced failure is needed.
 
-**Crash recovery is not a special case.** After a restart these same queries simply return more rows. There is no startup sweep, and nothing force-fails in-flight work. The earlier Python design did exactly that, because completion lived in a coroutine, and its own docstring admitted it.
+## Session lifecycle
 
-The single loop replaces three separate mechanisms: a blocking wait per run, an `asyncio` wall-clock timeout, and a startup reconciliation pass.
-
-## Sequence numbers
-
-Events need gapless, unique sequence numbers per run: they are the SSE resume cursor and the client's dedupe key. Reading `max(seq)` and inserting would race.
-
-Instead the counter lives on the run row and is incremented in the same transaction as the insert:
-
-```ts
-const [bumped] = await tx
-  .update(runs)
-  .set({ eventSeq: sql`${runs.eventSeq} + 1`, lastEventAt: new Date() })
-  .where(eq(runs.id, runId))
-  .returning({ seq: runs.eventSeq });
-
-await tx.insert(runEvents).values({ runId, seq: bumped.seq, type, data });
+```text
+create session + first run
+        │
+        ▼
+queued → provisioning → running → terminal
+                              │
+                              ▼
+                   checkpoint persisted (active)
+                              │
+                              ▼
+                     idle / follow-up resume
+                              │
+             retention expiry ─┴─ delete
+                              ▼
+                  inactive (checkpoint deleted)
 ```
 
-Concurrent writers serialize on the row lock. Two things fall out for free:
+Only the run named by `sessions.active_run_id` may own a session. Follow-ups submitted while another turn is active are queued rows. Parking atomically stores the checkpoint, records the original workspace needed for source cleanup, and promotes the oldest surviving queued row. If source cleanup fails after that commit, the run remains visible to the reconciler until finalization succeeds.
 
-- `last_event_at` updates atomically with the evidence that produced it, so the reconciler's staleness check cannot drift from the log
-- `run_events` has a composite primary key of `(run_id, seq)`, which makes a duplicated sequence number *impossible* rather than merely unlikely
+An active session has a provider checkpoint and can resume without cloning or installing dependencies. After the configured retention period (the existing `sessionWorkspaceRetentionSeconds` setting, seven days by default), the reconciler deletes that checkpoint and marks the session `inactive`; its Postgres Pi checkpoint remains. The next turn cold-starts from the repository's configured base image, removes only its derived `/workspace/<repo>` path, clones the repository, and restores only the Pi conversation. This is explicit in `WORKSPACE_RESUMED=false` and never pretends filesystem state survived.
 
-## Why Postgres is also the queue
+The session Delete action permanently deletes the session, all turns, and its provider checkpoint. Deletion is refused while a run is non-terminal. Provider cleanup is idempotent; a repeated HTTP request returns `404` because the chat no longer exists.
 
-`select ... for update skip locked` is the entire queue implementation. Concurrent workers step over each other's locked candidate rather than blocking or double-claiming. It is one SQL clause.
+## Agent checkpoint and credentials
 
-Adding Redis or a broker would mean holding work in a second system when it is already durably in the first. The lease (`claim_expires_at`) closes the one gap: a worker that dies between claiming and creating a sandbox would otherwise strand the run, and the reconciler returns it to the queue, safely, because no sandbox exists yet.
+Pi's native JSONL session is restored before each turn and committed before the runtime reports success. The controller accepts a checkpoint only from the active run and its callback token. The checkpoint is opaque and size-limited.
 
-`LISTEN/NOTIFY` makes claiming and streaming feel instant, but it is only a wake-up hint. Every listener also polls, so a dropped notification costs latency, not correctness. Unlike an in-memory bus it works across processes, which is what makes splitting the API from the reconciler a deployment choice.
+Each turn receives fresh callback, forge, model, and plugin credentials. The provider checkpoint must not retain their values: E2B uses filesystem-only pause and microSandbox snapshots are created after the runtime exits. Git credential helpers contain environment-variable references, not token values.
 
-## Resumable turns are a separate layer
+## Failure behavior
 
-Controller restart safety and conversation continuation solve different failures. A `sessions` row is the durable parent of ordered runs. It holds the active run guard, latest Pi JSONL checkpoint, and optional provider workspace reference. Creating a follow-up locks the session row, assigns the next turn number, and inserts an ordinary queued run. Only the queued run named by `active_run_id` may be claimed; later messages wait durably. Parking the current turn atomically promotes the oldest queued successor before waking the reconciler.
+- A missing or corrupt checkpoint clears the stale reference and cold-starts from the repository image while retaining Pi history.
+- A suspension failure stops the live sandbox and retains any separate previous filesystem checkpoint for another resume. This also protects saved work when runtime installation fails after restoring a snapshot and the provider removes the disposable live copy. If suspension produced a new provider checkpoint but the database commit failed, reconciliation removes that uncommitted checkpoint before retrying. Only when no separate checkpoint remains does the session continue cold from its Pi checkpoint. If microSandbox has already created a valid snapshot but cannot remove the stopped source VM, the committed finalization marker makes the source safe to reclaim on a later reconciliation pass.
+- A runtime failure is terminal; the reconciler still attempts to preserve its filesystem checkpoint.
+- A run is not resumable mid-turn. The next turn continues from the last completed Pi checkpoint.
+- Provider stop/delete/finalize operations are idempotent. A failed cleanup call keeps its durable marker and is retried; provider-side timeouts remain the final resource backstop.
 
-The runtime downloads the checkpoint before invoking Pi and uploads the updated checkpoint before reporting `done`. The controller refuses successful completion without that checkpoint. After the run is terminal, the reconciler suspends the filesystem; a later turn resumes it and skips clone/setup. If it has expired, the run creates a fresh sandbox and clone but still restores the Pi checkpoint.
+## Event sequence numbers
 
-Nothing depends on controller memory, sandbox memory, or an agent process staying alive. The exact ownership and failure cases are specified in [sessions.md](sessions.md).
+The event counter lives on each run row and increments in the same transaction as its event insert. Concurrent callbacks therefore get gapless `(run_id, seq)` keys and atomically update `last_event_at`, which drives the silence check.
 
-## What is not solved
+## Validation
 
-- **A run is not resumable mid-turn.** If a sandbox dies while Pi is executing, that turn fails; the next user turn can continue from the last completed Pi checkpoint, not the interrupted reasoning step.
-- **Retries only cover provisioning.** A transient sandbox API failure returns the run to the queue up to three attempts. A failure *inside* the agent is a real outcome and is reported as one.
-- **`stop` failures are not retried forever.** A provider that cannot kill a machine will not start succeeding on the next tick, and retrying would turn one stuck sandbox into an endless loop. The run is stamped as reclaimed and the provider's own timeout is the backstop.
+`apps/controller/reconcile/reconciler.integration.test.ts` proves that a completed turn is suspended, that a follow-up calls `resume` with the stored checkpoint, and that no second `create` occurs. It also covers a missing checkpoint falling back to the configured repository image.
 
-## Where this is tested
+`apps/controller/http/environments.integration.test.ts` covers image mapping, clearing, and disposable image compatibility tests. The live test in `apps/controller/e2e.live.test.ts` performs two real turns, verifies the same Pi session id and uncommitted file, checks `git.workspace_resumed` without `git.cloned`, and handles the provider-specific checkpoint id behavior.
 
-`apps/controller/db/runs.integration.test.ts` covers the SQL properties: exclusive claiming, guarded transitions, gapless sequences under concurrency.
+The SQL race/ownership properties are covered by `apps/controller/db/sessions.integration.test.ts` and `apps/controller/db/runs.integration.test.ts`.
 
-`apps/controller/reconcile/reconciler.integration.test.ts` drives the loop one tick at a time and simulates crashes by starting a fresh reconciler over existing state, including the case that used to break: *a live run must survive a restart untouched*.
+## Provider contract
 
-`apps/controller/db/sessions.integration.test.ts` covers the one-active-turn guard, checkpoint ownership, turn ordering, and parking. The reconciler suite additionally proves suspend then resume uses the same workspace without another create.
+`SandboxProvider.resolveImage` returns the effective provider-native base image for a requested mapping, including the provider default for an empty mapping. `suspend` returns an opaque `WorkspaceRef`, `finalizeSuspend` releases any stopped source only after the controller commits that reference and is safe to retry, `resume` restores it, and `deleteWorkspace` permanently removes it. The controller never parses provider ids or assumes Docker/OCI details. See [adding-a-sandbox-provider.md](adding-a-sandbox-provider.md).

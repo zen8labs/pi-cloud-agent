@@ -12,6 +12,8 @@ import type { Secret } from "./secret";
  */
 export interface SandboxProvider {
   readonly name: string;
+  /** Resolve an empty or provider-specific image reference before pinning it. */
+  resolveImage(imageRef: string): Promise<string>;
   create(spec: SandboxSpec): Promise<SandboxRef>;
   /** Run a disposable command and return its output; used for preflight checks. */
   execute?(spec: SandboxSpec): Promise<SandboxExecutionResult>;
@@ -19,6 +21,8 @@ export interface SandboxProvider {
   resume(ref: WorkspaceRef, spec: SandboxSpec): Promise<SandboxRef>;
   /** Persist the filesystem without retaining process memory or credentials. */
   suspend(ref: SandboxRef): Promise<WorkspaceRef>;
+  /** Release the stopped source after the controller durably records the workspace. Idempotent. */
+  finalizeSuspend(ref: SandboxRef, workspace: WorkspaceRef): Promise<void>;
   /** Permanently remove a suspended workspace. Must be idempotent. */
   deleteWorkspace(ref: WorkspaceRef): Promise<void>;
   /** Must be idempotent: the reconciler may call it for an already-dead box. */
@@ -44,6 +48,9 @@ export interface SandboxSpec {
   secrets: Record<string, Secret>;
   /** The command that starts the runtime inside the sandbox. */
   command: string;
+  /** Trusted hook: durably claim the allocated machine before installation/launch.
+   * Providers must await it and must not start the command if it rejects. */
+  onAllocated?: (ref: SandboxRef) => Promise<void>;
 }
 
 /** A handle durable enough to survive a controller restart: it is stored. */

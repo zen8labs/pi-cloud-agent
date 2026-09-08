@@ -127,6 +127,15 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  deleteSession: (id: string): Promise<{ ok: boolean }> =>
+    request<{ ok: boolean }>(`/sessions/${id}`, { method: "DELETE" }),
+
+  setSessionPinned: (id: string, pinned: boolean): Promise<{ ok: boolean; pinned: boolean }> =>
+    request<{ ok: boolean; pinned: boolean }>(`/sessions/${id}/pin`, {
+      method: "PATCH",
+      body: JSON.stringify({ pinned }),
+    }),
+
   cancelRun: (id: string): Promise<{ status: string }> =>
     request<{ status: string }>(`/runs/${id}/cancel`, { method: "POST" }),
 
@@ -144,7 +153,7 @@ export const api = {
   saveRepositoryEnvironment: (body: {
     provider: string;
     repo: string;
-    setupScript: string;
+    imageRef: string;
   }): Promise<{
     ok: boolean;
     configured: boolean;
@@ -158,7 +167,7 @@ export const api = {
   testRepositoryEnvironment: (body: {
     provider: string;
     repo: string;
-    setupScript: string;
+    imageRef: string;
   }): Promise<{ ok: boolean; code: number; output: string }> =>
     request<{ ok: boolean; code: number; output: string }>("/environments/test", {
       method: "POST",

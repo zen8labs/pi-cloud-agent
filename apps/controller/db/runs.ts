@@ -19,6 +19,7 @@ import {
   lt,
   notInArray,
   or,
+  type SQL,
   sql,
 } from "drizzle-orm";
 import { CHANNELS, type Database, notify } from "./client";
@@ -86,7 +87,7 @@ export async function claimNextRun(
           // owns activeRunId is eligible to provision against the workspace.
           or(
             isNull(runs.sessionId),
-            sql`exists (select 1 from ${sessions} where ${sessions.id} = ${runs.sessionId} and ${sessions.activeRunId} = ${runs.id})`,
+            sql`exists (select 1 from ${sessions} where ${sessions.id} = ${runs.sessionId} and ${sessions.activeRunId} = ${runs.id} and ${sessions.sessionOperation} is null)`,
           ),
           ...(excludeIds.length > 0 ? [notInArray(runs.id, excludeIds)] : []),
         ),
@@ -125,6 +126,7 @@ export async function attachSandbox(
   runId: string,
   sandbox: { provider: string; id: string },
   deadlineAt: Date,
+  attempt?: number,
 ): Promise<boolean> {
   const updated = await database
     .update(runs)
@@ -134,7 +136,16 @@ export async function attachSandbox(
       deadlineAt,
       updatedAt: new Date(),
     })
-    .where(and(eq(runs.id, runId), eq(runs.status, "provisioning")))
+    .where(
+      and(
+        eq(runs.id, runId),
+        eq(runs.status, "provisioning"),
+        isNull(runs.sandboxId),
+        ...(attempt === undefined
+          ? []
+          : [eq(runs.attempt, attempt), gt(runs.claimExpiresAt, new Date())]),
+      ),
+    )
     .returning({ id: runs.id });
   return updated.length > 0;
 }
@@ -154,7 +165,10 @@ export async function setRunPlugins(
 export async function markRunning(database: Database, runId: string): Promise<boolean> {
   const updated = await database
     .update(runs)
-    .set({ status: "running", updatedAt: new Date() })
+    // Establish the liveness baseline after the provider has launched the
+    // runtime. A slow image/runtime preparation must not look silent merely
+    // because the provisioning claim was created earlier.
+    .set({ status: "running", lastEventAt: new Date(), updatedAt: new Date() })
     .where(and(eq(runs.id, runId), eq(runs.status, "provisioning")))
     .returning({ id: runs.id });
   return updated.length > 0;
@@ -182,11 +196,23 @@ export async function completeRun(
 }
 
 /** Put a claimed-but-unprovisioned run back on the queue for another attempt. */
-export async function requeueRun(database: Database, runId: string): Promise<boolean> {
+export async function requeueRun(
+  database: Database,
+  runId: string,
+  claim?: { attempt: number; expired?: boolean },
+): Promise<boolean> {
   const updated = await database
     .update(runs)
     .set({ status: "queued", claimedAt: null, claimExpiresAt: null, updatedAt: new Date() })
-    .where(and(eq(runs.id, runId), eq(runs.status, "provisioning"), isNull(runs.sandboxId)))
+    .where(
+      and(
+        eq(runs.id, runId),
+        eq(runs.status, "provisioning"),
+        isNull(runs.sandboxId),
+        ...(claim ? [eq(runs.attempt, claim.attempt)] : []),
+        ...(claim?.expired ? [lt(runs.claimExpiresAt, new Date())] : []),
+      ),
+    )
     .returning({ id: runs.id });
   if (updated.length > 0) await notify(database, CHANNELS.runQueued, runId);
   return updated.length > 0;
@@ -197,6 +223,33 @@ export async function markSandboxStopped(database: Database, runId: string): Pro
     .update(runs)
     .set({ sandboxStoppedAt: new Date(), updatedAt: new Date() })
     .where(eq(runs.id, runId));
+}
+
+/** Clear the durable source-cleanup marker after finalization succeeds. */
+export async function markSessionSandboxFinalized(
+  database: Database,
+  runId: string,
+  source: { provider: string; id: string },
+  workspace: { provider: string; id: string },
+): Promise<boolean> {
+  const updated = await database
+    .update(runs)
+    .set({
+      sandboxFinalizationWorkspaceProvider: null,
+      sandboxFinalizationWorkspaceId: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(runs.id, runId),
+        eq(runs.sandboxProvider, source.provider),
+        eq(runs.sandboxId, source.id),
+        eq(runs.sandboxFinalizationWorkspaceProvider, workspace.provider),
+        eq(runs.sandboxFinalizationWorkspaceId, workspace.id),
+      ),
+    )
+    .returning({ id: runs.id });
+  return updated.length > 0;
 }
 
 /**
@@ -377,6 +430,63 @@ export async function findSandboxesToStop(
         isNull(runs.sessionId),
         isNotNull(runs.sandboxId),
         isNull(runs.sandboxStoppedAt),
+      ),
+    )
+    .limit(limit);
+}
+
+/** Parked session sources whose post-checkpoint cleanup still needs a retry. */
+export async function findSessionSandboxesToFinalize(
+  database: Database,
+  limit: number,
+  sessionId?: string,
+): Promise<RunRow[]> {
+  return findSessionWorkspaceMarkers(
+    database,
+    limit,
+    sessionId,
+    and(
+      isNotNull(runs.sandboxProvider),
+      isNotNull(runs.sandboxId),
+      isNotNull(runs.sandboxStoppedAt),
+      isNotNull(runs.sandboxFinalizationWorkspaceProvider),
+      isNotNull(runs.sandboxFinalizationWorkspaceId),
+    ),
+  );
+}
+
+/** Replaced session checkpoints whose provider deletion still needs a retry. */
+export async function findSessionSandboxReplacementsToDelete(
+  database: Database,
+  limit: number,
+  sessionId?: string,
+): Promise<RunRow[]> {
+  return findSessionWorkspaceMarkers(
+    database,
+    limit,
+    sessionId,
+    and(
+      isNotNull(runs.sandboxReplacementWorkspaceProvider),
+      isNotNull(runs.sandboxReplacementWorkspaceId),
+    ),
+  );
+}
+
+function findSessionWorkspaceMarkers(
+  database: Database,
+  limit: number,
+  sessionId: string | undefined,
+  marker: SQL | undefined,
+): Promise<RunRow[]> {
+  return database
+    .select()
+    .from(runs)
+    .where(
+      and(
+        isNotNull(runs.sessionId),
+        ...(sessionId ? [eq(runs.sessionId, sessionId)] : []),
+        inArray(runs.status, [...TERMINAL_STATUSES]),
+        ...(marker ? [marker] : []),
       ),
     )
     .limit(limit);

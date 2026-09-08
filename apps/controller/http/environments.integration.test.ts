@@ -5,9 +5,17 @@ import type {
 } from "@pi-cloud-agent/protocol";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Database } from "../db/client";
-import { getRepositoryEnvironment, saveRepositoryEnvironment } from "../db/environments";
+import { getRepositorySandboxImage, saveRepositorySandboxImage } from "../db/environments";
+import { completeRun } from "../db/runs";
+import { getSession, parkSession } from "../db/sessions";
 import { createCredentialBroker } from "../secrets/broker";
-import { bindTestDatabase, seedTestUser, silentLogger, testConfig } from "../test-support";
+import {
+  bindTestDatabase,
+  seedSession,
+  seedTestUser,
+  silentLogger,
+  testConfig,
+} from "../test-support";
 import type { createApp } from "./app";
 import { createApp as buildApp } from "./app";
 
@@ -16,8 +24,12 @@ let app: ReturnType<typeof createApp>;
 const auth = { cookie: "", userId: "" };
 
 let executedSpec: SandboxSpec | null = null;
+const deletedWorkspaces: string[] = [];
 const sandbox: SandboxProvider = {
   name: "fake",
+  async resolveImage(imageRef) {
+    return imageRef || "fake:default";
+  },
   async execute(spec) {
     executedSpec = spec;
     return { code: 0, stdout: "node v22.23.2\nPython 3.11.2", stderr: "" };
@@ -31,7 +43,10 @@ const sandbox: SandboxProvider = {
   async suspend(ref) {
     return ref;
   },
-  async deleteWorkspace() {},
+  async finalizeSuspend() {},
+  async deleteWorkspace(ref) {
+    deletedWorkspaces.push(ref.id);
+  },
   async stop() {},
 };
 
@@ -55,19 +70,28 @@ function requestHeaders() {
   };
 }
 
+function testImageRequest(target: ReturnType<typeof createApp>, imageRef: string) {
+  return target.request("/environments/test", {
+    method: "POST",
+    headers: requestHeaders(),
+    body: JSON.stringify({ provider: "github", repo: "acme/widgets", imageRef }),
+  });
+}
+
 describe("repository environments", () => {
   beforeEach(() => {
     executedSpec = null;
+    deletedWorkspaces.length = 0;
   });
 
-  it("saves and lists a per-repository setup script", async () => {
+  it("saves and lists a per-repository image reference", async () => {
     const response = await app.request("/environments", {
       method: "PUT",
       headers: requestHeaders(),
       body: JSON.stringify({
         provider: "github",
         repo: "acme/widgets",
-        setupScript: "pnpm install\npython3 -m venv .venv",
+        imageRef: "ghcr.io/acme/widgets:dev",
       }),
     });
     expect(response.status).toBe(200);
@@ -80,50 +104,86 @@ describe("repository environments", () => {
     expect(body.environments[0]).toMatchObject({
       provider: "github",
       repo: "acme/widgets",
-      setupScript: "pnpm install\npython3 -m venv .venv",
+      imageRef: "ghcr.io/acme/widgets:dev",
     });
   });
 
   it("clears the app setting", async () => {
-    await saveRepositoryEnvironment(database, {
+    await saveRepositorySandboxImage(database, {
       userId: auth.userId,
       provider: "github",
       repoFullName: "acme/widgets",
-      setupScript: "pnpm install",
+      imageRef: "ghcr.io/acme/widgets:dev",
     });
     const response = await app.request("/environments", {
       method: "PUT",
       headers: requestHeaders(),
-      body: JSON.stringify({ provider: "github", repo: "acme/widgets", setupScript: "  " }),
+      body: JSON.stringify({ provider: "github", repo: "acme/widgets", imageRef: "  " }),
     });
     expect(response.status).toBe(200);
     await expect(
-      getRepositoryEnvironment(database, auth.userId, "github", "acme/widgets"),
+      getRepositorySandboxImage(database, auth.userId, "github", "acme/widgets"),
     ).resolves.toBeNull();
   });
 
-  it("tests an unsaved setup script in a disposable sandbox", async () => {
-    const response = await app.request("/environments/test", {
-      method: "POST",
-      headers: requestHeaders(),
-      body: JSON.stringify({
-        provider: "github",
-        repo: "acme/widgets",
-        setupScript: "python -V\nnode --version",
-      }),
-    });
+  it("tests an unsaved image in a disposable sandbox", async () => {
+    const response = await testImageRequest(app, "docker.io/acme/widgets:dev");
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       output: "node v22.23.2\nPython 3.11.2",
     });
-    expect(executedSpec?.env.REPO_CLONE_URL).toBe("https://github.com/acme/widgets.git");
-    expect(executedSpec?.command).toMatch(/^set -eu\n/);
-    expect(executedSpec?.command).toContain("git clone --depth 1");
-    expect(executedSpec?.command).toContain(`if [ -n "\${SCM_TOKEN:-}" ]; then`);
-    expect(executedSpec?.command).toContain("unset BASH_ENV ENV NODE_ENV");
-    expect(executedSpec?.command).toContain(
-      "timeout --signal=KILL 300s bash --noprofile --norc -e -u -o pipefail",
-    );
+    expect(executedSpec?.image).toBe("docker.io/acme/widgets:dev");
+    expect(executedSpec?.command).toContain("test -r /opt/pi-cloud-agent/run.js");
+    expect(executedSpec?.command).toContain("test -r /opt/pi-cloud-agent/package.json");
+    expect(executedSpec?.command).toContain("test -w /workspace");
+    expect(executedSpec?.command).toContain("node --import tsx");
+    expect(executedSpec?.command).toContain("command -v git");
+  });
+
+  it("rejects an empty image in the preflight endpoint", async () => {
+    const response = await app.request("/environments/test", {
+      method: "POST",
+      headers: requestHeaders(),
+      body: JSON.stringify({ provider: "github", repo: "acme/widgets", imageRef: "  " }),
+    });
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({ error: "image reference cannot be empty" });
+    expect(executedSpec).toBeNull();
+  });
+
+  it("does not expose provider-specific errors from image preflight", async () => {
+    const failingSandbox: SandboxProvider = {
+      ...sandbox,
+      async execute() {
+        throw new Error("e2b: template build failed for docker.io/acme/widgets:dev");
+      },
+    };
+    const failingApp = buildApp({
+      config: testConfig(),
+      database,
+      log: silentLogger(),
+      broker: createCredentialBroker(testConfig(), database, silentLogger()),
+      sandbox: failingSandbox,
+    });
+
+    const response = await testImageRequest(failingApp, "docker.io/acme/widgets:dev");
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ error: "could not test repository image" });
+  });
+
+  it("deletes a session and asks the provider to delete its checkpoint", async () => {
+    const { session, run } = await seedSession(database, auth.userId);
+    await completeRun(database, run.id, "succeeded");
+    await parkSession(database, run, { provider: "fake", id: "checkpoint-1" }, null);
+
+    const response = await app.request(`/sessions/${session.id}`, {
+      method: "DELETE",
+      headers: requestHeaders(),
+    });
+    expect(response.status).toBe(200);
+    expect(deletedWorkspaces).toEqual(["checkpoint-1"]);
+    expect(await getSession(database, session.id)).toBeNull();
   });
 });

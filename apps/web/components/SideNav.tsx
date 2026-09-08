@@ -1,21 +1,27 @@
 "use client";
 
 import type { SessionSummary } from "@pi-cloud-agent/protocol";
-import { PanelLeftIcon, PlusIcon } from "lucide-react";
+import { PanelLeftIcon, PinIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AccountMenu } from "@/components/AccountMenu";
 import { useNavCollapse } from "@/components/nav-collapse";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { api } from "@/lib/api";
+import { formatDuration } from "@/lib/format";
 import { loadSessionTitles } from "@/lib/session-titles";
 import { cn } from "@/lib/utils";
 
 export function SideNav() {
   const pathname = usePathname();
+  const router = useRouter();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [titles, setTitles] = useState<Record<string, string>>({});
+  const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SessionSummary | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -38,7 +44,45 @@ export function SideNav() {
   }, []);
 
   const active = sessions.filter((session) => session.status !== "idle");
-  const recent = sessions.filter((session) => session.status === "idle");
+  const pinned = sessions.filter((session) => session.status === "idle" && session.pinned);
+  const recent = sessions.filter((session) => session.status === "idle" && !session.pinned);
+
+  const togglePin = async (session: SessionSummary) => {
+    setPendingActionId(session.id);
+    try {
+      const result = await api.setSessionPinned(session.id, !session.pinned);
+      setSessions((current) =>
+        current.map((item) =>
+          item.id === session.id ? { ...item, pinned: result.pinned } : item,
+        ),
+      );
+    } catch (cause) {
+      window.alert(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setPendingActionId(null);
+    }
+  };
+
+  const requestDelete = (session: SessionSummary) => {
+    setDeleteError(null);
+    setDeleteTarget(session);
+  };
+
+  const deleteSession = async () => {
+    if (!deleteTarget) return;
+    const session = deleteTarget;
+    setPendingActionId(session.id);
+    try {
+      await api.deleteSession(session.id);
+      setSessions((current) => current.filter((item) => item.id !== session.id));
+      setDeleteTarget(null);
+      if (pathname === `/sessions/${session.id}`) router.push("/");
+    } catch (cause) {
+      setDeleteError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setPendingActionId(null);
+    }
+  };
 
   return (
     <>
@@ -74,6 +118,20 @@ export function SideNav() {
               sessions={active}
               pathname={pathname}
               titles={titles}
+              pendingActionId={pendingActionId}
+              onTogglePin={togglePin}
+              onDelete={requestDelete}
+            />
+          )}
+          {pinned.length > 0 && (
+            <SessionGroup
+              label="Pinned"
+              sessions={pinned}
+              pathname={pathname}
+              titles={titles}
+              pendingActionId={pendingActionId}
+              onTogglePin={togglePin}
+              onDelete={requestDelete}
             />
           )}
           {recent.length > 0 && (
@@ -82,6 +140,9 @@ export function SideNav() {
               sessions={recent}
               pathname={pathname}
               titles={titles}
+              pendingActionId={pendingActionId}
+              onTogglePin={togglePin}
+              onDelete={requestDelete}
             />
           )}
           {sessions.length === 0 && (
@@ -95,6 +156,22 @@ export function SideNav() {
           <AccountMenu />
         </div>
       </aside>
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title={deleteTarget ? `Delete “${deleteTarget.title || "session"}”` : "Delete session"}
+        description="This permanently deletes the session, its chat history, and its sandbox checkpoint."
+        confirmLabel="Delete"
+        busyLabel="Deleting…"
+        busy={pendingActionId === deleteTarget?.id}
+        error={deleteError}
+        onCancel={() => {
+          if (pendingActionId === null) {
+            setDeleteTarget(null);
+            setDeleteError(null);
+          }
+        }}
+        onConfirm={() => void deleteSession()}
+      />
     </>
   );
 }
@@ -104,33 +181,71 @@ function SessionGroup({
   sessions,
   pathname,
   titles,
+  pendingActionId,
+  onTogglePin,
+  onDelete,
 }: {
   label: string;
   sessions: SessionSummary[];
   pathname: string;
   titles: Record<string, string>;
+  pendingActionId: string | null;
+  onTogglePin: (session: SessionSummary) => Promise<void>;
+  onDelete: (session: SessionSummary) => void;
 }) {
   return (
     <section className="mb-4">
       <h2 className="nav-label">{label}</h2>
       <div className="space-y-px">
         {sessions.map((session) => (
-          <Link
+          <div
             key={session.id}
-            href={`/sessions/${session.id}`}
-            title={session.repo}
             className={cn(
-              "history-link",
+              "history-link group overflow-hidden",
               pathname === `/sessions/${session.id}` && "is-active",
             )}
           >
-            <span className="truncate">
+            <Link
+              href={`/sessions/${session.id}`}
+              title={session.repo}
+              className="min-w-0 flex-1 truncate"
+            >
               {titles[session.id] || session.title || sessionLabel(session)}
-            </span>
-            {session.status !== "idle" && (
-              <span className="ml-auto size-1.5 shrink-0 animate-pulse-dot rounded-full bg-emerald-500" />
+            </Link>
+            {session.retentionStatus === "inactive" && (
+              <span
+                title={`Inactive after ${formatDuration(session.inactiveAfterSeconds)} without activity`}
+                className="shrink-0 text-[10px] text-muted-foreground"
+              >
+                inactive
+              </span>
             )}
-          </Link>
+            {session.status !== "idle" && (
+              <span className="size-1.5 shrink-0 animate-pulse-dot rounded-full bg-emerald-500" />
+            )}
+            <div className="flex w-0 shrink-0 items-center gap-0.5 overflow-hidden border-l border-transparent bg-inherit pl-1 opacity-0 transition-[width,opacity,border-color] duration-150 group-hover:w-14 group-hover:border-border/70 group-hover:opacity-100 group-focus-within:w-14 group-focus-within:border-border/70 group-focus-within:opacity-100">
+              <button
+                type="button"
+                aria-label={session.pinned ? "Unpin session" : "Pin session"}
+                title={session.pinned ? "Unpin session" : "Pin session"}
+                disabled={pendingActionId === session.id}
+                onClick={() => void onTogglePin(session)}
+                className="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+              >
+                <PinIcon className="size-3.5" fill={session.pinned ? "currentColor" : "none"} />
+              </button>
+              <button
+                type="button"
+                aria-label="Delete session"
+                title="Delete session"
+                disabled={pendingActionId === session.id}
+                onClick={() => onDelete(session)}
+                className="rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+              >
+                <Trash2Icon className="size-3.5" />
+              </button>
+            </div>
+          </div>
         ))}
       </div>
     </section>

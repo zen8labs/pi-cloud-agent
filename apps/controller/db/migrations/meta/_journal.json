@@ -127,6 +127,62 @@
       "when": 1786207299175,
       "tag": "0017_gorgeous_quicksilver",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788407523337,
+      "tag": "0018_session_checkpoints",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788413287069,
+      "tag": "0019_nostalgic_krista_starr",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788756748560,
+      "tag": "0020_wise_black_bolt",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788760843922,
+      "tag": "0021_session_pins",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1788769838210,
+      "tag": "0022_sad_carlie_cooper",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1788773553393,
+      "tag": "0023_hard_wind_dancer",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788774654200,
+      "tag": "0024_free_hellfire_club",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788785280375,
+      "tag": "0025_organic_molly_hayes",
+      "breakpoints": true
     }
   ]
 }

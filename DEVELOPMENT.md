@@ -39,7 +39,7 @@ From the repository root:
 make setup
 ```
 
-This installs the locked dependencies, starts the local Postgres container, applies migrations, builds the runtime image, and loads it into the microSandbox image cache. It is safe to run again after pulling changes.
+This installs the locked dependencies, starts local Postgres, applies migrations, builds the app runtime archives for amd64/arm64, and loads the default project image into microSandbox. It is safe to run again after pulling changes.
 
 ### 3. Start development
 
@@ -107,6 +107,7 @@ Build the hosted template and restart the app:
 
 ```bash
 pnpm sandbox:template
+pnpm sandbox:runtime
 make dev
 ```
 
@@ -126,15 +127,31 @@ Useful narrower checks are `pnpm lint`, `pnpm test`, `pnpm test:integration`, an
 LIVE_TEST_REPO=owner/repository pnpm test:live
 ```
 
-Rebuild the local image after changing `packages/runtime/**`, `packages/runtime/Dockerfile.sandbox`, or the runtime dependency:
+Rebuild the app runtime after changing runtime code or dependencies:
 
 ```bash
-pnpm sandbox:image
+pnpm sandbox:runtime
 ```
 
-For E2B, use `pnpm sandbox:template` instead.
+This artifact is used by both providers. Rebuild the default project image with `pnpm sandbox:image` (or `pnpm sandbox:template` for E2B) only when changing its toolchains. The controller Docker image builds both runtime archives from source; no local build artifacts are required. For other packaging layouts, set `SANDBOX_RUNTIME_DIR` to the archive directory.
 
-The image provides Node/npm/pnpm, Python/pip/venv/uv, Git/GitHub CLIs, common shell utilities, and native build tools. Repository-specific dependencies belong in the per-repository setup script in Settings > Environments; see [packages/runtime/README.md](packages/runtime/README.md#sandbox-tools-and-repository-setup).
+The image provides Node/npm/pnpm, Python/pip/venv/uv, Git/GitHub CLIs, common shell utilities, and native build tools. Repository-specific dependencies belong in a per-repository custom image; see [packages/runtime/README.md](packages/runtime/README.md#image-contract).
+
+Build a project image from a supported distribution; there is no required app parent image or agent runtime to copy:
+
+```dockerfile
+FROM debian:12-slim
+RUN apt-get update && apt-get install -y --no-install-recommends <toolchain> \
+    && rm -rf /var/lib/apt/lists/*
+```
+
+Enter the public OCI reference in Settings > Environments. **Test environment** optionally checks app installation and library loading; it does not run a model task. Supported bases are Debian 12/13 and Ubuntu 22.04/24.04. The app adds its runtime inside the sandbox and launches it as an unprivileged user. Language toolchains remain the image author's choice.
+
+To verify installation and warm resume with plain Debian, without model or forge credentials:
+
+```bash
+pnpm vitest run --project live packages/sandbox/project-image.live.test.ts
+```
 
 ## Troubleshooting
 

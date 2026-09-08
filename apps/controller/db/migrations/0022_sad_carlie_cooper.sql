@@ -1,0 +1,1 @@
+ALTER TABLE "sessions" ADD COLUMN "session_operation_heartbeat_at" timestamp with time zone;

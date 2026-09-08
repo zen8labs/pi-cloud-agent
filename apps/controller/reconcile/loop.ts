@@ -14,15 +14,25 @@ import {
 } from "../db/runs";
 import type { RunRow, SessionRow } from "../db/schema";
 import {
+  claimSessionOperation,
+  releaseSessionOperation,
+  releaseStaleReconcilerOperations,
+  startSessionOperationHeartbeat,
+} from "../db/session-operations";
+import {
   clearSessionWorkspace,
   findExpiredSessionWorkspaces,
   findSessionRunsToPark,
-  getSession,
-  parkSession,
 } from "../db/sessions";
 import type { Logger } from "../logger";
 import type { CredentialBroker } from "../secrets/broker";
 import { type ProvisionDeps, provisionRun } from "./provision";
+import {
+  retryPendingSessionFinalizations,
+  retryPendingSessionSandboxReplacements,
+  type SessionFinalizationDeps,
+} from "./session-finalization";
+import { parkSessionRun } from "./session-parking";
 
 /**
  * The reconciler: one loop that reads durable state and repairs it.
@@ -96,7 +106,29 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
   } = options;
 
   const sandbox = providedSandbox ?? createProvider(config.sandbox.provider);
-  const provisionDeps: ProvisionDeps = { config, database, broker, sandbox, log };
+  const provisionDeps: ProvisionDeps = {
+    config,
+    database,
+    broker,
+    sandbox,
+    createProvider,
+    log,
+    claimLeaseSeconds,
+  };
+  const finalizationDeps: SessionFinalizationDeps = {
+    database,
+    sandbox,
+    createProvider,
+    log,
+  };
+  const sessionParkingDeps = {
+    config,
+    database,
+    sandbox,
+    createProvider,
+    log,
+    finalization: finalizationDeps,
+  };
 
   let running = false;
   let timer: NodeJS.Timeout | null = null;
@@ -110,19 +142,19 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
   async function reclaim(run: RunRow, reason: string): Promise<void> {
     if (!run.sandboxId || !run.sandboxProvider) return;
     const runLog = log.child({ runId: run.id, sandboxId: run.sandboxId });
+    let stopped = false;
     try {
       const provider =
         run.sandboxProvider === sandbox.name ? sandbox : createProvider(run.sandboxProvider);
       await provider.stop({ provider: run.sandboxProvider, id: run.sandboxId });
+      stopped = true;
       runLog.info("sandbox reclaimed", { reason });
     } catch (error) {
-      // Deliberately still marked stopped: a provider that cannot kill a machine
-      // will not start succeeding on the next tick, and retrying forever would
-      // turn one stuck sandbox into an endless loop. The provider's own timeout
-      // is the backstop.
-      runLog.error("sandbox stop failed; giving up on it", { reason, error });
+      // Keep the marker clear so the next reconciliation pass retries cleanup.
+      // A failed provider call is not evidence that the machine is gone.
+      runLog.error("sandbox stop failed; will retry", { reason, error });
     }
-    await markSandboxStopped(database, run.id);
+    if (stopped) await markSandboxStopped(database, run.id);
   }
 
   /** Suspend a session workspace, or release the session cold if suspension fails. */
@@ -131,50 +163,29 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
       await reclaim(run, reason);
       return;
     }
-    if (!run.sandboxId || !run.sandboxProvider) {
-      // A promoted turn can be cancelled before it resumes the session's
-      // parked workspace. It owns no sandbox to suspend, so preserve the
-      // existing workspace reference for the next queued turn.
-      await parkSession(database, run, undefined, null);
-      return;
-    }
-
-    const provider =
-      run.sandboxProvider === sandbox.name ? sandbox : createProvider(run.sandboxProvider);
-    const ref = { provider: run.sandboxProvider, id: run.sandboxId };
-    try {
-      const workspace = await provider.suspend(ref);
-      const expiresAt = new Date(Date.now() + config.sessionWorkspaceRetentionSeconds * 1000);
-      const parked = await parkSession(database, run, workspace, expiresAt);
-      if (parked) {
-        log.info("session workspace suspended", {
-          sessionId: run.sessionId,
-          runId: run.id,
-          workspaceId: workspace.id,
-          reason,
-        });
-      } else {
-        const current = await getSession(database, run.sessionId);
-        const stillOwned = current?.activeRunId || current?.sandboxId === workspace.id;
-        if (!stillOwned) await provider.deleteWorkspace(workspace);
-      }
-    } catch (error) {
-      log.error("session workspace suspension failed; continuing cold", {
-        sessionId: run.sessionId,
-        runId: run.id,
-        error,
-      });
-      await provider.stop(ref).catch(() => undefined);
-      await parkSession(database, run, null, null);
-    }
+    await parkSessionRun(run, reason, sessionParkingDeps);
   }
 
   async function expireWorkspace(session: SessionRow): Promise<void> {
     if (!session.sandboxId || !session.sandboxProvider) return;
+    const operationAt = await claimSessionOperation(database, session.id, "expiring", {
+      activeRunId: null,
+      workspaceId: session.sandboxId,
+    });
+    if (!operationAt) {
+      return;
+    }
     const provider =
       session.sandboxProvider === sandbox.name
         ? sandbox
         : createProvider(session.sandboxProvider);
+    const stopHeartbeat = startSessionOperationHeartbeat(
+      database,
+      session.id,
+      "expiring",
+      operationAt,
+      (error) => log.warn("session expiry heartbeat failed", { sessionId: session.id, error }),
+    );
     try {
       await provider.deleteWorkspace({
         provider: session.sandboxProvider,
@@ -186,8 +197,23 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
         workspaceId: session.sandboxId,
         error,
       });
+      // Keep the durable reference so the next reconciliation pass can retry.
+      // Clearing it here would mark the session inactive while leaking the
+      // provider artifact permanently.
+      await releaseSessionOperation(database, session.id, "expiring", operationAt);
+      return;
+    } finally {
+      stopHeartbeat();
     }
-    await clearSessionWorkspace(database, session.id, session.sandboxId);
+    await clearSessionWorkspace(
+      database,
+      session.id,
+      session.sandboxId,
+      null,
+      "expiring",
+      operationAt,
+    );
+    await releaseSessionOperation(database, session.id, "expiring", operationAt);
   }
 
   async function drainQueue(): Promise<void> {
@@ -229,8 +255,12 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
   }
 
   async function tick(): Promise<void> {
+    await releaseStaleReconcilerOperations(database);
     // Ordered cheapest-first, and teardown before new work so a busy queue can
     // never starve reclamation of machines that are still costing money.
+    await retryPendingSessionSandboxReplacements(finalizationDeps);
+    await retryPendingSessionFinalizations(finalizationDeps);
+
     for (const run of await findSandboxesToStop(database, BATCH)) {
       await reclaim(run, "run finished");
     }
@@ -258,7 +288,7 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
     for (const run of await findReclaimableClaims(database, BATCH)) {
       // Claimed but never provisioned: whoever held it is gone, and no sandbox
       // was ever created, so another attempt is safe.
-      if (await requeueRun(database, run.id)) {
+      if (await requeueRun(database, run.id, { attempt: run.attempt, expired: true })) {
         log.warn("reclaimed an expired claim", { runId: run.id, attempt: run.attempt });
       }
     }

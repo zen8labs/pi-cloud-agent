@@ -1,7 +1,6 @@
 import { runAgentSession } from "./agent";
 import { createRuntimeRedactor, readConfig } from "./config";
 import { createReporter } from "./reporter";
-import { runSetupScript } from "./setup";
 import { configureGitCredentials, gitDiff, gitRevision, prepareCheckout } from "./workspace";
 
 const clean = createRuntimeRedactor();
@@ -28,11 +27,7 @@ async function main(): Promise<void> {
     stage = "git credentials";
     await configureGitCredentials(config, reporter);
     stage = "repository checkout";
-    const workspace = await prepareCheckout(config, reporter);
-    if (workspace === "created") {
-      stage = "repository setup";
-      await runSetupScript(config, reporter);
-    }
+    await prepareCheckout(config, reporter);
     const baseSha = config.sessionBaseSha || (await gitRevision(config.repo.path));
     if (baseSha) {
       // Persist the immutable session baseline before the agent can commit,

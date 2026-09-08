@@ -32,12 +32,22 @@ const observability = createObservability({
   log: createLogger("observability", { level: config.logLevel }),
 });
 
-const app = createApp({ config, database, log, observability, broker, sandbox });
+const createProvider = (name: string) => createSandboxProvider(name, config.env);
+const app = createApp({
+  config,
+  database,
+  log,
+  observability,
+  broker,
+  sandbox,
+  createSandboxProvider: createProvider,
+});
 const reconciler = createReconciler({
   config,
   database,
   broker,
   sandbox,
+  createProvider,
   log: createLogger("reconciler", { level: config.logLevel }),
 });
 

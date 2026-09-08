@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
+import { resolve } from "node:path";
 import {
   SandboxError,
   type SandboxExecutionResult,
@@ -11,17 +13,21 @@ import {
   MicrosandboxError,
   NetworkPolicy,
   Sandbox,
+  type SandboxBuilder,
   SandboxNotFoundError,
   SandboxStillRunningError,
+  Snapshot,
 } from "microsandbox";
 import { z } from "zod";
 import { flattenSecrets } from "./environment.js";
+import { SANDBOX_CPU_COUNT, SANDBOX_MEMORY_MB } from "./machine.js";
+import { readRuntimeArchive, runtimeInstallCommand, runtimeUser } from "./runtime-install.js";
 
 const envSchema = z.object({
   MICROSANDBOX_IMAGE: z.string().default("pi-cloud-agent:local"),
-  MICROSANDBOX_CPUS: z.coerce.number().int().positive().default(2),
-  MICROSANDBOX_MEMORY_MB: z.coerce.number().int().positive().default(4096),
+  SANDBOX_RUNTIME_DIR: z.string().default(""),
   MICROSANDBOX_ROOT_DISK_MIB: z.coerce.number().int().positive().default(8192),
+  MICROSANDBOX_SNAPSHOT_DIR: z.string().default(""),
   MICROSANDBOX_ALLOW_HOST: z
     .enum(["true", "false"])
     .default("true")
@@ -41,30 +47,35 @@ export function createMicroSandboxProvider(
 ): SandboxProvider {
   const {
     MICROSANDBOX_IMAGE: defaultImage,
-    MICROSANDBOX_CPUS: cpus,
-    MICROSANDBOX_MEMORY_MB: memoryMb,
+    SANDBOX_RUNTIME_DIR: runtimeDirectory,
     MICROSANDBOX_ROOT_DISK_MIB: rootDiskMib,
+    MICROSANDBOX_SNAPSHOT_DIR: configuredSnapshotDir,
     MICROSANDBOX_ALLOW_HOST: allowHost,
   } = envSchema.parse(env);
+  const snapshotDir = resolve(configuredSnapshotDir.trim() || ".pi-cloud-agent-snapshots");
 
   return {
     name: "microsandbox",
+
+    async resolveImage(imageRef) {
+      return imageRef || defaultImage;
+    },
 
     async execute(spec: SandboxSpec): Promise<SandboxExecutionResult> {
       const id = `pi-test-${randomUUID().slice(0, 12)}`;
       let sandbox: Sandbox | undefined;
       try {
-        sandbox = await Sandbox.builder(id)
-          .image(spec.image || defaultImage)
-          .rootDisk(rootDiskMib)
-          .entrypoint(["sleep", "infinity"])
-          .cpus(cpus)
-          .memory(memoryMb)
-          .network((network) => network.policy(buildNetworkPolicy(spec, allowHost)))
-          .maxDuration(spec.timeoutSeconds)
-          .create();
+        sandbox = await configureImageSandbox(
+          Sandbox.builder(id),
+          spec,
+          defaultImage,
+          rootDiskMib,
+          allowHost,
+        ).create();
+        await installRuntime(sandbox, runtimeDirectory, spec.timeoutSeconds);
         const output = await sandbox.execWith("bash", (exec) =>
           exec
+            .user(runtimeUser)
             .args(["--noprofile", "--norc", "-e", "-u", "-o", "pipefail", "-c", spec.command])
             .envs(flattenSecrets(spec))
             .timeout(spec.timeoutSeconds * 1000),
@@ -86,13 +97,13 @@ export function createMicroSandboxProvider(
       let sandbox: Sandbox;
 
       try {
-        sandbox = await Sandbox.builder(id)
-          .image(image)
-          .rootDisk(rootDiskMib)
-          .entrypoint(["sleep", "infinity"])
-          .cpus(cpus)
-          .memory(memoryMb)
-          .network((network) => network.policy(buildNetworkPolicy(spec, allowHost)))
+        sandbox = await configureImageSandbox(
+          Sandbox.builder(id),
+          spec,
+          defaultImage,
+          rootDiskMib,
+          allowHost,
+        )
           .detached(true)
           .maxDuration(spec.timeoutSeconds)
           .create();
@@ -104,6 +115,8 @@ export function createMicroSandboxProvider(
       }
 
       try {
+        await spec.onAllocated?.({ provider: "microsandbox", id });
+        await installRuntime(sandbox, runtimeDirectory, spec.timeoutSeconds);
         await startRuntime(sandbox, spec);
         await sandbox.detach();
       } catch (cause) {
@@ -121,11 +134,23 @@ export function createMicroSandboxProvider(
     },
 
     async resume(ref, spec): Promise<SandboxRef> {
+      const liveId = `pi-${spec.runId}-${randomUUID().slice(0, 8)}`;
       let sandbox: Sandbox;
       try {
-        sandbox = await Sandbox.startDetached(ref.id);
+        const snapshot = await Snapshot.open(ref.id);
+        await snapshot.verify();
+        sandbox = await Sandbox.builder(liveId)
+          .fromSnapshot(snapshot.path)
+          .entrypoint(["sleep", "infinity"])
+          .user("root")
+          .cpus(SANDBOX_CPU_COUNT)
+          .memory(SANDBOX_MEMORY_MB)
+          .network((network) => network.policy(buildNetworkPolicy(spec, allowHost)))
+          .detached(true)
+          .maxDuration(spec.timeoutSeconds)
+          .create();
       } catch (cause) {
-        if (cause instanceof SandboxNotFoundError) {
+        if (cause instanceof SandboxNotFoundError || isMissingSnapshot(cause)) {
           throw new WorkspaceNotFoundError(
             `microsandbox: workspace "${ref.id}" no longer exists`,
             { cause },
@@ -138,39 +163,66 @@ export function createMicroSandboxProvider(
       }
 
       try {
+        await spec.onAllocated?.({ provider: "microsandbox", id: liveId });
+        await installRuntime(sandbox, runtimeDirectory, spec.timeoutSeconds);
         await startRuntime(sandbox, spec);
         await sandbox.detach();
       } catch (cause) {
-        await sandbox.kill().catch(() => undefined);
+        await cleanupCreatedSandbox(liveId, sandbox);
         throw new SandboxError(`microsandbox: could not start runtime in "${ref.id}"`, {
           retryable: isRetryable(cause),
           cause,
         });
       }
 
-      return { provider: "microsandbox", id: ref.id };
+      // The snapshot path is the durable session reference; the live sandbox
+      // id is what the reconciler must stop and snapshot at turn completion.
+      return { provider: "microsandbox", id: liveId };
     },
 
     async suspend(ref) {
+      let snapshot: Snapshot;
       try {
         const handle = await Sandbox.get(ref.id);
         if (handle.status !== "stopped" && handle.status !== "crashed") {
           await handle.stop();
         }
+        await mkdir(snapshotDir, { recursive: true });
+        snapshot = await Snapshot.builder(`session-${ref.id}`)
+          .destDir(snapshotDir)
+          .fromSandbox(ref.id)
+          .force()
+          .recordIntegrity()
+          .create();
       } catch (cause) {
         throw new SandboxError(`microsandbox: could not suspend workspace "${ref.id}"`, {
           retryable: isRetryable(cause),
           cause,
         });
       }
-      return { provider: "microsandbox", id: ref.id };
+      return {
+        provider: "microsandbox",
+        id: snapshot.path,
+      };
+    },
+
+    async finalizeSuspend(ref) {
+      // The controller calls this only after the snapshot path is committed to
+      // Postgres. That ordering makes a controller crash leave a recoverable
+      // stopped source rather than an unreachable snapshot. Cleanup is
+      // idempotent because reconciliation may retry after a successful removal
+      // whose database marker update was interrupted.
+      await removePersistedSandbox(ref.id).catch((cause) => {
+        if (cause instanceof SandboxNotFoundError) return;
+        throw cause;
+      });
     },
 
     async deleteWorkspace(ref): Promise<void> {
       try {
-        await removePersistedSandbox(ref.id);
+        await Snapshot.remove(ref.id, { force: true });
       } catch (cause) {
-        if (cause instanceof SandboxNotFoundError) return;
+        if (isMissingSnapshot(cause)) return;
         throw new SandboxError(`microsandbox: could not delete workspace "${ref.id}"`, {
           retryable: false,
           cause,
@@ -192,6 +244,37 @@ export function createMicroSandboxProvider(
   };
 }
 
+function configureImageSandbox(
+  builder: SandboxBuilder,
+  spec: SandboxSpec,
+  defaultImage: string,
+  rootDiskMib: number,
+  allowHost: boolean,
+): SandboxBuilder {
+  return builder
+    .image(spec.image || defaultImage)
+    .rootDisk(rootDiskMib)
+    .entrypoint(["sleep", "infinity"])
+    .user("root")
+    .cpus(SANDBOX_CPU_COUNT)
+    .memory(SANDBOX_MEMORY_MB)
+    .network((network) => network.policy(buildNetworkPolicy(spec, allowHost)))
+    .maxDuration(spec.timeoutSeconds);
+}
+
+function isMissingSnapshot(cause: unknown): boolean {
+  const text = String(cause instanceof Error ? cause.message : cause).toLowerCase();
+  return (
+    text.includes("not found") ||
+    text.includes("no such file") ||
+    text.includes("does not exist") ||
+    text.includes("corrupt") ||
+    text.includes("checksum") ||
+    text.includes("integrity") ||
+    text.includes("invalid snapshot")
+  );
+}
+
 async function cleanupCreatedSandbox(id: string, sandbox: Sandbox): Promise<void> {
   await sandbox.kill().catch(() => undefined);
   await removePersistedSandbox(id).catch(() => undefined);
@@ -205,6 +288,7 @@ async function removePersistedSandbox(id: string): Promise<void> {
     }
     await handle.remove();
   } catch (cause) {
+    if (cause instanceof SandboxNotFoundError) return;
     if (!(cause instanceof SandboxStillRunningError)) throw cause;
     await Sandbox.get(id).then((handle) => handle.kill().then(() => handle.remove()));
   }
@@ -215,11 +299,12 @@ async function startRuntime(sandbox: Sandbox, spec: SandboxSpec): Promise<void> 
 
   const output = await sandbox.execWith("sh", (exec) =>
     exec
+      .user(runtimeUser)
       .args([
         "-lc",
         // Keep the detached process from holding the exec pipe open. Its output
         // is available inside the guest at this path; see docs/operations.md.
-        `nohup ${spec.command} > /tmp/pi-cloud-agent-runtime.log 2>&1 < /dev/null & pid=$!; sleep 0.1; kill -0 "$pid"`,
+        `nohup sh -c '${spec.command.replaceAll("'", "'\\''")}' > /tmp/pi-cloud-agent-runtime.log 2>&1 < /dev/null & pid=$!; sleep 0.1; kill -0 "$pid"`,
       ])
       .envs(envs)
       .timeout(spec.timeoutSeconds * 1000),
@@ -228,6 +313,21 @@ async function startRuntime(sandbox: Sandbox, spec: SandboxSpec): Promise<void> 
   if (!output.success) {
     throw new Error(output.stderr() || `runtime launch exited with code ${output.code}`);
   }
+}
+
+async function installRuntime(sandbox: Sandbox, directory: string, timeout: number) {
+  const machine = await sandbox.execWith("uname", (exec) => exec.args(["-m"]).user("root"));
+  if (!machine.success) throw new Error("could not identify sandbox architecture");
+  const archive = await readRuntimeArchive(directory, machine.stdout());
+  const target = `/tmp/pi-runtime-${randomUUID()}.tar.gz`;
+  await sandbox.fs().write(target, archive);
+  const result = await sandbox.execWith("sh", (exec) =>
+    exec
+      .args(["-c", runtimeInstallCommand(target)])
+      .user("root")
+      .timeout(timeout * 1000),
+  );
+  if (!result.success) throw new Error(result.stderr() || "app runtime installation failed");
 }
 
 const RETRYABLE_PATTERNS = [

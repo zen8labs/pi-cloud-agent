@@ -5,16 +5,23 @@ A sandbox provider answers two questions: *where does this turn's compute come f
 ```ts
 export interface SandboxProvider {
   readonly name: string;
+  /** Resolve the configured or provider-default base image before a session pins it. */
+  resolveImage(imageRef: string): Promise<string>;
   create(spec: SandboxSpec): Promise<SandboxRef>;
   execute?(spec: SandboxSpec): Promise<SandboxExecutionResult>;
   resume(ref: WorkspaceRef, spec: SandboxSpec): Promise<SandboxRef>;
   suspend(ref: SandboxRef): Promise<WorkspaceRef>;
+  finalizeSuspend(ref: SandboxRef, workspace: WorkspaceRef): Promise<void>; // idempotent
   deleteWorkspace(ref: WorkspaceRef): Promise<void>;
   stop(ref: SandboxRef): Promise<void>;
 }
 ```
 
-`create`/`stop` are the standalone lifecycle. `suspend`/`resume`/`deleteWorkspace` are the durable-session lifecycle. A backend may implement the latter with a filesystem-only pause, snapshot, archive, or detached volume. The optional `execute` method powers the Settings setup preflight and must run a disposable foreground command, return its output, and reclaim the machine before returning. The opaque `WorkspaceRef` is the only provider-specific state stored by the controller.
+`create`/`stop` are the standalone lifecycle. `suspend`/`finalizeSuspend`/`resume`/`deleteWorkspace` are the durable-session lifecycle. A backend may implement the latter with a filesystem-only pause, snapshot, archive, or detached volume. `finalizeSuspend` is called only after the controller commits the returned workspace, is retried until it succeeds, and must be idempotent; this closes the crash window between creating a snapshot and releasing its source. The optional `execute` method powers the Settings image preflight and must run a disposable foreground command, return its output, and reclaim the machine before returning. The opaque `WorkspaceRef` is the only provider-specific checkpoint state stored by the controller.
+
+Project images do not package the agent. Before executing the supplied command, built-in providers transfer the app-managed runtime archive and install it inside the isolated VM, without run credentials. Launch the command as the unprivileged app user with credentials scoped to that process. Preflight follows the same installation path. See [the runtime image contract](../packages/runtime/README.md#image-contract).
+
+`resolveImage` turns the empty image reference into the provider's effective default and may materialize a public OCI reference into a provider-native template. The controller stores that resolved value and its provider on the session before the first sandbox is created, so later configuration changes cannot silently alter a cold resume or send the alias to another backend.
 
 ## 1. Write it
 
@@ -42,6 +49,9 @@ export function createMyBackendProvider(
 
   return {
     name: "my-backend",
+    async resolveImage(imageRef) {
+      return imageRef || "my-backend-default";
+    },
 
     async create(spec: SandboxSpec) {
       const envs = { ...spec.env };
@@ -75,6 +85,10 @@ export function createMyBackendProvider(
       return { provider: "my-backend", id: workspace.id };
     },
 
+    async finalizeSuspend(ref) {
+      await deleteStoppedSource(ref.id);
+    },
+
     async deleteWorkspace(ref) {
       await deleteSnapshot(ref.id);
     },
@@ -104,7 +118,11 @@ Select it with `SANDBOX_PROVIDER=my-backend`. Nothing else in the system changes
 
 **`deleteWorkspace` is idempotent.** Expiry and a concurrent follow-up can race. Deleting an already-missing workspace must resolve.
 
+**`resolveImage` is deterministic for a session.** Return the provider-native reference that should be pinned for future cold starts; do not return an empty sentinel.
+
 **`suspend` retains filesystem state, not credentials in process memory.** A later turn receives fresh secrets. If a provider cannot discard memory independently, its implementation needs a snapshot or volume boundary that does.
+
+**`finalizeSuspend` runs after the checkpoint is durable and is idempotent.** Release a stopped source here, not at the end of `suspend`; a controller crash or provider error leaves a durable marker that the reconciler retries without losing the checkpoint.
 
 **`resume` starts exactly one new runtime command.** Report a missing or expired reference with `WorkspaceNotFoundError`; the controller will clear it and cold-create from the durable Pi checkpoint. Do not classify a missing workspace as a generic permanent failure.
 
@@ -132,9 +150,9 @@ If you ever find yourself needing an application route, polling bridge, or agent
 
 ## The image
 
-`spec.image` is provider-specific: an E2B template name, a Docker tag, a Modal image reference. An empty string means "use this provider's configured default".
+`spec.image` is provider-specific: an E2B template name, a Docker/OCI tag, a Modal image reference. `resolveImage("")` must return the provider's configured default. The E2B implementation turns public OCI references into a provider template and refreshes completed image-tag resolutions so a republished tag is not permanently stale, while microSandbox passes the Docker reference directly to its local runtime.
 
-Whatever it points at needs Node, `git`, `gh`, and the bundled runtime at `/app/run.js`. `packages/runtime/Dockerfile.sandbox` is the reference; a provider that consumes plain Dockerfiles can use it unchanged.
+The image supplies the project environment. Providers install the app runtime separately; users need no private app paths, agent dependencies, or app user. `packages/runtime/Dockerfile.sandbox` is the default toolchain image, and `Dockerfile.runtime` builds the app-owned archives. See [supported image requirements](../packages/runtime/README.md#image-contract).
 
 ## Test it
 

@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { redactUrlCredentials, SANDBOX_ENV } from "@pi-cloud-agent/protocol";
+import { redactUrlCredentials, SANDBOX_ENV, SANDBOX_PATHS } from "@pi-cloud-agent/protocol";
 import type { RuntimeConfig } from "./config";
 import type { Reporter } from "./reporter";
 
@@ -35,7 +36,7 @@ export function trimCommandOutput(
   };
 }
 
-export function run(
+function run(
   command: string,
   args: string[],
   options: {
@@ -338,10 +339,17 @@ export async function prepareCheckout(
   reporter: Reporter,
 ): Promise<"created" | "resumed"> {
   const { repo } = config;
-  if (await reuseCheckout(repo.path, reporter)) return "resumed";
+  if (!repo.path.startsWith(`${SANDBOX_PATHS.workspace}/`)) {
+    throw new Error("repository checkout path must stay under /workspace");
+  }
   if (config.workspaceResumed) {
+    if (await reuseCheckout(repo.path, reporter)) return "resumed";
     throw new Error("the provider resumed a workspace without the repository checkout");
   }
+  // A repository image is allowed to contain toolchain caches or a stale
+  // checkout path. Cold starts must not trust that state: remove only the
+  // derived checkout directory before cloning the requested revision.
+  await rm(repo.path, { recursive: true, force: true });
   const candidates = [...new Set([repo.headBranch, repo.defaultBranch].filter(Boolean))];
 
   let cloned = false;

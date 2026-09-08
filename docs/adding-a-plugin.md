@@ -1,11 +1,8 @@
 # Adding a plugin
 
-A plugin is an installable bundle of **skills** and/or **MCP servers**. It
-attaches to a user task: the task request decides what job to
-do; plugins add extra capabilities for users who install them.
+A plugin is an installable bundle of **skills** and/or **MCP servers**. It attaches to a user task: the task request decides what job to do; plugins add extra capabilities for users who install them.
 
-The reference package is [`marketplace/plugins/context7`](../marketplace/plugins/context7).
-`marketplace/plugins/` is the in-repo single source of truth for plugin packages.
+The reference package is [`marketplace/plugins/context7`](../marketplace/plugins/context7). `marketplace/plugins/` is the in-repo single source of truth for plugin packages.
 
 ## Package layout
 
@@ -47,28 +44,21 @@ Rules:
 
 - `name` is lowercase kebab-case and unique in the catalog.
 - Component paths are relative; no `..`, no absolute paths.
-- `variables` declare **names** only. Values are configured in the dashboard and
-  never live in the package.
+- `variables` declare **names** only. Values are configured in the dashboard and never live in the package.
 
 ### Skills
 
-Each `skills/*/SKILL.md` may have frontmatter `name` + `description`. When any
-enabled plugin contributes skills, those skills are composed into `TASK_PROMPT`.
+Each `skills/*/SKILL.md` may have frontmatter `name` + `description`. When any enabled plugin contributes skills, those skills are composed into `TASK_PROMPT`.
 
 ### MCP
 
-Declarative servers in `mcp.json`. Prefer remote URL/SSE with header secrets and
-`lifecycle: "lazy"`. Use `${VAR}` placeholders for secrets. Command-based
-servers require an operator `MCP_COMMAND_ALLOWLIST` entry.
+Declarative servers in `mcp.json`. Prefer remote URL/SSE with header secrets and `lifecycle: "lazy"`. Use `${VAR}` placeholders for secrets. Command-based servers require an operator `MCP_COMMAND_ALLOWLIST` entry.
 
-The sandbox loads MCP **only** via resolved `MCP_CONFIG` from the controller —
-never from the cloned repository's `.mcp.json`.
+The sandbox loads MCP **only** via resolved `MCP_CONFIG` from the controller — never from the cloned repository's `.mcp.json`.
 
 ### Host-mediated OAuth (optional)
 
-When an MCP server supports OAuth 2.1 (RFC 9728), declare it on the manifest.
-The controller discovers the authorization server, registers a public client
-(DCR + PKCE), and stores tokens encrypted — no plugin `install/` code runs.
+When an MCP server supports OAuth 2.1 (RFC 9728), declare it on the manifest. The controller discovers the authorization server, registers a public client (DCR + PKCE), and stores tokens encrypted — no plugin `install/` code runs.
 
 ```json
 "oauth": {
@@ -78,16 +68,13 @@ The controller discovers the authorization server, registers a public client
 }
 ```
 
-The issuer host must be on `PLUGIN_OAUTH_ISSUER_ALLOWLIST` (default
-`auth.exa.ai`). See [`marketplace/plugins/exa`](../marketplace/plugins/exa).
+The issuer host must be on `PLUGIN_OAUTH_ISSUER_ALLOWLIST` (default `auth.exa.ai`). See [`marketplace/plugins/exa`](../marketplace/plugins/exa).
 
-Dashboard flow: Install → **Connect** → browser sign-in → token injected as
-`${tokenVariable}` at provision. Paste into Configure remains a fallback.
+Dashboard flow: Install → **Connect** → browser sign-in → token injected as `${tokenVariable}` at provision. Paste into Configure remains a fallback.
 
 ## Marketplace (MVP)
 
-One catalog per deployment. Packages live under `marketplace/plugins/`; seeding
-copies them into `PLUGIN_ARTIFACT_ROOT` and registers catalog rows.
+One catalog per deployment. Packages live under `marketplace/plugins/`; seeding copies them into `PLUGIN_ARTIFACT_ROOT` and registers catalog rows.
 
 | Actor | Can |
 |---|---|
@@ -105,8 +92,6 @@ Then open the dashboard **Plugins** page: Install → Connect (OAuth) or Configu
 
 ## Trust boundary
 
-- Controller reads manifests and substitutes variables. It never executes plugin
-  TypeScript or MCP servers.
+- Controller reads manifests and substitutes variables. It never executes plugin TypeScript or MCP servers.
 - Runtime may load `pi-mcp-adapter` with the resolved config snapshot only.
-- `packages/runtime` still depends only on `protocol` (+ harness). Plugin
-  packages are data, not workspace dependencies of the runtime.
+- `packages/runtime` still depends only on `protocol` (+ harness). Plugin packages are data, not workspace dependencies of the runtime.

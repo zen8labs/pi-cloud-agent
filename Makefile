@@ -19,6 +19,7 @@ migrate: db
 setup: check-env
 	pnpm install --frozen-lockfile
 	$(MAKE) migrate
+	pnpm sandbox:runtime
 	pnpm sandbox:image
 
 dev: check-env migrate

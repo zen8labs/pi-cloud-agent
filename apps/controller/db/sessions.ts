@@ -6,9 +6,15 @@ import {
   type Trigger,
   type WorkspaceRef,
 } from "@pi-cloud-agent/protocol";
-import { and, desc, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, lt, or, type SQL, sql } from "drizzle-orm";
 import { CHANNELS, type Database, notify } from "./client";
-import { type RunRow, runs, type SessionRow, sessions } from "./schema";
+import { type RunRow, runs, type SessionOperation, type SessionRow, sessions } from "./schema";
+import { CLEARED_SESSION_OPERATION, isSessionOperationStale } from "./session-operations";
+import {
+  buildFinalizationUpdate,
+  buildReplacementUpdate,
+  buildWorkspaceUpdate,
+} from "./session-workspace";
 
 export interface CreateSessionInput {
   userId?: string | null;
@@ -29,6 +35,15 @@ export class SessionNotFoundError extends Error {
     this.name = "SessionNotFoundError";
   }
 }
+
+export class SessionBusyError extends Error {
+  constructor() {
+    super("session cleanup is in progress; retry shortly");
+    this.name = "SessionBusyError";
+  }
+}
+
+type SessionTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 export async function createSessionWithRun(
   database: Database,
@@ -96,6 +111,7 @@ export async function createSessionTurn(
       .limit(1)
       .for("update");
     if (!session) throw new SessionNotFoundError();
+    await clearStaleSessionOperation(tx, session, sessionId);
 
     const turnNumber = session.turnCount + 1;
     const startsImmediately = session.activeRunId === null;
@@ -126,6 +142,8 @@ export async function createSessionTurn(
         turnCount: turnNumber,
         model: modelSelection.model,
         modelConnectionId: modelSelection.modelConnectionId,
+        retentionStatus: "active",
+        lastActivityAt: new Date(),
         updatedAt: new Date(),
       })
       .where(eq(sessions.id, sessionId));
@@ -134,7 +152,30 @@ export async function createSessionTurn(
   if (result.startsImmediately) await notify(database, CHANNELS.runQueued, result.run.id);
   return result.run;
 }
-
+async function clearStaleSessionOperation(
+  tx: SessionTransaction,
+  session: SessionRow,
+  sessionId: string,
+): Promise<void> {
+  if (!session.sessionOperation) return;
+  if (!isSessionOperationStale(session.sessionOperationHeartbeatAt))
+    throw new SessionBusyError();
+  const marker = session.sessionOperationAt
+    ? eq(sessions.sessionOperationAt, session.sessionOperationAt)
+    : isNull(sessions.sessionOperationAt);
+  const reclaimed = await tx
+    .update(sessions)
+    .set({ ...CLEARED_SESSION_OPERATION, updatedAt: new Date() })
+    .where(
+      and(
+        eq(sessions.id, sessionId),
+        eq(sessions.sessionOperation, session.sessionOperation),
+        marker,
+      ),
+    )
+    .returning({ id: sessions.id });
+  if (reclaimed.length === 0) throw new SessionBusyError();
+}
 export async function getSession(
   database: Database,
   sessionId: string,
@@ -157,8 +198,22 @@ export async function listSessions(
     .select()
     .from(sessions)
     .where(userId ? eq(sessions.userId, userId) : undefined)
-    .orderBy(desc(sessions.updatedAt))
+    .orderBy(desc(sessions.pinned), desc(sessions.updatedAt))
     .limit(limit);
+}
+
+export async function setSessionPinned(
+  database: Database,
+  sessionId: string,
+  userId: string,
+  pinned: boolean,
+): Promise<boolean> {
+  const updated = await database
+    .update(sessions)
+    .set({ pinned, updatedAt: new Date() })
+    .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)))
+    .returning({ id: sessions.id });
+  return updated.length > 0;
 }
 
 export async function listSessionRuns(
@@ -189,8 +244,14 @@ export async function saveSessionCheckpoint(
   if (!sessionId) return false;
   const updated = await database
     .update(sessions)
-    .set({ agentCheckpoint: content, updatedAt: new Date() })
-    .where(and(eq(sessions.id, sessionId), eq(sessions.activeRunId, run.id)))
+    .set({ agentCheckpoint: content, lastActivityAt: new Date(), updatedAt: new Date() })
+    .where(
+      and(
+        eq(sessions.id, sessionId),
+        eq(sessions.activeRunId, run.id),
+        isNull(sessions.sessionOperation),
+      ),
+    )
     .returning({ id: sessions.id });
   return updated.length > 0;
 }
@@ -211,6 +272,7 @@ export async function saveSessionDiffBaseSha(
         eq(sessions.id, sessionId),
         eq(sessions.activeRunId, run.id),
         isNull(sessions.diffBaseSha),
+        isNull(sessions.sessionOperation),
       ),
     )
     .returning({ id: sessions.id });
@@ -222,17 +284,25 @@ export async function parkSession(
   run: RunRow,
   workspace: WorkspaceRef | null | undefined,
   expiresAt: Date | null,
+  replacedWorkspace?: WorkspaceRef | null,
+  operationAt?: Date,
 ): Promise<boolean> {
   const sessionId = run.sessionId;
   if (!sessionId) return false;
   const result = await database.transaction(async (tx) => {
     const [owner] = await tx
-      .select({ activeRunId: sessions.activeRunId })
+      .select({
+        activeRunId: sessions.activeRunId,
+        sessionOperation: sessions.sessionOperation,
+        sessionOperationAt: sessions.sessionOperationAt,
+      })
       .from(sessions)
       .where(eq(sessions.id, sessionId))
       .limit(1)
       .for("update");
-    if (owner?.activeRunId !== run.id) return { parked: false, nextRunId: null };
+    if (!ownsParkLease(owner, run.id, operationAt)) {
+      return { parked: false, nextRunId: null };
+    }
 
     const [next] = await tx
       .select({ id: runs.id })
@@ -247,14 +317,7 @@ export async function parkSession(
       .orderBy(runs.turnNumber)
       .limit(1)
       .for("update");
-    const workspaceUpdate =
-      workspace === undefined
-        ? {}
-        : {
-            sandboxProvider: workspace?.provider ?? null,
-            sandboxId: workspace?.id ?? null,
-            workspaceExpiresAt: expiresAt,
-          };
+    const workspaceUpdate = buildWorkspaceUpdate(workspace, expiresAt);
     const updated = await tx
       .update(sessions)
       .set({
@@ -262,17 +325,56 @@ export async function parkSession(
         ...workspaceUpdate,
         updatedAt: new Date(),
       })
-      .where(and(eq(sessions.id, sessionId), eq(sessions.activeRunId, run.id)))
+      .where(
+        and(
+          eq(sessions.id, sessionId),
+          eq(sessions.activeRunId, run.id),
+          ...(operationAt
+            ? [
+                eq(sessions.sessionOperation, "parking"),
+                eq(sessions.sessionOperationAt, operationAt),
+              ]
+            : [isNull(sessions.sessionOperation)]),
+        ),
+      )
       .returning({ id: sessions.id });
     if (updated.length === 0) return { parked: false, nextRunId: null };
     await tx
       .update(runs)
-      .set({ sandboxStoppedAt: new Date(), updatedAt: new Date() })
+      .set({
+        sandboxStoppedAt: new Date(),
+        ...buildFinalizationUpdate(workspace),
+        ...buildReplacementUpdate(replacedWorkspace),
+        updatedAt: new Date(),
+      })
       .where(and(eq(runs.id, run.id), isNull(runs.sandboxStoppedAt)));
     return { parked: true, nextRunId: next?.id ?? null };
   });
-  if (result.nextRunId) await notify(database, CHANNELS.runQueued, result.nextRunId);
+  // NOTIFY is a wake-up hint; polling remains the correctness path. A failed
+  // notification must not make a committed checkpoint look uncommitted.
+  if (result.nextRunId)
+    await notify(database, CHANNELS.runQueued, result.nextRunId).catch(() => undefined);
   return result.parked;
+}
+
+function ownsParkLease(
+  owner:
+    | {
+        activeRunId: string | null;
+        sessionOperation: SessionOperation | null;
+        sessionOperationAt: Date | null;
+      }
+    | undefined,
+  runId: string,
+  operationAt?: Date,
+): boolean {
+  return (
+    owner?.activeRunId === runId &&
+    (operationAt
+      ? owner.sessionOperation === "parking" &&
+        owner.sessionOperationAt?.getTime() === operationAt.getTime()
+      : owner.sessionOperation === null)
+  );
 }
 
 export async function findExpiredSessionWorkspaces(
@@ -288,6 +390,7 @@ export async function findExpiredSessionWorkspaces(
         isNotNull(sessions.sandboxId),
         isNotNull(sessions.workspaceExpiresAt),
         lt(sessions.workspaceExpiresAt, new Date()),
+        or(isNull(sessions.sessionOperation), eq(sessions.sessionOperation, "expiring")),
       ),
     )
     .limit(limit);
@@ -316,16 +419,67 @@ export async function clearSessionWorkspace(
   database: Database,
   sessionId: string,
   workspaceId: string,
+  expectedActiveRunId?: string | null,
+  expectedOperation?: SessionOperation | null,
+  expectedOperationAt?: Date,
 ): Promise<boolean> {
+  const guards = sessionGuards(expectedActiveRunId, expectedOperation, expectedOperationAt);
   const updated = await database
     .update(sessions)
     .set({
-      sandboxProvider: null,
       sandboxId: null,
       workspaceExpiresAt: null,
+      retentionStatus: "inactive",
       updatedAt: new Date(),
     })
-    .where(and(eq(sessions.id, sessionId), eq(sessions.sandboxId, workspaceId)))
+    .where(and(eq(sessions.id, sessionId), eq(sessions.sandboxId, workspaceId), ...guards))
     .returning({ id: sessions.id });
   return updated.length > 0;
+}
+
+/** Permanently delete a session and its turns after the checkpoint is reclaimed. */
+export async function deleteSession(
+  database: Database,
+  sessionId: string,
+  userId?: string | null,
+  expectedActiveRunId?: string | null,
+  /** Prevent an archive from deleting a turn queued after its initial read. */
+  expectedLatestRunId?: string,
+  expectedOperation?: SessionOperation | null,
+  expectedOperationAt?: Date,
+): Promise<boolean> {
+  const ownership = userId ? [eq(sessions.userId, userId)] : [];
+  const guards = sessionGuards(expectedActiveRunId, expectedOperation, expectedOperationAt);
+  const deleted = await database
+    .delete(sessions)
+    .where(
+      and(
+        eq(sessions.id, sessionId),
+        ...ownership,
+        ...guards,
+        ...(expectedLatestRunId ? [eq(sessions.latestRunId, expectedLatestRunId)] : []),
+      ),
+    )
+    .returning({ id: sessions.id });
+  return deleted.length > 0;
+}
+
+function sessionGuards(
+  expectedActiveRunId: string | null | undefined,
+  expectedOperation: SessionOperation | null | undefined,
+  expectedOperationAt: Date | undefined,
+): SQL[] {
+  const operation =
+    expectedOperation === undefined || expectedOperation === null
+      ? isNull(sessions.sessionOperation)
+      : eq(sessions.sessionOperation, expectedOperation);
+  const operationAt = expectedOperationAt
+    ? [eq(sessions.sessionOperationAt, expectedOperationAt)]
+    : [];
+  if (expectedActiveRunId === undefined) return [operation, ...operationAt];
+  const activeRun =
+    expectedActiveRunId === null
+      ? isNull(sessions.activeRunId)
+      : eq(sessions.activeRunId, expectedActiveRunId);
+  return [activeRun, operation, ...operationAt];
 }
