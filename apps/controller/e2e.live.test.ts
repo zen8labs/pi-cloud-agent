@@ -107,7 +107,12 @@ describe("a real resumable session, end to end", () => {
           "succeeded",
         );
         const firstIdle = await waitForSessionIdle(session.id);
-        expect(firstIdle.sandboxId).toBe(first.sandboxId);
+        expect(firstIdle.sandboxId).toBeTruthy();
+        if (config.sandbox.provider === "microsandbox") {
+          expect(firstIdle.sandboxId).not.toBe(first.sandboxId);
+        } else {
+          expect(firstIdle.sandboxId).toBe(first.sandboxId);
+        }
 
         const firstEvents = await listEvents(database, run.id, 0);
         const firstLogs = logNames(firstEvents);
@@ -140,8 +145,13 @@ describe("a real resumable session, end to end", () => {
         const secondLogs = logNames(secondEvents);
         expect(secondLogs).toContain("git.workspace_resumed");
         expect(secondLogs).not.toContain("git.cloned");
-        expect(second.sandboxId).toBe(first.sandboxId);
-        expect(secondIdle.sandboxId).toBe(firstIdle.sandboxId);
+        if (config.sandbox.provider === "microsandbox") {
+          expect(second.sandboxId).not.toBe(first.sandboxId);
+          expect(secondIdle.sandboxId).not.toBe(firstIdle.sandboxId);
+        } else {
+          expect(second.sandboxId).toBe(first.sandboxId);
+          expect(secondIdle.sandboxId).toBe(firstIdle.sandboxId);
+        }
         expect(piSessionId(secondEvents)).toBe(piSessionId(firstEvents));
         expect(tokenText(secondEvents)).toContain(proof);
         expect(new Set(secondEvents.map((event) => event.type))).toContain("tool_call");
@@ -215,13 +225,21 @@ async function cleanupSession(sessionId: string): Promise<void> {
   if (!session) return;
   const latest = session.latestRunId ? await getRun(database, session.latestRunId) : null;
   const provider = createSandboxProvider(config.sandbox.provider, config.env);
-  const ref = session.sandboxId
-    ? { provider: session.sandboxProvider ?? provider.name, id: session.sandboxId }
-    : latest?.sandboxId
-      ? { provider: latest.sandboxProvider ?? provider.name, id: latest.sandboxId }
-      : null;
-  if (!ref) return;
-  await provider.deleteWorkspace(ref).catch(() => provider.stop(ref));
+  if (session.sandboxId) {
+    await provider
+      .deleteWorkspace({
+        provider: session.sandboxProvider ?? provider.name,
+        id: session.sandboxId,
+      })
+      .catch(() => undefined);
+  } else if (latest?.sandboxId) {
+    // A terminal run that has not reached the parking pass still owns a live
+    // sandbox; it is not a durable checkpoint and must be stopped, not deleted
+    // through the checkpoint API.
+    await provider
+      .stop({ provider: latest.sandboxProvider ?? provider.name, id: latest.sandboxId })
+      .catch(() => undefined);
+  }
   if (session.sandboxId) await clearSessionWorkspace(database, session.id, session.sandboxId);
 }
 

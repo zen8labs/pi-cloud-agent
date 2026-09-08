@@ -1,8 +1,6 @@
 # Marketplace plugins
 
-In-repo **single source of truth** for plugin packages. The controller seeds and
-publishes from this directory into the catalog; published copies live under
-`PLUGIN_ARTIFACT_ROOT` (default `.pi-plugin-artifacts/`).
+In-repo **single source of truth** for plugin packages. The controller seeds and publishes from this directory into the catalog; published copies live under `PLUGIN_ARTIFACT_ROOT` (default `.pi-plugin-artifacts/`).
 
 | Package | Role |
 |---|---|

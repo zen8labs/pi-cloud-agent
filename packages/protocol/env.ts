@@ -21,8 +21,6 @@ export const SANDBOX_ENV = {
   githubReview: "GITHUB_REVIEW_CONTEXT",
   /** JSON comment target for the trusted `reply_github_comment` runtime tool. */
   githubComment: "GITHUB_COMMENT_CONTEXT",
-  /** Optional app-managed setup script for a fresh repository checkout. */
-  setupScript: "REPO_SETUP_SCRIPT",
 
   /**
    * Optional JSON snapshot of resolved MCP server config for `createMcpAdapter`.
@@ -61,9 +59,9 @@ export const SANDBOX_ENV = {
 
 export type SandboxEnvKey = keyof typeof SANDBOX_ENV;
 
-/** Where the sandbox image puts things. Fixed by the image, not configurable. */
+/** App-owned paths installed by the provider, independent of the project image. */
 export const SANDBOX_PATHS = {
   workspace: "/workspace",
   state: "/workspace/.pi-cloud-agent",
-  app: "/app",
+  app: "/opt/pi-cloud-agent",
 } as const;

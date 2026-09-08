@@ -40,6 +40,12 @@ export const createSessionTurnRequestSchema = z.object({
 
 export type CreateSessionTurnRequest = z.infer<typeof createSessionTurnRequestSchema>;
 
+export const updateSessionPinRequestSchema = z.object({
+  pinned: z.boolean(),
+});
+
+export type UpdateSessionPinRequest = z.infer<typeof updateSessionPinRequestSchema>;
+
 export const sessionCheckpointSchema = z.object({
   content: z.string().max(20_000_000),
 });
@@ -81,10 +87,15 @@ export interface RunEventsResponse {
 }
 
 export type SessionStatus = "idle" | "queued" | "provisioning" | "running" | "parking";
+export type SessionRetentionStatus = "active" | "inactive";
 
 export interface SessionSummary {
   id: string;
   status: SessionStatus;
+  retentionStatus: SessionRetentionStatus;
+  /** Seconds without activity before the provider checkpoint is released. */
+  inactiveAfterSeconds: number;
+  pinned: boolean;
   title: string;
   provider: string;
   repo: string;
@@ -169,7 +180,18 @@ export interface BranchesResponse {
 export const updateRepositoryEnvironmentRequestSchema = z.object({
   provider: z.string().min(1),
   repo: z.string().min(3),
-  setupScript: z.string().max(100_000),
+  imageRef: z
+    .string()
+    .trim()
+    .max(500)
+    .refine(
+      (value) =>
+        Array.from(value).every((char) => {
+          const code = char.charCodeAt(0);
+          return code >= 32 && code !== 127;
+        }),
+      "image reference contains control characters",
+    ),
 });
 
 export type UpdateRepositoryEnvironmentRequest = z.infer<
@@ -179,7 +201,7 @@ export type UpdateRepositoryEnvironmentRequest = z.infer<
 export interface RepositoryEnvironmentSummary {
   provider: string;
   repo: string;
-  setupScript: string;
+  imageRef: string;
   updatedAt: string;
 }
 

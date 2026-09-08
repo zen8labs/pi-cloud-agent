@@ -12,6 +12,7 @@ export function ConfirmDialog({
   confirmLabel,
   busyLabel,
   busy = false,
+  error,
   onConfirm,
   onCancel,
 }: {
@@ -21,6 +22,7 @@ export function ConfirmDialog({
   confirmLabel: string;
   busyLabel?: string;
   busy?: boolean;
+  error?: string | null;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -51,6 +53,11 @@ export function ConfirmDialog({
       >
         <h2 className="text-sm font-medium">{title}</h2>
         <p className="mt-2 text-sm text-muted-foreground">{description}</p>
+        {error ? (
+          <p role="alert" className="mt-3 text-sm text-destructive">
+            {error}
+          </p>
+        ) : null}
         <div className="mt-5 flex justify-end gap-2">
           <Button
             type="button"

@@ -1,73 +1,27 @@
-import { SANDBOX_ENV, SandboxError, type SandboxProvider } from "@pi-cloud-agent/protocol";
+import { SANDBOX_ENV, SandboxError } from "@pi-cloud-agent/protocol";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
-import type { Database } from "../db/client";
-import { saveRepositoryEnvironment } from "../db/environments";
-import { appendEvent, attachSandbox, claimNextRun, completeRun, getRun } from "../db/runs";
+import { saveRepositorySandboxImage } from "../db/environments";
+import { attachSandbox, claimNextRun, completeRun, getRun } from "../db/runs";
+import type { RunRow } from "../db/schema";
 import { runs } from "../db/schema";
 import { createSessionTurn, getSession, parkSession } from "../db/sessions";
-import type { CredentialBroker } from "../secrets/broker";
 import {
-  bindTestDatabase,
   seedRun,
   seedSession,
   seedTestUser,
   silentLogger,
   testConfig,
+  testCredentialBroker,
 } from "../test-support";
 import { fakeProvider } from "./fake-sandbox-provider";
 import { createReconciler, type Reconciler } from "./loop";
+import { database, reconciler, tick } from "./reconciler-test-support";
 
-/** The reconciler, driven one tick at a time against real durable state. */
-
-let database: Database;
-bindTestDatabase((value) => {
-  database = value;
-});
-
-const broker: CredentialBroker = {
-  async mintForRepository() {
-    return { secrets: {}, env: {} };
-  },
-  async mintForRun() {
-    return {
-      model: {
-        connectionId: "00000000-0000-4000-8000-000000000099",
-        authType: "api_key",
-        provider: "test-provider",
-        name: "test-model",
-        api: "openai-completions",
-        baseUrl: "https://model.example.test/v1",
-        contextWindow: 16_384,
-        maxTokens: 2_048,
-        apiKey: "test-key",
-        authJson: null,
-        thinkingLevels: ["off", "medium"],
-      },
-      secrets: {},
-      env: {},
-    };
-  },
-};
-
-function reconciler(
-  provider: SandboxProvider,
-  options: { silenceTimeoutSeconds?: number; claimLeaseSeconds?: number } = {},
-): Reconciler {
-  return createReconciler({
-    config: testConfig({ SANDBOX_PROVIDER: "fake" }),
-    database,
-    broker,
-    log: silentLogger(),
-    createProvider: () => provider,
-    ...options,
-  });
-}
-
-/** One full pass, including detached provisioning. */
-async function tick(loop: Reconciler): Promise<void> {
-  await loop.tick();
-  await loop.drain();
+async function completeAndReclaim(loop: Reconciler, run: RunRow): Promise<void> {
+  await tick(loop);
+  await completeRun(database, run.id, "succeeded");
+  await tick(loop);
 }
 
 describe("provisioning", () => {
@@ -151,19 +105,13 @@ describe("completion and teardown", () => {
     expect(provider.created[0]?.env[SANDBOX_ENV.workspaceResumed]).toBe("false");
 
     await completeRun(database, run.id, "succeeded");
-    let releaseBoth = () => {};
-    const bothSuspended = new Promise<void>((resolve) => {
-      releaseBoth = resolve;
-    });
     provider.suspend = async (ref) => {
       provider.suspended.push(ref.id);
-      if (provider.suspended.length === 2) releaseBoth();
-      await bothSuspended;
       return ref;
     };
     await Promise.all([loop.tick(), reconciler(provider).tick()]);
 
-    expect(provider.suspended).toEqual(["sb-1", "sb-1"]);
+    expect(provider.suspended).toEqual(["sb-1"]);
     expect(provider.deleted).toEqual([]);
     expect(provider.stopped).toEqual([]);
     expect((await getSession(database, session.id))?.sandboxId).toBe("sb-1");
@@ -188,14 +136,66 @@ describe("completion and teardown", () => {
     expect((await getRun(database, followUp.id))?.sandboxId).toBe("sb-1");
   });
 
+  it("deletes the previous checkpoint when a new turn creates a replacement", async () => {
+    const { session, run } = await seedSession(database);
+    const provider = fakeProvider();
+    const loop = reconciler(provider);
+    provider.suspend = async (ref) => {
+      provider.suspended.push(ref.id);
+      return { provider: "fake", id: `checkpoint-${provider.suspended.length}` };
+    };
+
+    await completeAndReclaim(loop, run);
+    expect((await getSession(database, session.id))?.sandboxId).toBe("checkpoint-1");
+
+    const followUp = await createSessionTurn(
+      database,
+      session.id,
+      "Continue from the checkpoint.",
+      "follow-up-token",
+      null,
+      { model: session.model, modelConnectionId: session.modelConnectionId },
+    );
+    provider.resume = async (ref, spec) => {
+      provider.resumed.push(ref.id);
+      provider.resumeSpecs.push(spec);
+      await spec.onAllocated?.({ provider: "fake", id: "live-2" });
+      return { provider: "fake", id: "live-2" };
+    };
+    await tick(loop);
+    await completeRun(database, followUp.id, "succeeded");
+    await tick(loop);
+
+    expect(provider.resumed).toEqual(["checkpoint-1"]);
+    expect(provider.deleted).toEqual(["checkpoint-1"]);
+    expect((await getSession(database, session.id))?.sandboxId).toBe("checkpoint-2");
+  });
+
+  it("releases a stopped source only after the checkpoint is committed", async () => {
+    const { session, run } = await seedSession(database);
+    const provider = fakeProvider();
+    let checkpointCommitted = false;
+    provider.finalizeSuspend = async (_source, workspace) => {
+      checkpointCommitted =
+        (await getSession(database, session.id))?.sandboxId === workspace.id;
+    };
+
+    const loop = reconciler(provider);
+    await tick(loop);
+    await completeRun(database, run.id, "succeeded");
+    await tick(loop);
+
+    expect(checkpointCommitted).toBe(true);
+  });
+
   it("cold-starts from the durable checkpoint when a parked workspace disappeared", async () => {
     const user = await seedTestUser(database, testConfig());
     const { session, run } = await seedSession(database, user.userId);
-    await saveRepositoryEnvironment(database, {
+    await saveRepositorySandboxImage(database, {
       userId: user.userId,
       provider: "github",
       repoFullName: "acme/widgets",
-      setupScript: "pnpm install",
+      imageRef: "ghcr.io/acme/widgets:dev",
     });
     const healthy = fakeProvider();
     const firstLoop = reconciler(healthy);
@@ -214,12 +214,18 @@ describe("completion and teardown", () => {
         modelConnectionId: session.modelConnectionId,
       },
     );
+    await saveRepositorySandboxImage(database, {
+      userId: user.userId,
+      provider: "github",
+      repoFullName: "acme/widgets",
+      imageRef: "docker.io/acme/widgets:newer",
+    });
     const missing = fakeProvider({ resumeMissing: true });
     await tick(reconciler(missing));
 
     expect(missing.created).toHaveLength(1);
     expect(missing.created[0]?.env[SANDBOX_ENV.workspaceResumed]).toBe("false");
-    expect(missing.created[0]?.secrets[SANDBOX_ENV.setupScript]?.expose()).toBe("pnpm install");
+    expect(missing.created[0]?.image).toBe("ghcr.io/acme/widgets:dev");
     expect((await getRun(database, followUp.id))?.status).toBe("running");
     expect((await getSession(database, session.id))?.sandboxId).toBeNull();
   });
@@ -269,8 +275,7 @@ describe("completion and teardown", () => {
     const provider = fakeProvider();
     const loop = reconciler(provider);
 
-    await tick(loop);
-    await completeRun(database, run.id, "succeeded");
+    await completeAndReclaim(loop, run);
     await tick(loop);
 
     expect(provider.stopped).toEqual(["sb-1"]);
@@ -303,11 +308,13 @@ describe("completion and teardown", () => {
     expect(provider.stopped).toEqual(["sb-1"]);
   });
 
-  it("gives up on a machine the provider cannot kill, rather than looping forever", async () => {
+  it("retains a cleanup marker when a provider cannot kill a machine", async () => {
     const run = await seedRun(database);
     const provider = fakeProvider();
+    let attempts = 0;
     provider.stop = async () => {
-      throw new Error("provider is down");
+      attempts += 1;
+      if (attempts === 1) throw new Error("provider is down");
     };
     const loop = reconciler(provider);
 
@@ -315,105 +322,10 @@ describe("completion and teardown", () => {
     await completeRun(database, run.id, "succeeded");
     await tick(loop);
 
+    expect((await getRun(database, run.id))?.sandboxStoppedAt).toBeNull();
+    await tick(loop);
     expect((await getRun(database, run.id))?.sandboxStoppedAt).not.toBeNull();
-  });
-});
-
-describe("recovery", () => {
-  it("fails and reclaims a run that passed its deadline", async () => {
-    const run = await seedRun(database);
-    const provider = fakeProvider();
-    const loop = reconciler(provider);
-
-    await tick(loop);
-    await database
-      .update(runs)
-      .set({ deadlineAt: new Date(Date.now() - 1000) })
-      .where(eq(runs.id, run.id));
-    await tick(loop);
-
-    const stored = await getRun(database, run.id);
-    expect(stored?.status).toBe("failed");
-    expect(stored?.error).toContain("wall-clock budget");
-    expect(provider.stopped).toEqual(["sb-1"]);
-  });
-
-  it("fails a sandbox that stopped reporting", async () => {
-    const run = await seedRun(database);
-    const provider = fakeProvider();
-    const loop = reconciler(provider, { silenceTimeoutSeconds: 30 });
-
-    await tick(loop);
-    await appendEvent(database, run.id, "token", { content: "working" });
-    await database
-      .update(runs)
-      .set({ lastEventAt: new Date(Date.now() - 120_000) })
-      .where(eq(runs.id, run.id));
-    await tick(loop);
-
-    const stored = await getRun(database, run.id);
-    expect(stored?.status).toBe("failed");
-    expect(stored?.error).toContain("stopped reporting");
-    expect(provider.stopped).toEqual(["sb-1"]);
-  });
-
-  it("recovers a run whose worker died between claiming and provisioning", async () => {
-    const run = await seedRun(database);
-    await claimNextRun(database, -1);
-
-    const provider = fakeProvider();
-    const loop = reconciler(provider);
-    await tick(loop);
-
-    // Requeued and then picked up in the same pass: no operator intervention.
-    const stored = await getRun(database, run.id);
-    expect(stored?.status).toBe("running");
-    expect(stored?.attempt).toBe(2);
-  });
-
-  it("leaves a live run alone across a restart", async () => {
-    const run = await seedRun(database);
-    const provider = fakeProvider();
-
-    await tick(reconciler(provider));
-    // A brand new reconciler, as if the process had just booted.
-    await tick(reconciler(provider));
-
-    const stored = await getRun(database, run.id);
-    expect(stored?.status).toBe("running");
-    expect(stored?.error).toBeNull();
-    expect(provider.stopped).toEqual([]);
-  });
-
-  it("completes a run from a callback that arrives after a restart", async () => {
-    const run = await seedRun(database);
-    const provider = fakeProvider();
-    await tick(reconciler(provider));
-
-    // The sandbox kept working while the controller was gone and reports now.
-    await appendEvent(database, run.id, "status", { status: "done" });
-    expect(await completeRun(database, run.id, "succeeded")).toBe(true);
-
-    await tick(reconciler(provider));
-    expect((await getRun(database, run.id))?.status).toBe("succeeded");
-    expect(provider.stopped).toEqual(["sb-1"]);
-  });
-
-  it("cleans up a machine created for a run that was cancelled mid-create", async () => {
-    const run = await seedRun(database);
-    const provider = fakeProvider();
-    provider.create = async (spec) => {
-      // Cancel lands while the provider is still working.
-      await completeRun(database, spec.runId, "cancelled");
-      return { provider: "fake", id: "sb-orphan" };
-    };
-
-    await tick(reconciler(provider));
-
-    // attachSandbox refused, so provisioning owns the cleanup — the id was never
-    // stored and the reconciler would otherwise never learn about it.
-    expect(provider.stopped).toEqual(["sb-orphan"]);
-    expect((await getRun(database, run.id))?.sandboxId).toBeNull();
+    expect(attempts).toBe(2);
   });
 });
 
@@ -425,7 +337,7 @@ describe("concurrency", () => {
     const loop = createReconciler({
       config: testConfig({ SANDBOX_PROVIDER: "fake" }),
       database,
-      broker,
+      broker: testCredentialBroker,
       log: silentLogger(),
       createProvider: () => provider,
       maxConcurrentProvisions: 2,

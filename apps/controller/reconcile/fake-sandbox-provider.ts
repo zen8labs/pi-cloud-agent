@@ -24,6 +24,9 @@ export function fakeProvider(
   const deleted: string[] = [];
   return {
     name: "fake",
+    async resolveImage(imageRef) {
+      return imageRef || "fake:default";
+    },
     created,
     resumeSpecs,
     stopped,
@@ -33,18 +36,22 @@ export function fakeProvider(
     async create(spec) {
       if (behavior.failWith) throw behavior.failWith;
       created.push(spec);
-      return { provider: "fake", id: `sb-${created.length}` };
+      const ref = { provider: "fake", id: `sb-${created.length}` };
+      await spec.onAllocated?.(ref);
+      return ref;
     },
     async resume(ref, spec) {
       if (behavior.resumeMissing) throw new WorkspaceNotFoundError("workspace expired");
       resumed.push(ref.id);
       resumeSpecs.push(spec);
+      await spec.onAllocated?.({ provider: "fake", id: ref.id });
       return { provider: "fake", id: ref.id };
     },
     async suspend(ref) {
       suspended.push(ref.id);
       return { provider: "fake", id: ref.id };
     },
+    async finalizeSuspend() {},
     async deleteWorkspace(ref) {
       deleted.push(ref.id);
     },

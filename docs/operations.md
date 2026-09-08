@@ -40,6 +40,8 @@ The GitHub App Setup URL is intentionally public. If the browser does not have a
 ```dotenv
 CONTROL_PLANE_URL=http://host.microsandbox.internal:8080
 MICROSANDBOX_ALLOW_HOST=true
+# Store provider-owned session snapshots on durable local storage.
+MICROSANDBOX_SNAPSHOT_DIR=.pi-cloud-agent-snapshots
 ```
 
 With a hosted provider like E2B, `http://localhost:8080` is unreachable and every run goes silent until the reconciler times it out.
@@ -86,13 +88,19 @@ docker run --rm --entrypoint bash pi-cloud-agent:local -lc \
   'id -un; node --version; pnpm --version; python --version; uv --version; rg --version'
 ```
 
-## Repository setup
+## Repository images and checkpoints
 
-Configure setup commands per connected repository in Settings > Environments. Use **Test setup** to run the unsaved script in a disposable fresh sandbox before saving it. The current app-managed script is resolved when a run is provisioned and runs after checkout, before the model starts. Leaving it empty skips custom setup and uses only the bundled image. The script runs as the unprivileged sandbox user, with a five-minute limit, and a non-zero exit or timeout fails the run with a `repository setup` error. Resumed session workspaces skip setup because their filesystem is retained. Keep the script non-interactive, idempotent, and free of embedded credentials. Forge credentials remain available for private Git dependencies, but the sandbox boundary currently allows repository code to read those credentials; see [secrets.md](secrets.md).
+Configure a public project image per connected repository in Settings > Environments. It supplies project toolchains on a supported Debian/Ubuntu base; the provider installs the app runtime, its Node, git/gh prerequisites, and unprivileged user inside the VM. No private runtime paths need to be packaged in the image. **Test environment** optionally checks installation and library loading without running a model task. Leaving the mapping empty uses the default project environment. Build and deploy the app archives with `pnpm sandbox:runtime`; see [compatibility and deployment](../packages/runtime/README.md#image-contract).
 
-Model credentials, the run callback token, and plugin configuration are withheld from the setup process. Forge credentials remain available so private submodules and Git dependencies can be installed; they are still subject to the sandbox token-exposure limitation in [secrets.md](secrets.md).
+After each completed session turn, microSandbox stores an integrity-checked local snapshot, commits its path and source-finalization marker, and then releases the stopped source VM; E2B pauses the filesystem. If source release fails, the marker remains and the reconciler retries it on a later pass. The previous checkpoint is deleted after its replacement is durable, so a session keeps one warm artifact. Warm follow-ups resume that checkpoint without cloning. Checkpoints expire after `SESSION_WORKSPACE_RETENTION_SECONDS` (seven days by default); the reconciler deletes them and marks the session inactive while retaining the provider identity, so the next turn cold-clones from the correct provider's pinned image while restoring Pi history. See [resumability.md](resumability.md).
 
-The default image includes Node/npm/pnpm and Python/pip/venv/uv. Setup unsets the image's `NODE_ENV=production` so npm and pnpm can install development dependencies; a script may set it explicitly when production-only behavior is intended. Python's `VIRTUAL_ENV` is `/home/node/.venv`, so use `python -m pip install ...` rather than `pip install --user` or `--break-system-packages`. Go, Rust, Java, browser runtimes, and cloud CLIs require a future image profile or custom image.
+The first provisioning also pins the resolved repository image and provider on the session. Changing the Settings mapping therefore affects new sessions; an existing session keeps its original provider/image pair if it ever needs a cold resume.
+
+Delete and retention expiry claim the session before provider cleanup. A follow-up submitted during cleanup receives `409`; cleanup renews its heartbeat while the provider call runs, and only a claim stale for ten minutes can be reclaimed after a crash. Pending stopped-source finalizations are retained on their terminal run and retried by the reconciler. The guarded delete or clear then verifies the immutable operation token before changing the session.
+
+E2B materializes each public OCI image resolution under a unique template alias and fails a build instead of reusing an older alias. A session stores the resolved provider/alias pair once, so a republished registry tag affects only later sessions.
+
+Session artifacts are filesystem checkpoints rather than full Docker image commits. Keep `MICROSANDBOX_SNAPSHOT_DIR` on durable storage, monitor that storage directly, and use delete or retention expiry as the normal reclamation paths. The controller keeps one checkpoint per session and deletes the old one only after the replacement is durable. If a provider delete temporarily fails during replacement, the new checkpoint remains usable and the old reference stays on the terminal run for reconciler retry.
 
 ## Watching a run
 
@@ -149,7 +157,7 @@ psql -c "select id, status, sandbox_provider, sandbox_id
          from runs where sandbox_id is not null and sandbox_stopped_at is null;"
 
 # durable sessions and their parked workspaces
-psql -c "select id, active_run_id, latest_run_id, turn_count, sandbox_id, workspace_expires_at
+psql -c "select id, active_run_id, latest_run_id, turn_count, sandbox_image_ref, retention_status, sandbox_id, workspace_expires_at
          from sessions order by updated_at desc limit 10;"
 ```
 
@@ -157,7 +165,7 @@ psql -c "select id, active_run_id, latest_run_id, turn_count, sandbox_id, worksp
 
 ```text
 status: queued → provisioning → running → succeeded
-events: git.cloned → git.checkout_ready → setup.skipped
+events: git.cloned → git.checkout_ready
         → agent.session_start → agent.turn_start → message… → token…
         → tool_call… → agent.turn_end → agent.session_complete → status{done}
 ```
@@ -171,11 +179,12 @@ The terminal evidence is a `status` event followed by the run row reaching `succ
 | stuck in `queued` | reconciler not running, or `SANDBOX_PROVIDER` misconfigured | controller logs at startup |
 | `failed` immediately, "could not create a sandbox" | bad provider configuration, missing local image, or missing E2B template | `pnpm sandbox:image` or `pnpm sandbox:template` |
 | `running`, no events, fails with "stopped reporting" | `CONTROL_PLANE_URL` is unreachable from the sandbox, or the detached runtime failed before it could report | the controller log, `msb logs <sandbox-id>`, `msb exec <sandbox-id> -- cat /tmp/pi-cloud-agent-runtime.log` while the microSandbox is running, and the selected provider's network path |
-| `repository setup` failure before the agent starts | app-managed setup exited non-zero or exceeded five minutes | the `setup.failed` event and the script's last output lines |
+| image compatibility failure before the agent starts | image lacks the runtime contract or cannot boot | Settings **Test environment** output and provider logs |
 | events stop mid-run, then "wall-clock budget" | the agent genuinely ran long | `RUN_WALL_CLOCK_SECONDS` |
 | `git.clone_branch_failed` then a successful clone | the named branch is gone; fell back to the default | benign |
 | `attempt` climbing | retryable provisioning failures | the provider's error in the logs |
 | session stays `parking` | reconciler has not suspended or released the terminal turn | controller logs and `runs.sandbox_stopped_at` |
+| stopped source remains after a checkpoint commit | provider finalization failed and is waiting for reconciliation | controller logs and `runs.sandbox_finalization_workspace_id` |
 | follow-up clones again | parked workspace expired or disappeared | `sessions.workspace_expires_at`, `git.cloned`; Pi history still resumes |
 
 ## Cancelling and cleanup
@@ -216,9 +225,7 @@ pnpm db:migrate
 pnpm plugins:seed   # publishes every package under marketplace/plugins as approved / default_off
 ```
 
-Set `PLUGIN_OAUTH_REDIRECT_URI` to a browser-reachable controller URL (for local
-dev usually `http://localhost:8080/plugins/oauth/callback` — not the sandbox
-gateway host). Keep `PLUGIN_OAUTH_ISSUER_ALLOWLIST` tight (default `auth.exa.ai`).
+Set `PLUGIN_OAUTH_REDIRECT_URI` to a browser-reachable controller URL (for local dev usually `http://localhost:8080/plugins/oauth/callback` — not the sandbox gateway host). Keep `PLUGIN_OAUTH_ISSUER_ALLOWLIST` tight (default `auth.exa.ai`).
 
 Demo with Context7: Install → Configure with a key from https://context7.com/dashboard → start a `general` run that asks about a library API.
 

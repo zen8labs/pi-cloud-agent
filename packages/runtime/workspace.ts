@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { redactUrlCredentials, SANDBOX_ENV } from "@pi-cloud-agent/protocol";
+import { redactUrlCredentials, SANDBOX_ENV, SANDBOX_PATHS } from "@pi-cloud-agent/protocol";
 import type { RuntimeConfig } from "./config";
 import type { Reporter } from "./reporter";
 
@@ -35,7 +36,7 @@ export function trimCommandOutput(
   };
 }
 
-export function run(
+function run(
   command: string,
   args: string[],
   options: {
@@ -338,13 +339,27 @@ export async function prepareCheckout(
   reporter: Reporter,
 ): Promise<"created" | "resumed"> {
   const { repo } = config;
-  if (await reuseCheckout(repo.path, reporter)) return "resumed";
+  if (!repo.path.startsWith(`${SANDBOX_PATHS.workspace}/`)) {
+    throw new Error("repository checkout path must stay under /workspace");
+  }
   if (config.workspaceResumed) {
+    if (await reuseCheckout(repo.path, reporter)) return "resumed";
     throw new Error("the provider resumed a workspace without the repository checkout");
   }
-  const candidates = [...new Set([repo.headBranch, repo.defaultBranch].filter(Boolean))];
+  // A repository image is allowed to contain toolchain caches or a stale
+  // checkout path. Cold starts must not trust that state: remove only the
+  // derived checkout directory before cloning the requested revision.
+  await rm(repo.path, { recursive: true, force: true });
+  await cloneFreshCheckout(config, reporter);
+  await checkoutHeadRevision(repo);
+  await fetchDiffRevisions(config);
+  reporter.log("git.checkout_ready", { path: repo.path, headSha: repo.headSha || null });
+  return "created";
+}
 
-  let cloned = false;
+async function cloneFreshCheckout(config: RuntimeConfig, reporter: Reporter): Promise<void> {
+  const { repo } = config;
+  const candidates = [...new Set([repo.headBranch, repo.defaultBranch].filter(Boolean))];
   let lastOutput = "";
   for (const branch of candidates) {
     const result = await run("git", [
@@ -358,46 +373,39 @@ export async function prepareCheckout(
     ]);
     if (result.code === 0) {
       reporter.log("git.cloned", { branch });
-      cloned = true;
-      break;
+      return;
     }
     lastOutput = result.output;
     reporter.log("git.clone_branch_failed", { branch, output: lastOutput });
   }
 
-  if (!cloned) {
-    const result = await run("git", [
-      "clone",
-      "--depth",
-      String(CLONE_DEPTH),
-      repo.cloneUrl,
-      repo.path,
-    ]);
-    if (result.code !== 0) {
-      throw new Error(`clone failed: ${result.output || lastOutput || "git exited non-zero"}`);
-    }
-    reporter.log("git.cloned", { branch: "(default)" });
+  const result = await run("git", [
+    "clone",
+    "--depth",
+    String(CLONE_DEPTH),
+    repo.cloneUrl,
+    repo.path,
+  ]);
+  if (result.code !== 0) {
+    throw new Error(`clone failed: ${result.output || lastOutput || "git exited non-zero"}`);
   }
+  reporter.log("git.cloned", { branch: "(default)" });
+}
 
-  if (repo.headSha) {
-    const fetched = await run(
-      "git",
-      ["fetch", "--depth", String(CLONE_DEPTH), "origin", repo.headSha],
-      { cwd: repo.path },
-    );
-    if (fetched.code !== 0) {
-      throw new Error(`could not fetch head revision ${repo.headSha}: ${fetched.output}`);
-    }
-    const checkout = await run("git", ["reset", "--hard", repo.headSha], { cwd: repo.path });
-    if (checkout.code !== 0) {
-      throw new Error(`could not check out ${repo.headSha}: ${checkout.output}`);
-    }
+async function checkoutHeadRevision(repo: RuntimeConfig["repo"]): Promise<void> {
+  if (!repo.headSha) return;
+  const fetched = await run(
+    "git",
+    ["fetch", "--depth", String(CLONE_DEPTH), "origin", repo.headSha],
+    { cwd: repo.path },
+  );
+  if (fetched.code !== 0) {
+    throw new Error(`could not fetch head revision ${repo.headSha}: ${fetched.output}`);
   }
-
-  await fetchDiffRevisions(config);
-
-  reporter.log("git.checkout_ready", { path: repo.path, headSha: repo.headSha || null });
-  return "created";
+  const checkout = await run("git", ["reset", "--hard", repo.headSha], { cwd: repo.path });
+  if (checkout.code !== 0) {
+    throw new Error(`could not check out ${repo.headSha}: ${checkout.output}`);
+  }
 }
 
 async function fetchDiffRevisions(config: RuntimeConfig): Promise<void> {

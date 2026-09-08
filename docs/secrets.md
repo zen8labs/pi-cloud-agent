@@ -8,7 +8,7 @@ Users authenticate through the configured GitHub App. The controller creates a l
 
 The current broker injects the token into the sandbox as `SCM_TOKEN` and provider-specific aliases. GitHub webhook-triggered runs use the same connected-user token for checkout. When the controller has `GITHUB_APP_ID` plus its private key, controller-owned reviews and comment replies use a short-lived installation token, so GitHub attributes automation to the App rather than the connected user; if those App credentials cannot mint a token, publication fails instead of falling back silently. The connected user token is used for publication only when App credentials are intentionally not configured. The private key never crosses into the sandbox. The checkout token remains intentionally temporary: repository code and the agent run in the same untrusted machine, so a malicious repository can read or exfiltrate a token visible to its process.
 
-The optional per-repository setup script in Settings runs in that same untrusted checkout. The Settings **Test setup** action uses a disposable sandbox with the same boundary, then destroys it. It can use the forge credential for private dependencies, but the runtime withholds model credentials, the run callback token, and plugin configuration before invoking it. Do not put any additional credentials in the script or its output.
+Repository-specific dependencies belong in a user-selected base image/template. The Settings **Test environment** action runs a disposable compatibility check and destroys it. The image executes in the same untrusted sandbox as repository code, so image authors must be trusted. Provider checkpoints are filesystem-only and must not retain credential values.
 
 ## Security concerns
 
@@ -29,9 +29,7 @@ The application user is established by the GitHub App callback. VCS connections,
 
 ## Plugin MCP OAuth
 
-Host-mediated plugin OAuth reuses the same encryption key (`VCS_ENCRYPTION_KEY`)
-and stores access/refresh tokens in `plugin_oauth_tokens` plus a copy of the
-access token in `plugin_user_variables` under the manifest `tokenVariable`.
+Host-mediated plugin OAuth reuses the same encryption key (`VCS_ENCRYPTION_KEY`) and stores access/refresh tokens in `plugin_oauth_tokens` plus a copy of the access token in `plugin_user_variables` under the manifest `tokenVariable`.
 
 - Authorization-server hosts must be listed in `PLUGIN_OAUTH_ISSUER_ALLOWLIST`.
 - Tokens must never appear in `run_events`, logs, or audit detail payloads.

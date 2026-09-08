@@ -10,16 +10,18 @@ import {
 } from "@pi-cloud-agent/protocol";
 import type { Config } from "../config";
 import type { Database } from "../db/client";
-import { getRepositoryEnvironment } from "../db/environments";
+import { getRepositorySandboxImage } from "../db/environments";
+import { failProvisioningAttempt, renewProvisioningClaim } from "../db/provisioning";
 import {
   appendEvent,
   attachSandbox,
-  completeRun,
   markRunning,
+  markSandboxStopped,
   requeueRun,
   setRunPlugins,
 } from "../db/runs";
 import type { RunRow } from "../db/schema";
+import { pinSessionSandboxImage } from "../db/session-images";
 import { clearSessionWorkspace, getSessionForRun } from "../db/sessions";
 import type { Logger } from "../logger";
 import { buildTaskPrompt, resolvePluginsForRun } from "../plugins/catalog";
@@ -42,7 +44,10 @@ export interface ProvisionDeps {
   database: Database;
   broker: CredentialBroker;
   sandbox: SandboxProvider;
+  /** Resolve a provider recorded on a parked session after a config change. */
+  createProvider?: (name: string) => SandboxProvider;
   log: Logger;
+  claimLeaseSeconds?: number;
 }
 
 /** How many times a retryable provisioning failure is worth another attempt. */
@@ -51,6 +56,7 @@ const MAX_ATTEMPTS = 3;
 export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<void> {
   const { config, database, broker, sandbox } = deps;
   const log = deps.log.child({ runId: run.id, repo: run.repoFullName });
+  const heartbeat = startProvisioningHeartbeat(run, deps);
 
   try {
     const task = buildTask(run);
@@ -76,18 +82,16 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
     );
 
     const session = await getSessionForRun(database, run);
-    const workspaceResumed = Boolean(session?.sandboxId) && run.trigger.source !== "github";
-    const sessionBaseSha =
-      run.trigger.source === "github" ? null : (session?.diffBaseSha ?? null);
+    const resume = sessionResumeState(run, session);
     const env = {
       ...buildEnv(
         run,
         task,
         config,
-        workspaceResumed,
+        resume.workspaceResumed,
         resolved.skillText,
         credentials.model,
-        sessionBaseSha,
+        resume.sessionBaseSha,
       ),
       ...credentials.env,
     };
@@ -101,66 +105,167 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
         "mcp config",
       );
     }
-    const environment = await getRepositoryEnvironment(
+    const environment = await getRepositorySandboxImage(
       database,
       run.userId,
       run.provider,
       run.repoFullName,
     );
-    if (environment?.setupScript) {
-      secrets[SANDBOX_ENV.setupScript] = new Secret(
-        environment.setupScript,
-        "app-managed repository setup script",
+    const sessionProvider = sessionProviderName(session, sandbox.name);
+    let sessionSandbox = providerFor(deps, sandbox, sessionProvider);
+    const requestedImageRef = session?.sandboxImageRef || environment?.imageRef || "";
+    let imageRef =
+      session?.sandboxImageRef ?? (await sessionSandbox.resolveImage(requestedImageRef));
+    if (session && session.sandboxImageRef === null) {
+      const pinnedImage = await pinSessionSandboxImage(
+        database,
+        session.id,
+        sessionSandbox.name,
+        imageRef,
       );
+      if (pinnedImage === null) {
+        throw new SandboxError("session image could not be pinned", { retryable: true });
+      }
+      imageRef = pinnedImage.imageRef;
+      sessionSandbox = providerFor(deps, sandbox, pinnedImage.provider);
     }
-
+    let allocated = false;
     const spec = {
       runId: run.id,
-      image: "",
+      image: imageRef,
       timeoutSeconds: config.sandbox.timeoutSeconds,
       env,
       secrets,
-      command: `node --import tsx ${SANDBOX_PATHS.app}/run.js`,
+      command: `cd ${SANDBOX_PATHS.app} && ./bin/node --import tsx ./run.js`,
+      onAllocated: async (ref: SandboxRef) => {
+        await attachOwnedSandbox(database, run, ref, wallClockSeconds);
+        allocated = true;
+        clearInterval(heartbeat);
+      },
     };
     const ref = await startSandbox(
       session,
       spec,
-      sandbox,
+      sessionSandbox,
       database,
       log,
-      run.trigger.source !== "github",
+      resume.allowResume,
     );
 
-    // First durable write after the machine exists. Until this commits, a crash
-    // would leak the sandbox; after it, the reconciler will always find it.
-    const attached = await attachSandbox(
-      database,
-      run.id,
-      ref,
-      new Date(Date.now() + wallClockSeconds * 1000),
-    );
-
-    if (!attached) {
-      // The run left `provisioning` while we were creating the machine — almost
-      // always a cancel. The machine is ours to clean up, not the reconciler's,
-      // because its id was never stored.
-      log.warn("run left provisioning during create; stopping the orphan sandbox", {
+    // Every provider must report allocation before launching the runtime.
+    if (!allocated) {
+      log.warn("provider skipped allocation reporting; stopping the orphan sandbox", {
         sandboxId: ref.id,
       });
-      await sandbox.stop(ref).catch((error) => log.error("orphan stop failed", { error }));
-      return;
+      await sessionSandbox
+        .stop(ref)
+        .catch((error) => log.error("orphan stop failed", { error }));
+      throw new Error("sandbox provider did not report allocation before launch");
     }
 
-    await markRunning(database, run.id);
+    const running = await markRunning(database, run.id);
+    if (!running) {
+      await stopAfterLostOwnership(database, sessionSandbox, ref, run.id, log);
+      return;
+    }
     log.info("sandbox running", {
       sandboxId: ref.id,
       wallClockSeconds,
-      workspaceResumed,
+      workspaceResumed: resume.workspaceResumed,
       plugins: resolved.attached.map((plugin) => `${plugin.name}@${plugin.version}`),
     });
   } catch (error) {
     await handleFailure(run, error, deps, log);
+  } finally {
+    clearInterval(heartbeat);
   }
+}
+
+function sessionResumeState(
+  run: RunRow,
+  session: Awaited<ReturnType<typeof getSessionForRun>>,
+): { allowResume: boolean; workspaceResumed: boolean; sessionBaseSha: string | null } {
+  const allowResume = run.trigger.source !== "github";
+  return {
+    allowResume,
+    workspaceResumed: Boolean(session?.sandboxId) && allowResume,
+    sessionBaseSha: allowResume ? (session?.diffBaseSha ?? null) : null,
+  };
+}
+
+function sessionProviderName(
+  session: Awaited<ReturnType<typeof getSessionForRun>>,
+  fallback: string,
+): string {
+  return session?.sandboxId
+    ? (session.sandboxProvider ?? fallback)
+    : (session?.sandboxImageProvider ?? fallback);
+}
+
+async function attachOwnedSandbox(
+  database: Database,
+  run: RunRow,
+  ref: SandboxRef,
+  wallClockSeconds: number,
+) {
+  const attached = await attachSandbox(
+    database,
+    run.id,
+    ref,
+    new Date(Date.now() + wallClockSeconds * 1000),
+    run.attempt,
+  );
+  if (!attached) throw new Error("provisioning ownership was lost before runtime launch");
+}
+
+async function stopAfterLostOwnership(
+  database: Database,
+  sandbox: SandboxProvider,
+  ref: SandboxRef,
+  runId: string,
+  log: Logger,
+): Promise<void> {
+  // Cancellation or another terminal decision may race the provider's final
+  // launch step. The allocation is already durable, so stop it here instead of
+  // letting a terminal run retain a live sandbox until polling.
+  log.info("run ownership ended before runtime was marked running", {
+    sandboxId: ref.id,
+  });
+  try {
+    await sandbox.stop(ref);
+    await markSandboxStopped(database, runId);
+  } catch (error) {
+    log.error("sandbox stop after lost ownership failed", { error });
+  }
+}
+
+function startProvisioningHeartbeat(run: RunRow, deps: ProvisionDeps) {
+  const leaseSeconds = deps.claimLeaseSeconds ?? 120;
+  const heartbeat = setInterval(
+    () => {
+      void renewProvisioningClaim(deps.database, run, leaseSeconds).catch((error: unknown) =>
+        deps.log.warn("provisioning heartbeat failed", { runId: run.id, error }),
+      );
+    },
+    Math.max(10, (leaseSeconds * 1000) / 3),
+  );
+  heartbeat.unref();
+  return heartbeat;
+}
+
+function providerFor(
+  deps: ProvisionDeps,
+  sandbox: SandboxProvider,
+  providerName: string,
+): SandboxProvider {
+  if (providerName === sandbox.name) return sandbox;
+  const provider = deps.createProvider?.(providerName);
+  if (!provider) {
+    throw new SandboxError(`sandbox provider "${providerName}" is unavailable`, {
+      retryable: false,
+    });
+  }
+  return provider;
 }
 
 async function startSandbox(
@@ -180,7 +285,7 @@ async function startSandbox(
     return await sandbox.resume(workspace, spec);
   } catch (error) {
     if (!(error instanceof WorkspaceNotFoundError)) throw error;
-    await clearSessionWorkspace(database, session.id, workspace.id);
+    await clearSessionWorkspace(database, session.id, workspace.id, session.activeRunId);
     log.warn("stored session workspace is gone; continuing from checkpoint", {
       sessionId: session.id,
       workspaceId: workspace.id,
@@ -206,12 +311,11 @@ async function handleFailure(
       attempt: run.attempt,
       error,
     });
-    await requeueRun(deps.database, run.id);
-    return;
+    if (await requeueRun(deps.database, run.id, { attempt: run.attempt })) return;
   }
 
   log.error("provisioning failed", { attempt: run.attempt, error });
-  await completeRun(deps.database, run.id, "failed", message);
+  await failProvisioningAttempt(deps.database, run, message);
 }
 
 function buildTask(run: RunRow): TaskSpec {

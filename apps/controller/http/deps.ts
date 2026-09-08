@@ -14,6 +14,8 @@ export interface Deps {
   observability?: Observability;
   broker?: CredentialBroker;
   sandbox?: SandboxProvider;
+  /** Resolve a provider recorded on a session for deletion cleanup. */
+  createSandboxProvider?: (name: string) => SandboxProvider;
 }
 
 export type AppEnv = { Variables: Deps & { user: AppUserRow | null } };

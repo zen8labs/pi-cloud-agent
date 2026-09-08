@@ -22,6 +22,7 @@ type TurnDiff = {
 type DiffItem = CodeViewItem;
 
 const MemoizedCodeView = memo(CodeView) as typeof CodeView;
+const DIFF_THEMES = { dark: "pierre-dark", light: "pierre-light" } as const;
 
 export function SessionDiffSidebar({
   turns,
@@ -51,7 +52,7 @@ export function SessionDiffSidebar({
       diffStyle: "unified" as const,
       diffIndicators: "bars" as const,
       hunkSeparators: "line-info" as const,
-      theme: dark ? "pierre-dark" : "pierre-light",
+      theme: DIFF_THEMES,
       themeType: dark ? ("dark" as const) : ("light" as const),
       overflow: "scroll" as const,
       lineDiffType: "word-alt" as const,

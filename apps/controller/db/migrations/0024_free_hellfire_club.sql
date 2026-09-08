@@ -1,0 +1,1 @@
+ALTER TABLE "sessions" DROP COLUMN "checkpoint_size_bytes";

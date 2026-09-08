@@ -81,6 +81,7 @@ export async function claimIntegrationDelivery(
           or(
             eq(integrationDeliveries.status, "pending"),
             eq(integrationDeliveries.status, "processing"),
+            eq(integrationDeliveries.status, "failed"),
           ),
         ),
       )
@@ -174,6 +175,27 @@ export async function getExternalThread(
     )
     .limit(1);
   return row ?? null;
+}
+
+export async function bindExternalThread(
+  database: { insert: Database["insert"] },
+  input: {
+    externalThreadKey?: string;
+    userId?: string | null;
+    provider: string;
+    repoFullName: string;
+  },
+  sessionId: string,
+): Promise<void> {
+  if (!input.externalThreadKey) return;
+  if (!input.userId) throw new Error("external sessions require an owner");
+  await database.insert(externalThreads).values({
+    provider: input.provider,
+    externalKey: input.externalThreadKey,
+    userId: input.userId,
+    sessionId,
+    repoFullName: input.repoFullName,
+  });
 }
 
 export async function beginGithubReviewPublication(

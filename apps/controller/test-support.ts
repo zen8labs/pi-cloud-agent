@@ -11,6 +11,7 @@ import { createSessionWithRun } from "./db/sessions";
 import { createApp } from "./http/app";
 import { saveApiKeyConnection } from "./llm/connections";
 import { createLogger, type Logger } from "./logger";
+import type { CredentialBroker } from "./secrets/broker";
 
 /**
  * Shared setup for integration tests.
@@ -126,6 +127,31 @@ export function withTestModel(body: unknown, modelConnectionId: string): unknown
 export function silentLogger(): Logger {
   return createLogger("test", { level: "silent" });
 }
+
+export const testCredentialBroker: CredentialBroker = {
+  async mintForRepository() {
+    return { secrets: {}, env: {} };
+  },
+  async mintForRun() {
+    return {
+      model: {
+        connectionId: "00000000-0000-4000-8000-000000000099",
+        authType: "api_key",
+        provider: "test-provider",
+        name: "test-model",
+        api: "openai-completions",
+        baseUrl: "https://model.example.test/v1",
+        contextWindow: 16_384,
+        maxTokens: 2_048,
+        apiKey: "test-key",
+        authJson: null,
+        thinkingLevels: ["off", "medium"],
+      },
+      secrets: {},
+      env: {},
+    };
+  },
+};
 
 export function manualTrigger(overrides: Partial<Trigger["repo"]> = {}): Trigger {
   return {

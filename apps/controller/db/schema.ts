@@ -5,6 +5,7 @@ import type {
   RepoRef,
   RunEventType,
   RunStatus,
+  SessionRetentionStatus,
   ThinkingLevel,
   Trigger,
 } from "@pi-cloud-agent/protocol";
@@ -24,6 +25,8 @@ import {
 import { type AttachedPluginRef, definePluginTables } from "./schema-plugins";
 
 export type { AttachedPluginRef } from "./schema-plugins";
+
+export type SessionOperation = "archiving" | "expiring" | "parking" | "replacing";
 
 /**
  * Users and web sessions own the application identity boundary; runs and
@@ -73,7 +76,7 @@ export const vcsConnections = pgTable(
   ],
 );
 
-export const repositoryEnvironments = pgTable(
+export const repositorySandboxImages = pgTable(
   "repository_environments",
   {
     id: uuid("id").primaryKey().defaultRandom(),
@@ -82,8 +85,8 @@ export const repositoryEnvironments = pgTable(
       .references(() => appUsers.id, { onDelete: "cascade" }),
     provider: text("provider").notNull(),
     repoFullName: text("repo_full_name").notNull(),
-    /** App-managed setup script. Empty configurations are deleted. */
-    setupScript: text("setup_script").notNull(),
+    /** Provider-specific base image/template reference. Empty mappings are deleted. */
+    imageRef: text("image_ref").notNull(),
     createdAt: timestamptz("created_at").notNull().defaultNow(),
     updatedAt: timestamptz("updated_at").notNull().defaultNow(),
   },
@@ -145,6 +148,7 @@ export const sessions = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id").references(() => appUsers.id, { onDelete: "set null" }),
     title: text("title").notNull(),
+    pinned: boolean("pinned").notNull().default(false),
     provider: text("provider").notNull(),
     repoFullName: text("repo_full_name").notNull(),
     repo: jsonb("repo").notNull().$type<RepoRef>(),
@@ -164,10 +168,29 @@ export const sessions = pgTable(
     /** Original checkout revision used for the cumulative session diff. */
     diffBaseSha: text("diff_base_sha"),
 
-    /** Provider-owned workspace retained while the session is idle. */
+    /** Repository image/template selected for this session's cold starts. */
+    sandboxImageRef: text("sandbox_image_ref"),
+    /** Provider that resolved the pinned repository image reference. */
+    sandboxImageProvider: text("sandbox_image_provider"),
+
+    /** Provider that owns the checkpoint, retained after expiry for cold resumes. */
     sandboxProvider: text("sandbox_provider"),
     sandboxId: text("sandbox_id"),
     workspaceExpiresAt: timestamptz("workspace_expires_at"),
+    /** Retention state for the provider-owned checkpoint. */
+    retentionStatus: text("retention_status")
+      .notNull()
+      .default("active")
+      .$type<SessionRetentionStatus>(),
+    /** Last user activity, used to transition active sessions to inactive. */
+    lastActivityAt: timestamptz("last_activity_at").notNull().defaultNow(),
+    /** Provider-reported checkpoint size for quota/retention accounting. */
+
+    /** Durable cleanup operation that blocks new turns until it completes. */
+    sessionOperation: text("session_operation").$type<SessionOperation>(),
+    sessionOperationAt: timestamptz("session_operation_at"),
+    /** Lease heartbeat for long-running cleanup; the operation timestamp is immutable. */
+    sessionOperationHeartbeatAt: timestamptz("session_operation_heartbeat_at"),
 
     createdAt: timestamptz("created_at").notNull().defaultNow(),
     updatedAt: timestamptz("updated_at").notNull().defaultNow(),
@@ -177,6 +200,9 @@ export const sessions = pgTable(
     index("sessions_workspace_expiry_idx")
       .on(table.workspaceExpiresAt)
       .where(sql`${table.sandboxId} is not null and ${table.activeRunId} is null`),
+    index("sessions_retention_activity_idx")
+      .on(table.retentionStatus, table.lastActivityAt)
+      .where(sql`${table.activeRunId} is null`),
   ],
 );
 
@@ -242,6 +268,13 @@ export const runs = pgTable(
     sandboxProvider: text("sandbox_provider"),
     sandboxId: text("sandbox_id"),
     sandboxStoppedAt: timestamptz("sandbox_stopped_at"),
+
+    /** Original checkpoint retained until the stopped source is finalized. */
+    sandboxFinalizationWorkspaceProvider: text("sandbox_finalization_workspace_provider"),
+    sandboxFinalizationWorkspaceId: text("sandbox_finalization_workspace_id"),
+    /** Previous checkpoint retained until replacement cleanup succeeds. */
+    sandboxReplacementWorkspaceProvider: text("sandbox_replacement_workspace_provider"),
+    sandboxReplacementWorkspaceId: text("sandbox_replacement_workspace_id"),
 
     /**
      * Monotonic event counter. Incremented in the same transaction that inserts
@@ -447,7 +480,7 @@ export type GithubInstallationRow = typeof githubInstallations.$inferSelect;
 export type GithubReviewPublicationRow = typeof githubReviewPublications.$inferSelect;
 export type ObservabilityExportRow = typeof observabilityExports.$inferSelect;
 export type VcsConnectionRow = typeof vcsConnections.$inferSelect;
-export type RepositoryEnvironmentRow = typeof repositoryEnvironments.$inferSelect;
+export type RepositorySandboxImageRow = typeof repositorySandboxImages.$inferSelect;
 export type LlmConnectionRow = typeof llmConnections.$inferSelect;
 export type OAuthStateRow = typeof oauthStates.$inferSelect;
 export type AppUserRow = typeof appUsers.$inferSelect;

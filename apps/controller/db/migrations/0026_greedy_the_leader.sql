@@ -9,6 +9,16 @@ CREATE TABLE "external_threads" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "github_comment_publications" (
+	"run_id" uuid PRIMARY KEY NOT NULL,
+	"submission" jsonb NOT NULL,
+	"last_error" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"status" text DEFAULT 'processing' NOT NULL,
+	"github_comment_id" text
+);
+--> statement-breakpoint
 CREATE TABLE "github_installations" (
 	"installation_id" text PRIMARY KEY NOT NULL,
 	"user_id" uuid NOT NULL,
@@ -22,11 +32,11 @@ CREATE TABLE "github_installations" (
 CREATE TABLE "github_review_publications" (
 	"run_id" uuid PRIMARY KEY NOT NULL,
 	"submission" jsonb NOT NULL,
-	"status" text DEFAULT 'processing' NOT NULL,
-	"github_review_id" text,
 	"last_error" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"status" text DEFAULT 'processing' NOT NULL,
+	"github_review_id" text
 );
 --> statement-breakpoint
 CREATE TABLE "integration_deliveries" (
@@ -47,6 +57,7 @@ CREATE TABLE "integration_deliveries" (
 --> statement-breakpoint
 ALTER TABLE "external_threads" ADD CONSTRAINT "external_threads_user_id_app_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."app_users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "external_threads" ADD CONSTRAINT "external_threads_session_id_sessions_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."sessions"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "github_comment_publications" ADD CONSTRAINT "github_comment_publications_run_id_runs_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."runs"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "github_installations" ADD CONSTRAINT "github_installations_user_id_app_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."app_users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "github_review_publications" ADD CONSTRAINT "github_review_publications_run_id_runs_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."runs"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "integration_deliveries" ADD CONSTRAINT "integration_deliveries_run_id_runs_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."runs"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint

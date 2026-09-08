@@ -7,11 +7,19 @@ import {
   LoaderCircleIcon,
   PlayIcon,
   TerminalSquareIcon,
+  XIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { api } from "@/lib/api";
+import { InfoTooltip } from "./LlmConnectionSupport";
 
 export function RepositoryEnvironmentSection({ onNotice }: { onNotice: NoticeHandler }) {
   const [repos, setRepos] = useState<VcsRepository[]>([]);
@@ -55,10 +63,10 @@ export function RepositoryEnvironmentSection({ onNotice }: { onNotice: NoticeHan
           <TerminalSquareIcon className="size-4 text-muted-foreground" />
         </div>
         <div>
-          <h3 className="text-sm font-medium">Repository environments</h3>
+          <h3 className="text-sm font-medium">Starting environment</h3>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Add the setup commands this repository needs before an agent starts. This setting is
-            saved per repository and runs before the agent starts.
+            Choose the project environment for new sessions in this repository. The app adds its
+            agent runtime and manages the checkout and session checkpoint.
           </p>
         </div>
       </div>
@@ -120,18 +128,18 @@ function EnvironmentEditor({
   onRepositoryChange: (key: string) => void;
   onSaved: (environment: RepositoryEnvironmentSummary | undefined) => void;
 }) {
-  const [script, setScript] = useState(configured?.setupScript ?? "");
+  const [imageRef, setImageRef] = useState(configured?.imageRef ?? "");
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; output: string } | null>(null);
 
   useEffect(() => {
-    setScript(configured?.setupScript ?? "");
+    setImageRef(configured?.imageRef ?? "");
     setTestResult(null);
-  }, [configured?.setupScript]);
+  }, [configured?.imageRef]);
 
   const test = async () => {
-    if (!script.trim()) return;
+    if (!imageRef.trim()) return;
     setTesting(true);
     setTestResult(null);
     try {
@@ -139,7 +147,7 @@ function EnvironmentEditor({
         await api.testRepositoryEnvironment({
           provider: repo.provider,
           repo: repo.fullName,
-          setupScript: script,
+          imageRef,
         }),
       );
     } catch (cause) {
@@ -155,13 +163,13 @@ function EnvironmentEditor({
       const result = await api.saveRepositoryEnvironment({
         provider: repo.provider,
         repo: repo.fullName,
-        setupScript: script,
+        imageRef,
       });
       onSaved(result.environment);
       onNotice(
-        script.trim()
-          ? "Environment setup saved."
-          : "Environment setup cleared; only bundled image tools will be used.",
+        imageRef.trim()
+          ? "Starting environment saved."
+          : "Starting environment cleared; new sessions will use the default environment.",
         "success",
       );
     } catch (cause) {
@@ -173,49 +181,62 @@ function EnvironmentEditor({
 
   return (
     <div className="space-y-4 rounded-xl border border-border bg-card p-4">
-      <label
+      <span
         className="block text-xs font-medium text-muted-foreground"
-        htmlFor="environment-repo"
+        id="environment-repo-label"
       >
         Repository
-      </label>
-      <select
-        id="environment-repo"
-        value={selectedRepoKey}
-        onChange={(event) => onRepositoryChange(event.target.value)}
-        className="h-9 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-      >
-        {repos.map((item) => (
-          <option key={repoKey(item)} value={repoKey(item)}>
-            {item.fullName}
-          </option>
-        ))}
-      </select>
+      </span>
+      <Select value={selectedRepoKey} onValueChange={(next) => onRepositoryChange(next ?? "")}>
+        <SelectTrigger aria-labelledby="environment-repo-label" className="w-full">
+          <SelectValue placeholder="Select repository" />
+        </SelectTrigger>
+        <SelectContent align="start" className="max-w-[min(28rem,var(--available-width))]">
+          {repos.map((item) => (
+            <SelectItem key={repoKey(item)} value={repoKey(item)}>
+              {item.fullName}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       <div>
-        <label
-          className="block text-xs font-medium text-muted-foreground"
-          htmlFor="environment-script"
-        >
-          Setup script
-        </label>
-        <Textarea
-          id="environment-script"
-          value={script}
-          onChange={(event) => setScript(event.target.value)}
-          placeholder={`pnpm install\npython -m pip install -r requirements.txt`}
-          className="mt-2 min-h-32 resize-y font-mono text-xs leading-5"
+        <div className="flex items-center gap-1.5">
+          <label
+            className="block text-xs font-medium text-muted-foreground"
+            htmlFor="environment-image"
+          >
+            Environment image (optional)
+          </label>
+          <InfoTooltip label="Environment image requirements">
+            Use a public Docker image from Docker Hub or GHCR. Choose Debian 12/13 or Ubuntu
+            22.04/24.04 with the tools your project needs. The app adds its agent runtime and
+            handles the checkout. Test environment checks setup only; it does not run an agent
+            task.
+          </InfoTooltip>
+        </div>
+        <input
+          id="environment-image"
+          aria-describedby="environment-image-help"
+          value={imageRef}
+          onChange={(event) => setImageRef(event.target.value)}
+          placeholder="docker.io/acme/my-project-env:latest"
+          className="mt-2 h-9 w-full rounded-lg border border-input bg-background px-2.5 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           spellCheck={false}
         />
-        <p className="mt-2 text-xs leading-5 text-muted-foreground">
-          Runs as the unprivileged sandbox user after checkout, with a five-minute limit. Test
-          it in a disposable sandbox before saving.
+        <p id="environment-image-help" className="mt-2 text-xs leading-5 text-muted-foreground">
+          New sessions start from this environment in an isolated sandbox. Resumed sessions
+          continue from their saved checkpoint. Leave blank to use the default environment.
         </p>
       </div>
-      {testResult && <SetupTestResult result={testResult} />}
+      {testResult && (
+        <ImageTestResult result={testResult} onClose={() => setTestResult(null)} />
+      )}
       <div className="flex items-center justify-between gap-3">
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
           {configured && <CheckCircle2Icon className="size-3.5 text-emerald-500" />}
-          {configured ? "Custom setup enabled" : "Bundled image only"}
+          {configured
+            ? "Custom environment will be used for new sessions"
+            : "Default environment will be used for new sessions"}
         </span>
         <div className="flex items-center gap-2">
           <Button
@@ -223,10 +244,10 @@ function EnvironmentEditor({
             size="sm"
             variant="outline"
             onClick={() => void test()}
-            disabled={busy || testing || !script.trim()}
+            disabled={busy || testing || !imageRef.trim()}
           >
             {testing ? <LoaderCircleIcon className="animate-spin" /> : <PlayIcon />}
-            {testing ? "Testing…" : "Test setup"}
+            {testing ? "Testing…" : "Test environment"}
           </Button>
           <Button
             type="button"
@@ -235,7 +256,7 @@ function EnvironmentEditor({
             disabled={busy || testing}
           >
             {busy && <LoaderCircleIcon className="animate-spin" />}
-            {busy ? "Saving…" : "Save setup"}
+            {busy ? "Saving…" : "Save environment"}
           </Button>
         </div>
       </div>
@@ -243,22 +264,40 @@ function EnvironmentEditor({
   );
 }
 
-function SetupTestResult({ result }: { result: { ok: boolean; output: string } }) {
+function ImageTestResult({
+  result,
+  onClose,
+}: {
+  result: { ok: boolean; output: string };
+  onClose: () => void;
+}) {
   return (
     <div
+      role={result.ok ? "status" : "alert"}
       className={`rounded-lg border px-3 py-2 text-xs ${
         result.ok
           ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300"
           : "border-destructive/30 bg-destructive/5 text-destructive"
       }`}
     >
-      <div className="flex items-center gap-1.5 font-medium">
-        {result.ok ? (
-          <CheckCircle2Icon className="size-3.5" />
-        ) : (
-          <CircleXIcon className="size-3.5" />
-        )}
-        {result.ok ? "Setup test passed" : "Setup test failed"}
+      <div className="flex items-center justify-between gap-2 font-medium">
+        <div className="flex items-center gap-1.5">
+          {result.ok ? (
+            <CheckCircle2Icon className="size-3.5" />
+          ) : (
+            <CircleXIcon className="size-3.5" />
+          )}
+          {result.ok ? "Environment test passed" : "Environment test failed"}
+        </div>
+        <button
+          type="button"
+          aria-label="Close environment test result"
+          title="Close environment test result"
+          onClick={onClose}
+          className="rounded p-0.5 opacity-70 transition-opacity hover:opacity-100"
+        >
+          <XIcon className="size-3.5" />
+        </button>
       </div>
       {result.output && (
         <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-4 opacity-90">

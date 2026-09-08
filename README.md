@@ -31,7 +31,7 @@ Runs are fully headless. The dashboard can also continue a deliberate multi-turn
 
 A remote dev environment. There is nothing to attach to; the controller cannot even dial into a sandbox, by design. A parked session preserves agent history and a filesystem, not a machine you can SSH into.
 
-The execution unit is a **run**: an event starts it, it ends, and its log is immutable. A **session** is the durable parent for ordered chat turns, the Pi checkpoint, and an optional parked workspace. See [docs/sessions.md](docs/sessions.md).
+The execution unit is a **run**: an event starts it, it ends, and its log is immutable. A **session** is the durable parent for ordered chat turns, the Pi checkpoint, and an optional provider checkpoint. See [docs/resumability.md](docs/resumability.md).
 
 ## Development
 
@@ -44,7 +44,7 @@ The interesting decisions are subtractions:
 - **No workflow engine.** Run state lives in Postgres and one reconciliation loop repairs it, so a restart is indistinguishable from a slow tick. No Temporal, no trigger.dev, no run lifecycle held in memory to lose. → [docs/resumability.md](docs/resumability.md)
 - **No event bus, no Redis.** Postgres already stores every event; `LISTEN/NOTIFY` is a wake-up hint and polling is the correctness baseline.
 - **No prose publishing step.** The controller never parses agent text. GitHub reviews and replies use explicit structured tools when controller-owned credentials and durable idempotency are required; ordinary repository mutations remain agent-driven.
-- **A lifecycle-shaped sandbox contract.** `create`, `resume`, `suspend`, `deleteWorkspace`, and `stop`. The sandbox remains outbound-only; persistence is a provider concern, not an agent server. → [docs/adding-a-sandbox-provider.md](docs/adding-a-sandbox-provider.md)
+- **A lifecycle-shaped sandbox contract.** `resolveImage`, `create`, `resume`, `suspend`, `finalizeSuspend`, `deleteWorkspace`, and `stop`. The sandbox remains outbound-only; persistence is a provider concern, not an agent server. → [docs/adding-a-sandbox-provider.md](docs/adding-a-sandbox-provider.md)
 - **User-owned model connections.** The controller resolves the selected connection for each run, while the sandbox receives only the model configuration and credential needed for that run. → [docs/model-connections.md](docs/model-connections.md)
 
 ## Layout
