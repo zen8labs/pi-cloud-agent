@@ -20,13 +20,12 @@ import {
 } from "microsandbox";
 import { z } from "zod";
 import { flattenSecrets } from "./environment.js";
+import { SANDBOX_CPU_COUNT, SANDBOX_MEMORY_MB } from "./machine.js";
 import { readRuntimeArchive, runtimeInstallCommand, runtimeUser } from "./runtime-install.js";
 
 const envSchema = z.object({
   MICROSANDBOX_IMAGE: z.string().default("pi-cloud-agent:local"),
   SANDBOX_RUNTIME_DIR: z.string().default(""),
-  MICROSANDBOX_CPUS: z.coerce.number().int().positive().default(2),
-  MICROSANDBOX_MEMORY_MB: z.coerce.number().int().positive().default(4096),
   MICROSANDBOX_ROOT_DISK_MIB: z.coerce.number().int().positive().default(8192),
   MICROSANDBOX_SNAPSHOT_DIR: z.string().default(""),
   MICROSANDBOX_ALLOW_HOST: z
@@ -49,8 +48,6 @@ export function createMicroSandboxProvider(
   const {
     MICROSANDBOX_IMAGE: defaultImage,
     SANDBOX_RUNTIME_DIR: runtimeDirectory,
-    MICROSANDBOX_CPUS: cpus,
-    MICROSANDBOX_MEMORY_MB: memoryMb,
     MICROSANDBOX_ROOT_DISK_MIB: rootDiskMib,
     MICROSANDBOX_SNAPSHOT_DIR: configuredSnapshotDir,
     MICROSANDBOX_ALLOW_HOST: allowHost,
@@ -73,8 +70,6 @@ export function createMicroSandboxProvider(
           spec,
           defaultImage,
           rootDiskMib,
-          cpus,
-          memoryMb,
           allowHost,
         ).create();
         await installRuntime(sandbox, runtimeDirectory, spec.timeoutSeconds);
@@ -107,8 +102,6 @@ export function createMicroSandboxProvider(
           spec,
           defaultImage,
           rootDiskMib,
-          cpus,
-          memoryMb,
           allowHost,
         )
           .detached(true)
@@ -150,8 +143,8 @@ export function createMicroSandboxProvider(
           .fromSnapshot(snapshot.path)
           .entrypoint(["sleep", "infinity"])
           .user("root")
-          .cpus(cpus)
-          .memory(memoryMb)
+          .cpus(SANDBOX_CPU_COUNT)
+          .memory(SANDBOX_MEMORY_MB)
           .network((network) => network.policy(buildNetworkPolicy(spec, allowHost)))
           .detached(true)
           .maxDuration(spec.timeoutSeconds)
@@ -256,8 +249,6 @@ function configureImageSandbox(
   spec: SandboxSpec,
   defaultImage: string,
   rootDiskMib: number,
-  cpus: number,
-  memoryMb: number,
   allowHost: boolean,
 ): SandboxBuilder {
   return builder
@@ -265,8 +256,8 @@ function configureImageSandbox(
     .rootDisk(rootDiskMib)
     .entrypoint(["sleep", "infinity"])
     .user("root")
-    .cpus(cpus)
-    .memory(memoryMb)
+    .cpus(SANDBOX_CPU_COUNT)
+    .memory(SANDBOX_MEMORY_MB)
     .network((network) => network.policy(buildNetworkPolicy(spec, allowHost)))
     .maxDuration(spec.timeoutSeconds);
 }

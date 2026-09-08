@@ -24,10 +24,16 @@ Durable chat sessions additionally use `resume`, `suspend`, and `deleteWorkspace
 | File | Role |
 |---|---|
 | `index.ts` | the `FACTORIES` registry, `createSandboxProvider`, `sandboxProviderNames` |
+| `machine.ts` | CPU and memory for every built-in provider |
 | `microsandbox.ts` | microSandbox: local OCI microVM create/kill plus local integrity-checked snapshots |
 | `e2b.ts` | E2B: hosted create/kill plus filesystem-only pause/resume |
+| `e2b-template.ts` | CLI that applies `machine.ts` when building the hosted default template |
 | `runtime-install.ts` | app artifact selection and credential-free in-VM installation |
 | `registry.test.ts` | the registry contract: construction and its failure messages |
+
+## Machine size
+
+CPU and memory for every built-in provider live in [`machine.ts`](machine.ts) (`2` vCPU / `4096` MB). microSandbox applies them when it creates a VM. E2B applies them when it materializes a template, including `pnpm sandbox:template` and Settings image builds. Change the constants there to change both; then rebuild hosted templates. An existing E2B workspace keeps the size already baked into its template. Guest disk size is local-only (`MICROSANDBOX_ROOT_DISK_MIB`).
 
 ## Invariants
 
@@ -43,6 +49,7 @@ Durable chat sessions additionally use `resume`, `suspend`, and `deleteWorkspace
 - **Secrets are opened here and only here.** `spec.secrets` holds `Secret` objects; `expose()` is called at the boundary where they must become plain strings to cross into the machine.
 - **Never derive behavior from `spec.runId`.** It is correlation only. A provider that special-cases a run is a provider that cannot be swapped.
 - **Each factory validates its own environment.** That is why adding a backend needs no change to the controller's config schema.
+- **CPU and memory come from `machine.ts`.** Built-in providers do not take size from env vars.
 
 ## Notes on providers
 

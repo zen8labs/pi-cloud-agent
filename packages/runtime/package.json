@@ -11,7 +11,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsx build.ts",
-    "template:build": "pnpm build && e2b template create pi-cloud-agent -c 'sleep infinity' --ready-cmd 'true' -d Dockerfile.sandbox --cpu-count 2 --memory-mb 4096"
+    "template:build": "pnpm build && pnpm --filter @pi-cloud-agent/sandbox template"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "catalog:",
@@ -19,7 +19,6 @@
     "pi-mcp-adapter": "2.18.0"
   },
   "devDependencies": {
-    "@e2b/cli": "2.16.0",
     "@pi-cloud-agent/tsconfig": "workspace:*",
     "@types/node": "catalog:",
     "esbuild": "0.28.1",

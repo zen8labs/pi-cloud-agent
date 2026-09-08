@@ -10,6 +10,7 @@ import {
 import { ApiClient, ConnectionConfig, Sandbox, SandboxNotFoundError, Template } from "e2b";
 import { z } from "zod";
 import { flattenSecrets } from "./environment.js";
+import { SANDBOX_CPU_COUNT, SANDBOX_MEMORY_MB } from "./machine.js";
 import { readRuntimeArchive, runtimeInstallCommand, runtimeUser } from "./runtime-install.js";
 
 /**
@@ -28,10 +29,6 @@ const envSchema = z.object({
   E2B_TEMPLATE: z.string().default("pi-cloud-agent"),
   SANDBOX_RUNTIME_DIR: z.string().default(""),
 });
-
-/** Same size as microSandbox's defaults (`MICROSANDBOX_CPUS` / `MICROSANDBOX_MEMORY_MB`). */
-const TEMPLATE_CPU_COUNT = 2;
-const TEMPLATE_MEMORY_MB = 4096;
 
 function sessionOpts(apiKey: string, timeoutMs: number) {
   // The SDK's 60s request timeout is too short for a 120MB runtime upload,
@@ -270,8 +267,8 @@ async function buildTemplateFromImage(
   await Template.build(template, name, {
     apiKey,
     skipCache: true,
-    cpuCount: TEMPLATE_CPU_COUNT,
-    memoryMB: TEMPLATE_MEMORY_MB,
+    cpuCount: SANDBOX_CPU_COUNT,
+    memoryMB: SANDBOX_MEMORY_MB,
   });
   return name;
 }

@@ -8,6 +8,7 @@ const {
   templateFactory,
   templateBuilder,
   sandboxCreate,
+  sandboxPause,
   templateLookup,
   templateDelete,
   readRuntimeArchive,
@@ -26,6 +27,7 @@ const {
     templateFactory: vi.fn(() => builder),
     templateBuilder: builder,
     sandboxCreate: vi.fn(),
+    sandboxPause: vi.fn(async (): Promise<void> => undefined),
     templateLookup: vi.fn(async () => ({
       data: { templateID: "disposable-id" },
       response: { status: 200 },
@@ -36,7 +38,12 @@ const {
 });
 
 vi.mock("e2b", () => ({
-  Sandbox: { create: sandboxCreate, connect: sandboxConnect, kill: sandboxKill },
+  Sandbox: {
+    create: sandboxCreate,
+    connect: sandboxConnect,
+    kill: sandboxKill,
+    pause: sandboxPause,
+  },
   ConnectionConfig: class {},
   ApiClient: class {
     api = { GET: templateLookup, DELETE: templateDelete };
@@ -55,6 +62,7 @@ vi.mock("./runtime-install.js", () => ({
 }));
 
 import { createE2BProvider } from "./e2b";
+import { SANDBOX_CPU_COUNT, SANDBOX_MEMORY_MB } from "./machine";
 
 const preflightSpec = {
   runId: "test",
@@ -135,7 +143,7 @@ describe("E2B image resolution", () => {
     expect(buildTemplate).toHaveBeenCalledWith(
       templateBuilder,
       expect.any(String),
-      expect.objectContaining({ cpuCount: 2, memoryMB: 4096 }),
+      expect.objectContaining({ cpuCount: SANDBOX_CPU_COUNT, memoryMB: SANDBOX_MEMORY_MB }),
     );
   });
 
@@ -152,7 +160,12 @@ describe("E2B image resolution", () => {
       1,
       templateBuilder,
       expect.stringMatching(/^pi-cloud-agent-[0-9a-f]{16}-[0-9a-f]{12}$/),
-      { apiKey: "test-key", skipCache: true, cpuCount: 2, memoryMB: 4096 },
+      {
+        apiKey: "test-key",
+        skipCache: true,
+        cpuCount: SANDBOX_CPU_COUNT,
+        memoryMB: SANDBOX_MEMORY_MB,
+      },
     );
   });
 
