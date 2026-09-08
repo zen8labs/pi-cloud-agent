@@ -94,35 +94,62 @@ describe("session checkpoint races", () => {
     expect((await sessionDb.getSession(database, session.id))?.sandboxId).toBe(checkpoint.id);
   });
 
-  it("retains the old checkpoint deletion marker when suspension and cleanup fail", async () => {
-    const { session, run } = await support.seedSession(database);
-    const provider = providerWithFailingCheckpointDelete("checkpoint");
-    const loop = reconciler(provider);
-    await tick(loop);
-    await runs.completeRun(database, run.id, "succeeded");
-    await tick(loop);
-    const followUp = await sessionDb.createSessionTurn(
-      database,
-      session.id,
-      "Continue",
-      "token",
-      null,
-      { model: session.model, modelConnectionId: session.modelConnectionId },
-    );
-    provider.resume = async (_ref, spec) => {
-      const live = { provider: "fake", id: "resumed-live" };
-      await spec.onAllocated?.(live);
-      return live;
-    };
-    await tick(loop);
-    provider.suspend = async () => {
-      throw new Error("snapshot failed");
-    };
-    await runs.completeRun(database, followUp.id, "succeeded");
-    await tick(loop);
-    expect((await sessionDb.getSession(database, session.id))?.sandboxId).toBeNull();
-    await expectDeletionRetried(loop, provider, followUp.id);
-  });
+  it.each(["suspension", "resume preparation"])(
+    "preserves the last valid checkpoint after failed %s",
+    async (failure) => {
+      const { session, run } = await support.seedSession(database);
+      const provider = providerWithFailingCheckpointDelete("checkpoint");
+      const loop = reconciler(provider);
+      await tick(loop);
+      await runs.completeRun(database, run.id, "succeeded");
+      await tick(loop);
+      const followUp = await sessionDb.createSessionTurn(
+        database,
+        session.id,
+        "Continue",
+        "token",
+        null,
+        { model: session.model, modelConnectionId: session.modelConnectionId },
+      );
+      provider.resume = async (_ref, spec) => {
+        const live = { provider: "fake", id: "resumed-live" };
+        await spec.onAllocated?.(live);
+        if (failure === "resume preparation")
+          throw new Error("runtime installation failed; live copy removed");
+        return live;
+      };
+      await tick(loop);
+      provider.suspend = async () => {
+        throw new Error("snapshot failed");
+      };
+      await runs.completeRun(database, followUp.id, "succeeded");
+      await tick(loop);
+      expect((await sessionDb.getSession(database, session.id))?.sandboxId).toBe(
+        "checkpoint-1",
+      );
+      expect(
+        (await runs.getRun(database, followUp.id))?.sandboxReplacementWorkspaceId,
+      ).toBeNull();
+      await tick(loop);
+      expect(provider.deleted).toEqual([]);
+      provider.resume = async (ref, spec) => {
+        provider.resumed.push(ref.id);
+        await spec.onAllocated?.({ provider: "fake", id: "next-live" });
+        return { provider: "fake", id: "next-live" };
+      };
+      const next = await sessionDb.createSessionTurn(
+        database,
+        session.id,
+        "Retry",
+        "next-token",
+        null,
+        { model: session.model, modelConnectionId: session.modelConnectionId },
+      );
+      await tick(loop);
+      expect(provider.resumed).toContain("checkpoint-1");
+      expect((await runs.getRun(database, next.id))?.status).toBe("running");
+    },
+  );
 
   it("rejects a follow-up while expiry is deleting its checkpoint", async () => {
     const { session, run } = await support.seedSession(database);

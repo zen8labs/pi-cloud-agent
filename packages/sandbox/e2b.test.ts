@@ -7,6 +7,9 @@ const {
   templateExists,
   templateFactory,
   templateBuilder,
+  sandboxCreate,
+  templateLookup,
+  templateDelete,
 } = vi.hoisted(() => {
   const builder = {
     fromImage: vi.fn(),
@@ -15,17 +18,27 @@ const {
   builder.fromImage.mockReturnValue(builder);
   builder.setStartCmd.mockReturnValue(builder);
   return {
-    buildTemplate: vi.fn(async (): Promise<void> => undefined),
+    buildTemplate: vi.fn(async (_template: unknown, _name: string): Promise<void> => undefined),
     sandboxConnect: vi.fn(),
     sandboxKill: vi.fn(async (): Promise<void> => undefined),
     templateExists: vi.fn(async () => false),
     templateFactory: vi.fn(() => builder),
     templateBuilder: builder,
+    sandboxCreate: vi.fn(),
+    templateLookup: vi.fn(async () => ({
+      data: { templateID: "disposable-id" },
+      response: { status: 200 },
+    })),
+    templateDelete: vi.fn(async () => ({ response: { status: 204 } })),
   };
 });
 
 vi.mock("e2b", () => ({
-  Sandbox: { connect: sandboxConnect, kill: sandboxKill },
+  Sandbox: { create: sandboxCreate, connect: sandboxConnect, kill: sandboxKill },
+  ConnectionConfig: class {},
+  ApiClient: class {
+    api = { GET: templateLookup, DELETE: templateDelete };
+  },
   SandboxNotFoundError: class SandboxNotFoundError extends Error {},
   Template: Object.assign(templateFactory, {
     build: buildTemplate,
@@ -35,8 +48,78 @@ vi.mock("e2b", () => ({
 
 import { createE2BProvider } from "./e2b";
 
+const preflightSpec = {
+  runId: "test",
+  image: "ubuntu:22.04",
+  timeoutSeconds: 60,
+  env: {},
+  secrets: {},
+  command: "true",
+};
+
 describe("E2B image resolution", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it.each(["build", "create", "install"])(
+    "cleans up its private preflight template after %s fails",
+    async (failure) => {
+      if (failure === "build") buildTemplate.mockRejectedValueOnce(new Error("build failed"));
+      if (failure === "create") sandboxCreate.mockRejectedValueOnce(new Error("create failed"));
+      if (failure === "install")
+        sandboxCreate.mockResolvedValueOnce({
+          sandboxId: "test-sandbox",
+          commands: { run: vi.fn().mockRejectedValue(new Error("install failed")) },
+        });
+      const provider = createE2BProvider({ E2B_API_KEY: "test-key" });
+      await expect(provider.execute?.(preflightSpec)).rejects.toThrow(
+        "environment test failed",
+      );
+      expect(templateDelete).toHaveBeenCalledWith("/templates/{templateID}", {
+        params: { path: { templateID: "disposable-id" } },
+      });
+      expect(sandboxKill).toHaveBeenCalledTimes(failure === "install" ? 1 : 0);
+    },
+  );
+
+  it("never deletes an existing template used for preflight", async () => {
+    sandboxCreate.mockRejectedValueOnce(new Error("create failed"));
+    const provider = createE2BProvider({ E2B_API_KEY: "test-key" });
+    await expect(
+      provider.execute?.({ ...preflightSpec, image: "pi-cloud-agent" }),
+    ).rejects.toThrow();
+    expect(templateLookup).not.toHaveBeenCalled();
+    expect(templateDelete).not.toHaveBeenCalled();
+  });
+
+  it("keeps a concurrent session build separate from disposable preflight", async () => {
+    let release = () => {};
+    buildTemplate.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    sandboxCreate.mockRejectedValueOnce(new Error("create failed"));
+    const provider = createE2BProvider({ E2B_API_KEY: "test-key" });
+    const pinned = provider.resolveImage("ubuntu:22.04");
+    try {
+      await expect(provider.execute?.(preflightSpec)).rejects.toThrow();
+      expect(buildTemplate).toHaveBeenCalledTimes(2);
+      expect(templateLookup).toHaveBeenCalledWith("/templates/aliases/{alias}", {
+        params: { path: { alias: buildTemplate.mock.calls[1]?.[1] } },
+      });
+    } finally {
+      release();
+      await pinned;
+    }
+  });
+
+  it("surfaces template cleanup failure instead of hiding the leaked resource", async () => {
+    sandboxCreate.mockRejectedValueOnce(new Error("create failed"));
+    templateDelete.mockRejectedValueOnce(new Error("cleanup unavailable"));
+    const provider = createE2BProvider({ E2B_API_KEY: "test-key" });
+    await expect(provider.execute?.(preflightSpec)).rejects.toThrow("cleanup unavailable");
+  });
 
   it("refreshes a republished image tag instead of permanently reusing its old template", async () => {
     const provider = createE2BProvider({ E2B_API_KEY: "test-key" });

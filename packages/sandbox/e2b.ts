@@ -7,7 +7,7 @@ import {
   type SandboxSpec,
   WorkspaceNotFoundError,
 } from "@pi-cloud-agent/protocol";
-import { Sandbox, SandboxNotFoundError, Template } from "e2b";
+import { ApiClient, ConnectionConfig, Sandbox, SandboxNotFoundError, Template } from "e2b";
 import { z } from "zod";
 import { flattenSecrets } from "./environment.js";
 import { readRuntimeArchive, runtimeInstallCommand, runtimeUser } from "./runtime-install.js";
@@ -68,8 +68,18 @@ export function createE2BProvider(
       const envs = flattenSecrets(spec);
       const timeoutMs = spec.timeoutSeconds * 1000;
       let sandbox: Sandbox | undefined;
+      let ownedTemplate: string | undefined;
       try {
-        const template = await resolveTemplate(spec.image);
+        // Preflight owns its materialization exclusively; never delete a build
+        // shared with a session's pinned image resolution.
+        const template = await resolveTemplateReference(
+          spec.image || defaultTemplate,
+          defaultTemplate,
+          apiKey,
+          (name) => {
+            ownedTemplate = name;
+          },
+        );
         sandbox = await Sandbox.create(template, { apiKey, timeoutMs });
         await installRuntime(sandbox, runtimeDirectory, timeoutMs);
         const result = await sandbox.commands.run(spec.command, {
@@ -84,7 +94,11 @@ export function createE2BProvider(
           cause,
         });
       } finally {
-        if (sandbox) await Sandbox.kill(sandbox.sandboxId, { apiKey }).catch(() => undefined);
+        try {
+          if (sandbox) await Sandbox.kill(sandbox.sandboxId, { apiKey });
+        } finally {
+          if (ownedTemplate) await deletePreflightTemplate(ownedTemplate, apiKey);
+        }
       }
     },
 
@@ -197,14 +211,16 @@ async function resolveTemplateReference(
   imageRef: string,
   defaultTemplate: string,
   apiKey: string,
+  onOwnedTemplate?: (name: string) => void,
 ): Promise<string> {
   // Preserve the deployment's configured template alias exactly. Repository
   // mappings may instead use a Docker reference, including short official
   // images such as `ubuntu`; those are promoted to cached templates below.
   if (imageRef === defaultTemplate) return imageRef;
-  if (isContainerImageReference(imageRef)) return buildTemplateFromImage(imageRef, apiKey);
+  if (isContainerImageReference(imageRef))
+    return buildTemplateFromImage(imageRef, apiKey, onOwnedTemplate);
   if (await Template.exists(imageRef, { apiKey })) return imageRef;
-  return buildTemplateFromImage(imageRef, apiKey);
+  return buildTemplateFromImage(imageRef, apiKey, onOwnedTemplate);
 }
 
 function isContainerImageReference(imageRef: string): boolean {
@@ -214,16 +230,35 @@ function isContainerImageReference(imageRef: string): boolean {
   return imageRef.includes("/") || imageRef.includes(":");
 }
 
-async function buildTemplateFromImage(imageRef: string, apiKey: string): Promise<string> {
+async function buildTemplateFromImage(
+  imageRef: string,
+  apiKey: string,
+  onOwnedTemplate?: (name: string) => void,
+): Promise<string> {
   const digest = createHash("sha256").update(imageRef).digest("hex").slice(0, 16);
   const unique = randomUUID().replaceAll("-", "").slice(0, 12);
   const suffix = `${digest}-${unique}`;
   const name = `pi-cloud-agent-${suffix}`;
+  onOwnedTemplate?.(name);
   const template = Template().fromImage(imageRef).setStartCmd("sleep infinity", "true");
   // Every materialization gets its own immutable alias. A registry tag can be
   // republished, and a failed build must never silently reuse an older alias.
   await Template.build(template, name, { apiKey, skipCache: true });
   return name;
+}
+
+async function deletePreflightTemplate(alias: string, apiKey: string): Promise<void> {
+  const client = new ApiClient(new ConnectionConfig({ apiKey }));
+  const lookup = await client.api.GET("/templates/aliases/{alias}", {
+    params: { path: { alias } },
+  });
+  if (lookup.response.status === 404) return;
+  if (lookup.error || !lookup.data)
+    throw new Error(`e2b: could not locate disposable template "${alias}" for cleanup`);
+  const result = await client.api.DELETE("/templates/{templateID}", {
+    params: { path: { templateID: lookup.data.templateID } },
+  });
+  if (result.error) throw new Error(`e2b: could not delete disposable template "${alias}"`);
 }
 
 const RETRYABLE_PATTERNS = [

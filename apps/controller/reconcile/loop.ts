@@ -263,17 +263,17 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
         await cleanupUnownedWorkspace(run, ref, workspace);
       }
     } catch (error) {
-      log.error("session workspace suspension failed; continuing cold", {
+      log.error("session workspace suspension failed; retaining last available checkpoint", {
         sessionId: run.sessionId,
         runId: run.id,
         error,
       });
       // Keep the run attached until stopping succeeds so reconciliation retries it.
       await provider.stop(ref);
-      const replaced = previousWorkspace(previous, ref.id);
-      const parked = await parkSession(database, run, null, null, replaced, token);
-      if (parked && replaced)
-        await deleteMarkedWorkspace(finalizationDeps, replaced, run.sessionId, run.id);
+      // A restored VM is disposable; its separate source checkpoint is not.
+      // Keep that last good checkpoint when no replacement could be produced.
+      const retained = previousWorkspace(previous, ref.id);
+      await parkSession(database, run, retained ? undefined : null, null, null, token);
     }
   }
 
