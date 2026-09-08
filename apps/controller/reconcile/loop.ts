@@ -1,4 +1,4 @@
-import type { SandboxProvider, SandboxRef, WorkspaceRef } from "@pi-cloud-agent/protocol";
+import type { SandboxProvider } from "@pi-cloud-agent/protocol";
 import { createSandboxProvider } from "@pi-cloud-agent/sandbox";
 import type { Config } from "../config";
 import { CHANNELS, createNotifier, type Database } from "../db/client";
@@ -18,28 +18,21 @@ import {
   releaseSessionOperation,
   releaseStaleReconcilerOperations,
   startSessionOperationHeartbeat,
-  withSessionOperation,
 } from "../db/session-operations";
-import { markSessionSandboxReplacementPending } from "../db/session-workspace";
 import {
   clearSessionWorkspace,
   findExpiredSessionWorkspaces,
   findSessionRunsToPark,
-  getSession,
-  parkSession,
 } from "../db/sessions";
 import type { Logger } from "../logger";
 import type { CredentialBroker } from "../secrets/broker";
 import { type ProvisionDeps, provisionRun } from "./provision";
 import {
-  deleteMarkedWorkspace,
-  deleteReplacedWorkspace,
-  finalizeSuspendedSource,
-  prepareSessionParking,
   retryPendingSessionFinalizations,
   retryPendingSessionSandboxReplacements,
   type SessionFinalizationDeps,
 } from "./session-finalization";
+import { parkSessionRun } from "./session-parking";
 
 /**
  * The reconciler: one loop that reads durable state and repairs it.
@@ -97,24 +90,6 @@ export interface Reconciler {
 }
 
 const BATCH = 25;
-type ParkableSessionRun = Omit<RunRow, "sessionId" | "sandboxId" | "sandboxProvider"> & {
-  sessionId: string;
-  sandboxId: string;
-  sandboxProvider: string;
-};
-
-function isParkableSessionRun(run: RunRow): run is ParkableSessionRun {
-  return Boolean(run.sessionId && run.sandboxId && run.sandboxProvider);
-}
-
-function previousWorkspace(
-  previous: SessionRow | null,
-  currentId: string,
-): WorkspaceRef | null {
-  return previous?.sandboxProvider && previous.sandboxId && previous.sandboxId !== currentId
-    ? { provider: previous.sandboxProvider, id: previous.sandboxId }
-    : null;
-}
 
 export function createReconciler(options: ReconcilerOptions): Reconciler {
   const {
@@ -146,6 +121,14 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
     createProvider,
     log,
   };
+  const sessionParkingDeps = {
+    config,
+    database,
+    sandbox,
+    createProvider,
+    log,
+    finalization: finalizationDeps,
+  };
 
   let running = false;
   let timer: NodeJS.Timeout | null = null;
@@ -159,19 +142,19 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
   async function reclaim(run: RunRow, reason: string): Promise<void> {
     if (!run.sandboxId || !run.sandboxProvider) return;
     const runLog = log.child({ runId: run.id, sandboxId: run.sandboxId });
+    let stopped = false;
     try {
       const provider =
         run.sandboxProvider === sandbox.name ? sandbox : createProvider(run.sandboxProvider);
       await provider.stop({ provider: run.sandboxProvider, id: run.sandboxId });
+      stopped = true;
       runLog.info("sandbox reclaimed", { reason });
     } catch (error) {
-      // Deliberately still marked stopped: a provider that cannot kill a machine
-      // will not start succeeding on the next tick, and retrying forever would
-      // turn one stuck sandbox into an endless loop. The provider's own timeout
-      // is the backstop.
-      runLog.error("sandbox stop failed; giving up on it", { reason, error });
+      // Keep the marker clear so the next reconciliation pass retries cleanup.
+      // A failed provider call is not evidence that the machine is gone.
+      runLog.error("sandbox stop failed; will retry", { reason, error });
     }
-    await markSandboxStopped(database, run.id);
+    if (stopped) await markSandboxStopped(database, run.id);
   }
 
   /** Suspend a session workspace, or release the session cold if suspension fails. */
@@ -180,119 +163,7 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
       await reclaim(run, reason);
       return;
     }
-    if (!isParkableSessionRun(run)) {
-      await parkWithoutSandbox(run);
-      return;
-    }
-
-    await parkWithSandbox(run, reason);
-  }
-
-  async function parkWithoutSandbox(run: RunRow): Promise<void> {
-    // A promoted turn can be cancelled before it resumes the session's
-    // parked workspace. It owns no sandbox to suspend, so preserve the
-    // existing workspace reference for the next queued turn.
-    await parkSession(database, run, undefined, null);
-  }
-
-  async function parkWithSandbox(run: ParkableSessionRun, reason: string): Promise<void> {
-    await withSessionOperation(
-      database,
-      run.sessionId,
-      "parking",
-      { activeRunId: run.id },
-      (token) => parkClaimedSandbox(run, reason, token),
-      (error) =>
-        log.warn("session parking heartbeat failed", { sessionId: run.sessionId, error }),
-    );
-  }
-
-  async function parkClaimedSandbox(
-    run: ParkableSessionRun,
-    reason: string,
-    token: Date,
-  ): Promise<void> {
-    if (!(await prepareSessionParking(finalizationDeps, run))) return;
-    await suspendAndPark(run, reason, token);
-  }
-
-  async function suspendAndPark(
-    run: ParkableSessionRun,
-    reason: string,
-    token: Date,
-  ): Promise<void> {
-    const provider =
-      run.sandboxProvider === sandbox.name ? sandbox : createProvider(run.sandboxProvider);
-    const ref = { provider: run.sandboxProvider, id: run.sandboxId };
-    const previous = await getSession(database, run.sessionId);
-    try {
-      const workspace = await provider.suspend(ref);
-      const expiresAt = new Date(Date.now() + config.sessionWorkspaceRetentionSeconds * 1000);
-      const replacedWorkspace = previousWorkspace(previous, workspace.id);
-      const parked = await parkSession(
-        database,
-        run,
-        workspace,
-        expiresAt,
-        replacedWorkspace,
-        token,
-      );
-      if (parked) {
-        await deleteReplacedWorkspace(
-          finalizationDeps,
-          previous,
-          workspace,
-          run.sessionId,
-          run.id,
-        );
-        await finalizeSuspendedSource(
-          finalizationDeps,
-          provider,
-          ref,
-          workspace,
-          run.sessionId,
-          run.id,
-        );
-        log.info("session workspace suspended", {
-          sessionId: run.sessionId,
-          runId: run.id,
-          workspaceId: workspace.id,
-          reason,
-        });
-      } else {
-        await cleanupUnownedWorkspace(run, ref, workspace);
-      }
-    } catch (error) {
-      log.error("session workspace suspension failed; retaining last available checkpoint", {
-        sessionId: run.sessionId,
-        runId: run.id,
-        error,
-      });
-      // Keep the run attached until stopping succeeds so reconciliation retries it.
-      await provider.stop(ref);
-      // A restored VM is disposable; its separate source checkpoint is not.
-      // Keep that last good checkpoint when no replacement could be produced.
-      const retained = previousWorkspace(previous, ref.id);
-      await parkSession(database, run, retained ? undefined : null, null, null, token);
-    }
-  }
-
-  async function cleanupUnownedWorkspace(
-    run: ParkableSessionRun,
-    source: SandboxRef,
-    workspace: WorkspaceRef,
-  ): Promise<void> {
-    const current = await getSession(database, run.sessionId);
-    if (current?.sandboxId === workspace.id) return;
-    // E2B uses the paused sandbox id as both source and checkpoint. Deleting it
-    // here would destroy the source needed if parking retries after the session
-    // operation releases, so leave same-id checkpoints for that retry.
-    if (source.id !== workspace.id) {
-      const marked = await markSessionSandboxReplacementPending(database, run.id, workspace);
-      if (marked) {
-        await deleteMarkedWorkspace(finalizationDeps, workspace, run.sessionId, run.id);
-      }
-    }
+    await parkSessionRun(run, reason, sessionParkingDeps);
   }
 
   async function expireWorkspace(session: SessionRow): Promise<void> {

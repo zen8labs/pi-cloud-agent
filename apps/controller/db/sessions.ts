@@ -350,7 +350,10 @@ export async function parkSession(
       .where(and(eq(runs.id, run.id), isNull(runs.sandboxStoppedAt)));
     return { parked: true, nextRunId: next?.id ?? null };
   });
-  if (result.nextRunId) await notify(database, CHANNELS.runQueued, result.nextRunId);
+  // NOTIFY is a wake-up hint; polling remains the correctness path. A failed
+  // notification must not make a committed checkpoint look uncommitted.
+  if (result.nextRunId)
+    await notify(database, CHANNELS.runQueued, result.nextRunId).catch(() => undefined);
   return result.parked;
 }
 

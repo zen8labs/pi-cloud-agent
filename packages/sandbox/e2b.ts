@@ -153,9 +153,11 @@ export function createE2BProvider(
       const envs = flattenSecrets(spec);
       const timeoutMs = spec.timeoutSeconds * 1000;
       let sandbox: Sandbox | undefined;
+      let allocationAccepted = false;
       try {
         sandbox = await Sandbox.connect(ref.id, sessionOpts(apiKey, timeoutMs));
         await spec.onAllocated?.({ provider: "e2b", id: sandbox.sandboxId });
+        allocationAccepted = true;
         await installRuntime(sandbox, runtimeDirectory, timeoutMs);
         await sandbox.commands.run(spec.command, {
           background: true,
@@ -166,9 +168,13 @@ export function createE2BProvider(
         });
       } catch (cause) {
         if (cause instanceof SandboxNotFoundError) {
+          if (sandbox) await reclaimConnectedSandbox(sandbox.sandboxId, apiKey);
           throw new WorkspaceNotFoundError(`e2b: workspace "${ref.id}" no longer exists`, {
             cause,
           });
+        }
+        if (sandbox && !allocationAccepted) {
+          await reclaimConnectedSandbox(sandbox.sandboxId, apiKey);
         }
         throw new SandboxError(`e2b: could not resume workspace "${ref.id}"`, {
           retryable: isRetryable(cause),
@@ -207,6 +213,16 @@ export function createE2BProvider(
       await Sandbox.kill(ref.id, { apiKey });
     },
   };
+}
+
+async function reclaimConnectedSandbox(sandboxId: string, apiKey: string): Promise<void> {
+  try {
+    await Sandbox.pause(sandboxId, { apiKey, keepMemory: false });
+  } catch {
+    // If pausing fails, kill as a last resort so an expired owner cannot leave
+    // a live sandbox competing with the replacement attempt.
+    await Sandbox.kill(sandboxId, { apiKey }).catch(() => undefined);
+  }
 }
 
 async function installRuntime(sandbox: Sandbox, directory: string, timeoutMs: number) {

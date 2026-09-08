@@ -1,14 +1,12 @@
-import { SANDBOX_ENV, SandboxError, type SandboxProvider } from "@pi-cloud-agent/protocol";
+import { SANDBOX_ENV, SandboxError } from "@pi-cloud-agent/protocol";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
-import type { Database } from "../db/client";
 import { saveRepositorySandboxImage } from "../db/environments";
-import { appendEvent, attachSandbox, claimNextRun, completeRun, getRun } from "../db/runs";
+import { attachSandbox, claimNextRun, completeRun, getRun } from "../db/runs";
 import type { RunRow } from "../db/schema";
 import { runs } from "../db/schema";
 import { createSessionTurn, getSession, parkSession } from "../db/sessions";
 import {
-  bindTestDatabase,
   seedRun,
   seedSession,
   seedTestUser,
@@ -18,33 +16,7 @@ import {
 } from "../test-support";
 import { fakeProvider } from "./fake-sandbox-provider";
 import { createReconciler, type Reconciler } from "./loop";
-
-/** The reconciler, driven one tick at a time against real durable state. */
-
-let database: Database;
-bindTestDatabase((value) => {
-  database = value;
-});
-
-function reconciler(
-  provider: SandboxProvider,
-  options: { silenceTimeoutSeconds?: number; claimLeaseSeconds?: number } = {},
-): Reconciler {
-  return createReconciler({
-    config: testConfig({ SANDBOX_PROVIDER: "fake" }),
-    database,
-    broker: testCredentialBroker,
-    log: silentLogger(),
-    createProvider: () => provider,
-    ...options,
-  });
-}
-
-/** One full pass, including detached provisioning. */
-async function tick(loop: Reconciler): Promise<void> {
-  await loop.tick();
-  await loop.drain();
-}
+import { database, reconciler, tick } from "./reconciler-test-support";
 
 async function completeAndReclaim(loop: Reconciler, run: RunRow): Promise<void> {
   await tick(loop);
@@ -336,11 +308,13 @@ describe("completion and teardown", () => {
     expect(provider.stopped).toEqual(["sb-1"]);
   });
 
-  it("gives up on a machine the provider cannot kill, rather than looping forever", async () => {
+  it("retains a cleanup marker when a provider cannot kill a machine", async () => {
     const run = await seedRun(database);
     const provider = fakeProvider();
+    let attempts = 0;
     provider.stop = async () => {
-      throw new Error("provider is down");
+      attempts += 1;
+      if (attempts === 1) throw new Error("provider is down");
     };
     const loop = reconciler(provider);
 
@@ -348,105 +322,10 @@ describe("completion and teardown", () => {
     await completeRun(database, run.id, "succeeded");
     await tick(loop);
 
+    expect((await getRun(database, run.id))?.sandboxStoppedAt).toBeNull();
+    await tick(loop);
     expect((await getRun(database, run.id))?.sandboxStoppedAt).not.toBeNull();
-  });
-});
-
-describe("recovery", () => {
-  it("fails and reclaims a run that passed its deadline", async () => {
-    const run = await seedRun(database);
-    const provider = fakeProvider();
-    const loop = reconciler(provider);
-
-    await tick(loop);
-    await database
-      .update(runs)
-      .set({ deadlineAt: new Date(Date.now() - 1000) })
-      .where(eq(runs.id, run.id));
-    await tick(loop);
-
-    const stored = await getRun(database, run.id);
-    expect(stored?.status).toBe("failed");
-    expect(stored?.error).toContain("wall-clock budget");
-    expect(provider.stopped).toEqual(["sb-1"]);
-  });
-
-  it("fails a sandbox that stopped reporting", async () => {
-    const run = await seedRun(database);
-    const provider = fakeProvider();
-    const loop = reconciler(provider, { silenceTimeoutSeconds: 30 });
-
-    await tick(loop);
-    await appendEvent(database, run.id, "token", { content: "working" });
-    await database
-      .update(runs)
-      .set({ lastEventAt: new Date(Date.now() - 120_000) })
-      .where(eq(runs.id, run.id));
-    await tick(loop);
-
-    const stored = await getRun(database, run.id);
-    expect(stored?.status).toBe("failed");
-    expect(stored?.error).toContain("stopped reporting");
-    expect(provider.stopped).toEqual(["sb-1"]);
-  });
-
-  it("recovers a run whose worker died between claiming and provisioning", async () => {
-    const run = await seedRun(database);
-    await claimNextRun(database, -1);
-
-    const provider = fakeProvider();
-    const loop = reconciler(provider);
-    await tick(loop);
-
-    // Requeued and then picked up in the same pass: no operator intervention.
-    const stored = await getRun(database, run.id);
-    expect(stored?.status).toBe("running");
-    expect(stored?.attempt).toBe(2);
-  });
-
-  it("leaves a live run alone across a restart", async () => {
-    const run = await seedRun(database);
-    const provider = fakeProvider();
-
-    await tick(reconciler(provider));
-    // A brand new reconciler, as if the process had just booted.
-    await tick(reconciler(provider));
-
-    const stored = await getRun(database, run.id);
-    expect(stored?.status).toBe("running");
-    expect(stored?.error).toBeNull();
-    expect(provider.stopped).toEqual([]);
-  });
-
-  it("completes a run from a callback that arrives after a restart", async () => {
-    const run = await seedRun(database);
-    const provider = fakeProvider();
-    await tick(reconciler(provider));
-
-    // The sandbox kept working while the controller was gone and reports now.
-    await appendEvent(database, run.id, "status", { status: "done" });
-    expect(await completeRun(database, run.id, "succeeded")).toBe(true);
-
-    await tick(reconciler(provider));
-    expect((await getRun(database, run.id))?.status).toBe("succeeded");
-    expect(provider.stopped).toEqual(["sb-1"]);
-  });
-
-  it("cleans up a machine created for a run that was cancelled mid-create", async () => {
-    const run = await seedRun(database);
-    const provider = fakeProvider();
-    provider.create = async (spec) => {
-      // Cancel lands while the provider is still working.
-      await completeRun(database, spec.runId, "cancelled");
-      return { provider: "fake", id: "sb-orphan" };
-    };
-
-    await tick(reconciler(provider));
-
-    // attachSandbox refused, so provisioning owns the cleanup — the id was never
-    // stored and the reconciler would otherwise never learn about it.
-    expect(provider.stopped).toEqual(["sb-orphan"]);
-    expect((await getRun(database, run.id))?.sandboxId).toBeNull();
+    expect(attempts).toBe(2);
   });
 });
 

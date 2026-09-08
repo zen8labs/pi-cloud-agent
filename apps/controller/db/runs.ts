@@ -165,7 +165,10 @@ export async function setRunPlugins(
 export async function markRunning(database: Database, runId: string): Promise<boolean> {
   const updated = await database
     .update(runs)
-    .set({ status: "running", updatedAt: new Date() })
+    // Establish the liveness baseline after the provider has launched the
+    // runtime. A slow image/runtime preparation must not look silent merely
+    // because the provisioning claim was created earlier.
+    .set({ status: "running", lastEventAt: new Date(), updatedAt: new Date() })
     .where(and(eq(runs.id, runId), eq(runs.status, "provisioning")))
     .returning({ id: runs.id });
   return updated.length > 0;

@@ -48,7 +48,7 @@ Decides what runs and when, resolves connected identities, mints run credentials
 - **No in-memory run state.** If it is needed to resume a run, it is a column. This is the rule that removed the event bus.
 - **No in-memory session state.** Pi history is checkpointed in Postgres; a provider checkpoint is the warm-resume optimization. See [../../docs/resumability.md](../../docs/resumability.md).
 - **No workflow-specific behavior.** Intake resolves the user's repository and request; attached skills are handled through plugins.
-- **`attachSandbox` is the first durable write after a machine exists.** Before it commits a crash leaks a sandbox; after it, the reconciler always finds it.
+- **`attachSandbox` is the first durable write after a machine exists.** Before it commits a crash leaks a sandbox; after it, the reconciler always finds it. Cleanup markers are cleared only after the provider confirms stop/delete/finalize success.
 - **The controller never parses agent output.** The agent actuates its own outcomes. Adding a parser here is one of the changes to raise first.
 - **OTLP export is optional and best-effort.** The durable run journal remains the source of truth; exporter credentials stay in the controller, never in the sandbox. Delivery retries use `observability_exports` and do not affect run completion.
 - **Migrations are never applied on boot.** A schema change is a deliberate step, not a side effect of one replica winning a race during a deploy.

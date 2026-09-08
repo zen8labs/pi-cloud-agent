@@ -12,7 +12,14 @@ import type { Config } from "../config";
 import type { Database } from "../db/client";
 import { getRepositorySandboxImage } from "../db/environments";
 import { failProvisioningAttempt, renewProvisioningClaim } from "../db/provisioning";
-import { appendEvent, attachSandbox, markRunning, requeueRun, setRunPlugins } from "../db/runs";
+import {
+  appendEvent,
+  attachSandbox,
+  markRunning,
+  markSandboxStopped,
+  requeueRun,
+  setRunPlugins,
+} from "../db/runs";
 import type { RunRow } from "../db/schema";
 import { pinSessionSandboxImage } from "../db/session-images";
 import { clearSessionWorkspace, getSessionForRun } from "../db/sessions";
@@ -149,7 +156,11 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
       throw new Error("sandbox provider did not report allocation before launch");
     }
 
-    await markRunning(database, run.id);
+    const running = await markRunning(database, run.id);
+    if (!running) {
+      await stopAfterLostOwnership(database, sessionSandbox, ref, run.id, log);
+      return;
+    }
     log.info("sandbox running", {
       sandboxId: ref.id,
       wallClockSeconds,
@@ -186,6 +197,27 @@ async function attachOwnedSandbox(
     run.attempt,
   );
   if (!attached) throw new Error("provisioning ownership was lost before runtime launch");
+}
+
+async function stopAfterLostOwnership(
+  database: Database,
+  sandbox: SandboxProvider,
+  ref: SandboxRef,
+  runId: string,
+  log: Logger,
+): Promise<void> {
+  // Cancellation or another terminal decision may race the provider's final
+  // launch step. The allocation is already durable, so stop it here instead of
+  // letting a terminal run retain a live sandbox until polling.
+  log.info("run ownership ended before runtime was marked running", {
+    sandboxId: ref.id,
+  });
+  try {
+    await sandbox.stop(ref);
+    await markSandboxStopped(database, runId);
+  } catch (error) {
+    log.error("sandbox stop after lost ownership failed", { error });
+  }
 }
 
 function startProvisioningHeartbeat(run: RunRow, deps: ProvisionDeps) {

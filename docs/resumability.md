@@ -81,10 +81,10 @@ Each turn receives fresh callback, forge, model, and plugin credentials. The pro
 ## Failure behavior
 
 - A missing or corrupt checkpoint clears the stale reference and cold-starts from the repository image while retaining Pi history.
-- A suspension failure stops the live sandbox and retains any separate previous filesystem checkpoint for another resume. This also protects saved work when runtime installation fails after restoring a snapshot and the provider removes the disposable live copy. Only when no separate checkpoint remains does the session continue cold from its Pi checkpoint. If microSandbox has already created a valid snapshot but cannot remove the stopped source VM, the committed finalization marker makes the source safe to reclaim on a later reconciliation pass.
+- A suspension failure stops the live sandbox and retains any separate previous filesystem checkpoint for another resume. This also protects saved work when runtime installation fails after restoring a snapshot and the provider removes the disposable live copy. If suspension produced a new provider checkpoint but the database commit failed, reconciliation removes that uncommitted checkpoint before retrying. Only when no separate checkpoint remains does the session continue cold from its Pi checkpoint. If microSandbox has already created a valid snapshot but cannot remove the stopped source VM, the committed finalization marker makes the source safe to reclaim on a later reconciliation pass.
 - A runtime failure is terminal; the reconciler still attempts to preserve its filesystem checkpoint.
 - A run is not resumable mid-turn. The next turn continues from the last completed Pi checkpoint.
-- Provider stop/delete/finalize operations are idempotent; provider timeouts are the final resource backstop.
+- Provider stop/delete/finalize operations are idempotent. A failed cleanup call keeps its durable marker and is retried; provider-side timeouts remain the final resource backstop.
 
 ## Event sequence numbers
 

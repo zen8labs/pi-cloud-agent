@@ -40,7 +40,7 @@ CPU and memory for every built-in provider live in [`machine.ts`](machine.ts) (`
 - **`stop` is idempotent.** The reconciler may call it for a machine that is already dead; that is the normal path after a timeout.
 - **`create` returns a working machine or throws.** A machine that exists but whose command never started is the worst outcome. It burns a slot and a credential and then goes silent. Reclaim it yourself and throw.
 - **Report allocation before installing or launching.** `create` and `resume` await `spec.onAllocated`, when supplied, immediately after allocation. The controller records the machine with an attempt-fenced write; rejection means the worker no longer owns the run and must not launch its runtime.
-- **`resume` starts one fresh runtime process.** If the opaque workspace no longer exists, throw `WorkspaceNotFoundError` so the controller can continue cold from the Pi checkpoint.
+- **`resume` starts one fresh runtime process.** If the opaque workspace no longer exists, throw `WorkspaceNotFoundError` so the controller can continue cold from the Pi checkpoint. If allocation ownership is rejected after connecting, return the workspace to a paused filesystem-only state (or kill it if pausing fails) so a stale worker cannot leave a live sandbox behind.
 - **`suspend` retains filesystem state, not process memory.** Per-run credentials must not survive into the next turn.
 - **`deleteWorkspace` is idempotent.** Expiry can race another reconciler pass.
 - **`resolveImage` returns a non-empty provider-native reference.** The controller persists it on the session for deterministic cold resumes.

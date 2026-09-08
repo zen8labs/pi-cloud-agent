@@ -92,6 +92,7 @@ describe("transitions", () => {
     expect(await markRunning(database, run.id)).toBe(false);
     await claimNextRun(database, 60);
     expect(await markRunning(database, run.id)).toBe(true);
+    expect((await getRun(database, run.id))?.lastEventAt).not.toBeNull();
     // Already running: a second attempt changes nothing and says so.
     expect(await markRunning(database, run.id)).toBe(false);
   });

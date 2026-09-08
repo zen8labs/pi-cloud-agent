@@ -227,6 +227,40 @@ describe("E2B image resolution", () => {
     });
   });
 
+  it.each([
+    { title: "pauses a connected workspace", pauseFails: false },
+    { title: "kills a connected workspace if pausing fails", pauseFails: true },
+  ])("$title when allocation ownership is lost", async ({ pauseFails }) => {
+    sandboxConnect.mockResolvedValueOnce({
+      sandboxId: "paused-1",
+      commands: { run: vi.fn() },
+    });
+    if (pauseFails) sandboxPause.mockRejectedValueOnce(new Error("pause unavailable"));
+    const provider = createE2BProvider({ E2B_API_KEY: "test-key" });
+    await expect(
+      provider.resume(
+        { provider: "e2b", id: "paused-1" },
+        {
+          ...preflightSpec,
+          runId: "run-1",
+          image: "template-1",
+          onAllocated: async () => {
+            throw new Error("ownership expired");
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ name: "SandboxError" });
+    expect(sandboxPause).toHaveBeenCalledWith("paused-1", {
+      apiKey: "test-key",
+      keepMemory: false,
+    });
+    if (pauseFails) {
+      expect(sandboxKill).toHaveBeenCalledWith("paused-1", { apiKey: "test-key" });
+    } else {
+      expect(sandboxKill).not.toHaveBeenCalled();
+    }
+  });
+
   it("gives runtime uploads the sandbox timeout instead of the SDK 60s default", async () => {
     const write = vi.fn(async () => undefined);
     const run = vi

@@ -28,6 +28,28 @@ async function tick(loop: Reconciler): Promise<void> {
   await loop.drain();
 }
 
+function failNextTransaction(database: Database): { database: Database; fail: () => void } {
+  let failed = false;
+  const wrapped = new Proxy(database, {
+    get(target, property, receiver) {
+      if (property === "transaction" && failed) {
+        failed = false;
+        return async () => {
+          throw new Error("database temporarily unavailable");
+        };
+      }
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return {
+    database: wrapped as unknown as Database,
+    fail: () => {
+      failed = true;
+    },
+  };
+}
+
 function providerWithFailingCheckpointDelete(prefix: string) {
   const provider = fakeProvider();
   let deleteAttempts = 0;
@@ -57,6 +79,56 @@ async function expectDeletionRetried(
 }
 
 describe("session checkpoint races", () => {
+  it("deletes an uncommitted snapshot when the parking transaction fails", async () => {
+    const { session, run } = await support.seedSession(database);
+    const provider = fakeProvider();
+    provider.suspend = async () => ({ provider: "fake", id: "uncommitted-snapshot" });
+    const injected = failNextTransaction(database);
+    const loop = createReconciler({
+      database: injected.database,
+      config: support.testConfig({ SANDBOX_PROVIDER: "fake" }),
+      broker: support.testCredentialBroker,
+      log: support.silentLogger(),
+      createProvider: () => provider,
+    });
+    await loop.tick();
+    await loop.drain();
+    await runs.completeRun(database, run.id, "succeeded");
+    injected.fail();
+    await loop.tick();
+    expect(provider.deleted).toEqual(["uncommitted-snapshot"]);
+    expect((await sessionDb.getSession(database, session.id))?.sandboxId).toBeNull();
+  });
+
+  it("keeps a retry marker when uncommitted snapshot cleanup fails", async () => {
+    const { session, run } = await support.seedSession(database);
+    const provider = providerWithFailingCheckpointDelete("uncommitted");
+    const injected = failNextTransaction(database);
+    const loop = createReconciler({
+      database: injected.database,
+      config: support.testConfig({ SANDBOX_PROVIDER: "fake" }),
+      broker: support.testCredentialBroker,
+      log: support.silentLogger(),
+      createProvider: () => provider,
+    });
+
+    await loop.tick();
+    await loop.drain();
+    await runs.completeRun(database, run.id, "succeeded");
+    injected.fail();
+    await loop.tick();
+
+    expect(provider.deleted).toEqual(["uncommitted-1"]);
+    expect((await runs.getRun(database, run.id))?.sandboxReplacementWorkspaceId).toBe(
+      "uncommitted-1",
+    );
+    expect((await sessionDb.getSession(database, session.id))?.sandboxId).toBeNull();
+
+    await tick(loop);
+    expect(provider.deleted).toEqual(["uncommitted-1", "uncommitted-1"]);
+    expect((await runs.getRun(database, run.id))?.sandboxReplacementWorkspaceId).toBeNull();
+  });
+
   it("finishes old cleanup before another reconciler can reuse the snapshot path", async () => {
     const { session, run } = await support.seedSession(database);
     const provider = fakeProvider();
