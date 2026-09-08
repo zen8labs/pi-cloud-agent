@@ -23,7 +23,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-export type SessionOperation = "archiving" | "expiring";
+export type SessionOperation = "archiving" | "expiring" | "parking" | "replacing";
 
 /**
  * Users and web sessions own the application identity boundary; runs and

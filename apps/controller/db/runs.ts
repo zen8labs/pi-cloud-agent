@@ -87,7 +87,7 @@ export async function claimNextRun(
           // owns activeRunId is eligible to provision against the workspace.
           or(
             isNull(runs.sessionId),
-            sql`exists (select 1 from ${sessions} where ${sessions.id} = ${runs.sessionId} and ${sessions.activeRunId} = ${runs.id})`,
+            sql`exists (select 1 from ${sessions} where ${sessions.id} = ${runs.sessionId} and ${sessions.activeRunId} = ${runs.id} and ${sessions.sessionOperation} is null)`,
           ),
           ...(excludeIds.length > 0 ? [notInArray(runs.id, excludeIds)] : []),
         ),
@@ -126,6 +126,7 @@ export async function attachSandbox(
   runId: string,
   sandbox: { provider: string; id: string },
   deadlineAt: Date,
+  attempt?: number,
 ): Promise<boolean> {
   const updated = await database
     .update(runs)
@@ -135,7 +136,16 @@ export async function attachSandbox(
       deadlineAt,
       updatedAt: new Date(),
     })
-    .where(and(eq(runs.id, runId), eq(runs.status, "provisioning")))
+    .where(
+      and(
+        eq(runs.id, runId),
+        eq(runs.status, "provisioning"),
+        isNull(runs.sandboxId),
+        ...(attempt === undefined
+          ? []
+          : [eq(runs.attempt, attempt), gt(runs.claimExpiresAt, new Date())]),
+      ),
+    )
     .returning({ id: runs.id });
   return updated.length > 0;
 }
@@ -183,11 +193,23 @@ export async function completeRun(
 }
 
 /** Put a claimed-but-unprovisioned run back on the queue for another attempt. */
-export async function requeueRun(database: Database, runId: string): Promise<boolean> {
+export async function requeueRun(
+  database: Database,
+  runId: string,
+  claim?: { attempt: number; expired?: boolean },
+): Promise<boolean> {
   const updated = await database
     .update(runs)
     .set({ status: "queued", claimedAt: null, claimExpiresAt: null, updatedAt: new Date() })
-    .where(and(eq(runs.id, runId), eq(runs.status, "provisioning"), isNull(runs.sandboxId)))
+    .where(
+      and(
+        eq(runs.id, runId),
+        eq(runs.status, "provisioning"),
+        isNull(runs.sandboxId),
+        ...(claim ? [eq(runs.attempt, claim.attempt)] : []),
+        ...(claim?.expired ? [lt(runs.claimExpiresAt, new Date())] : []),
+      ),
+    )
     .returning({ id: runs.id });
   if (updated.length > 0) await notify(database, CHANNELS.runQueued, runId);
   return updated.length > 0;

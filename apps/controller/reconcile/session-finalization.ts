@@ -3,13 +3,38 @@ import type { Database } from "../db/client";
 import {
   findSessionSandboxesToFinalize,
   findSessionSandboxReplacementsToDelete,
+  getRun,
   markSessionSandboxFinalized,
 } from "../db/runs";
 import type { RunRow, SessionRow } from "../db/schema";
+import { withSessionOperation } from "../db/session-operations";
 import { markSessionSandboxReplacementDeleted } from "../db/session-workspace";
+import { getSession } from "../db/sessions";
 import type { Logger } from "../logger";
 
 const BATCH = 25;
+
+/** Under the parking claim, finish old cleanup before reusing a snapshot path. */
+export async function prepareSessionParking(
+  deps: SessionFinalizationDeps,
+  run: RunRow & { sessionId: string },
+): Promise<boolean> {
+  const current = await getRun(deps.database, run.id);
+  if (!current || current.sandboxStoppedAt) return false;
+  if (current.sandboxReplacementWorkspaceId && current.sandboxReplacementWorkspaceProvider) {
+    await deleteMarkedWorkspace(
+      deps,
+      {
+        provider: current.sandboxReplacementWorkspaceProvider,
+        id: current.sandboxReplacementWorkspaceId,
+      },
+      run.sessionId,
+      run.id,
+    );
+    if ((await getRun(deps.database, run.id))?.sandboxReplacementWorkspaceId) return false;
+  }
+  return true;
+}
 
 type FinalizableSessionRun = RunRow & {
   sessionId: string;
@@ -113,6 +138,15 @@ export async function deleteMarkedWorkspace(
 ): Promise<void> {
   try {
     const provider = providerFor(deps, workspace.provider);
+    const current = await getRun(deps.database, runId);
+    if (
+      current?.sandboxReplacementWorkspaceProvider !== workspace.provider ||
+      current.sandboxReplacementWorkspaceId !== workspace.id
+    )
+      return;
+    const session = await getSession(deps.database, sessionId);
+    if (session?.sandboxProvider === workspace.provider && session.sandboxId === workspace.id)
+      return;
     if (!provider) throw new Error(`sandbox provider "${workspace.provider}" is unavailable`);
     await provider.deleteWorkspace(workspace);
     await markSessionSandboxReplacementDeleted(deps.database, runId, workspace);
@@ -165,17 +199,17 @@ export async function retryPendingSessionSandboxReplacements(
       provider: run.sandboxReplacementWorkspaceProvider,
       id: run.sandboxReplacementWorkspaceId,
     };
-    try {
-      const provider = providerFor(deps, workspace.provider);
-      if (!provider) throw new Error(`sandbox provider "${workspace.provider}" is unavailable`);
-      await provider.deleteWorkspace(workspace);
-      await markSessionSandboxReplacementDeleted(deps.database, run.id, workspace);
-    } catch (error) {
-      deps.log.error("replaced session workspace cleanup failed", {
-        sessionId: run.sessionId,
-        workspaceId: workspace.id,
-        error,
-      });
-    }
+    await withSessionOperation(
+      deps.database,
+      run.sessionId,
+      "replacing",
+      { activeRunId: null },
+      () => deleteMarkedWorkspace(deps, workspace, run.sessionId, run.id),
+      (error) =>
+        deps.log.warn("checkpoint deletion heartbeat failed", {
+          sessionId: run.sessionId,
+          error,
+        }),
+    );
   }
 }

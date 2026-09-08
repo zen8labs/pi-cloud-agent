@@ -285,6 +285,7 @@ export async function parkSession(
   workspace: WorkspaceRef | null | undefined,
   expiresAt: Date | null,
   replacedWorkspace?: WorkspaceRef | null,
+  operationAt?: Date,
 ): Promise<boolean> {
   const sessionId = run.sessionId;
   if (!sessionId) return false;
@@ -293,12 +294,13 @@ export async function parkSession(
       .select({
         activeRunId: sessions.activeRunId,
         sessionOperation: sessions.sessionOperation,
+        sessionOperationAt: sessions.sessionOperationAt,
       })
       .from(sessions)
       .where(eq(sessions.id, sessionId))
       .limit(1)
       .for("update");
-    if (!ownsParkLease(owner, run.id)) {
+    if (!ownsParkLease(owner, run.id, operationAt)) {
       return { parked: false, nextRunId: null };
     }
 
@@ -327,7 +329,12 @@ export async function parkSession(
         and(
           eq(sessions.id, sessionId),
           eq(sessions.activeRunId, run.id),
-          isNull(sessions.sessionOperation),
+          ...(operationAt
+            ? [
+                eq(sessions.sessionOperation, "parking"),
+                eq(sessions.sessionOperationAt, operationAt),
+              ]
+            : [isNull(sessions.sessionOperation)]),
         ),
       )
       .returning({ id: sessions.id });
@@ -348,10 +355,23 @@ export async function parkSession(
 }
 
 function ownsParkLease(
-  owner: { activeRunId: string | null; sessionOperation: SessionOperation | null } | undefined,
+  owner:
+    | {
+        activeRunId: string | null;
+        sessionOperation: SessionOperation | null;
+        sessionOperationAt: Date | null;
+      }
+    | undefined,
   runId: string,
+  operationAt?: Date,
 ): boolean {
-  return owner?.activeRunId === runId && owner.sessionOperation === null;
+  return (
+    owner?.activeRunId === runId &&
+    (operationAt
+      ? owner.sessionOperation === "parking" &&
+        owner.sessionOperationAt?.getTime() === operationAt.getTime()
+      : owner.sessionOperation === null)
+  );
 }
 
 export async function findExpiredSessionWorkspaces(

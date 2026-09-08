@@ -122,6 +122,7 @@ export function createMicroSandboxProvider(
       }
 
       try {
+        await spec.onAllocated?.({ provider: "microsandbox", id });
         await installRuntime(sandbox, runtimeDirectory, spec.timeoutSeconds);
         await startRuntime(sandbox, spec);
         await sandbox.detach();
@@ -169,6 +170,7 @@ export function createMicroSandboxProvider(
       }
 
       try {
+        await spec.onAllocated?.({ provider: "microsandbox", id: liveId });
         await installRuntime(sandbox, runtimeDirectory, spec.timeoutSeconds);
         await startRuntime(sandbox, spec);
         await sandbox.detach();
@@ -295,6 +297,7 @@ async function removePersistedSandbox(id: string): Promise<void> {
     }
     await handle.remove();
   } catch (cause) {
+    if (cause instanceof SandboxNotFoundError) return;
     if (!(cause instanceof SandboxStillRunningError)) throw cause;
     await Sandbox.get(id).then((handle) => handle.kill().then(() => handle.remove()));
   }

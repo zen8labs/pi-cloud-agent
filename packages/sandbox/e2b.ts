@@ -105,6 +105,7 @@ export function createE2BProvider(
       }
 
       try {
+        await spec.onAllocated?.({ provider: "e2b", id: sandbox.sandboxId });
         await installRuntime(sandbox, runtimeDirectory, timeoutMs);
         await sandbox.commands.run(spec.command, {
           background: true,
@@ -131,6 +132,7 @@ export function createE2BProvider(
       let sandbox: Sandbox | undefined;
       try {
         sandbox = await Sandbox.connect(ref.id, { apiKey, timeoutMs });
+        await spec.onAllocated?.({ provider: "e2b", id: sandbox.sandboxId });
         await installRuntime(sandbox, runtimeDirectory, timeoutMs);
         await sandbox.commands.run(spec.command, {
           background: true,

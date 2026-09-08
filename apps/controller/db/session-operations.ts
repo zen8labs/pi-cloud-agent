@@ -1,4 +1,4 @@
-import { and, eq, isNull, lt, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import type { Database } from "./client";
 import { type SessionOperation, sessions } from "./schema";
 
@@ -10,6 +10,25 @@ export const CLEARED_SESSION_OPERATION = {
   sessionOperationAt: null,
   sessionOperationHeartbeatAt: null,
 } as const;
+
+/** Recover a crashed reconciler even if parking already promoted the next turn. */
+export async function releaseStaleReconcilerOperations(database: Database): Promise<void> {
+  await database
+    .update(sessions)
+    .set(CLEARED_SESSION_OPERATION)
+    .where(
+      and(
+        inArray(sessions.sessionOperation, ["parking", "replacing"]),
+        or(
+          isNull(sessions.sessionOperationHeartbeatAt),
+          lt(
+            sessions.sessionOperationHeartbeatAt,
+            new Date(Date.now() - SESSION_OPERATION_STALE_MS),
+          ),
+        ),
+      ),
+    );
+}
 
 export function isSessionOperationStale(heartbeatAt: Date | null): boolean {
   return (
@@ -145,4 +164,24 @@ export async function releaseSessionOperation(
     )
     .returning({ id: sessions.id });
   return updated.length > 0;
+}
+
+/** Serialize provider operations before touching a session's resources. */
+export async function withSessionOperation(
+  database: Database,
+  sessionId: string,
+  operation: SessionOperation,
+  expected: Parameters<typeof claimSessionOperation>[3],
+  work: (token: Date) => Promise<void>,
+  onError: (error: unknown) => void,
+): Promise<void> {
+  const token = await claimSessionOperation(database, sessionId, operation, expected);
+  if (!token) return;
+  const stop = startSessionOperationHeartbeat(database, sessionId, operation, token, onError);
+  try {
+    await work(token);
+  } finally {
+    stop();
+    await releaseSessionOperation(database, sessionId, operation, token);
+  }
 }

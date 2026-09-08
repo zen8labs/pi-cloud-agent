@@ -33,6 +33,7 @@ Durable chat sessions additionally use `resume`, `suspend`, and `deleteWorkspace
 
 - **`stop` is idempotent.** The reconciler may call it for a machine that is already dead; that is the normal path after a timeout.
 - **`create` returns a working machine or throws.** A machine that exists but whose command never started is the worst outcome. It burns a slot and a credential and then goes silent. Reclaim it yourself and throw.
+- **Report allocation before installing or launching.** `create` and `resume` await `spec.onAllocated`, when supplied, immediately after allocation. The controller records the machine with an attempt-fenced write; rejection means the worker no longer owns the run and must not launch its runtime.
 - **`resume` starts one fresh runtime process.** If the opaque workspace no longer exists, throw `WorkspaceNotFoundError` so the controller can continue cold from the Pi checkpoint.
 - **`suspend` retains filesystem state, not process memory.** Per-run credentials must not survive into the next turn.
 - **`deleteWorkspace` is idempotent.** Expiry can race another reconciler pass.

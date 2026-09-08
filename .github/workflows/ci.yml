@@ -109,3 +109,7 @@ jobs:
         run: docker buildx build --platform linux/amd64 --output type=local,dest=packages/runtime/dist -f packages/runtime/Dockerfile.runtime packages/runtime
       - name: Linux arm64 runtime artifact
         run: docker buildx build --platform linux/arm64 --output type=local,dest=packages/runtime/dist -f packages/runtime/Dockerfile.runtime packages/runtime
+      - name: Controller image from source only
+        run: docker build -t pi-cloud-agent-controller:ci -f apps/controller/Dockerfile .
+      - name: Controller native dependencies load
+        run: docker run --rm --entrypoint node pi-cloud-agent-controller:ci --import tsx -e "import('./reconcile/loop.ts')"

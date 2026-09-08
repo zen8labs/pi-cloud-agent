@@ -133,7 +133,7 @@ Rebuild the app runtime after changing runtime code or dependencies:
 pnpm sandbox:runtime
 ```
 
-This artifact is used by both providers. Rebuild the default project image with `pnpm sandbox:image` (or `pnpm sandbox:template` for E2B) only when changing its toolchains. Build runtime archives before building the controller Docker image: its build context includes `packages/runtime/dist`. For other packaging layouts, set `SANDBOX_RUNTIME_DIR` to the archive directory.
+This artifact is used by both providers. Rebuild the default project image with `pnpm sandbox:image` (or `pnpm sandbox:template` for E2B) only when changing its toolchains. The controller Docker image builds both runtime archives from source; no local build artifacts are required. For other packaging layouts, set `SANDBOX_RUNTIME_DIR` to the archive directory.
 
 The image provides Node/npm/pnpm, Python/pip/venv/uv, Git/GitHub CLIs, common shell utilities, and native build tools. Repository-specific dependencies belong in a per-repository custom image; see [packages/runtime/README.md](packages/runtime/README.md#image-contract).
 

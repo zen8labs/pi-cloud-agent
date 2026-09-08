@@ -133,19 +133,13 @@ describe("completion and teardown", () => {
     expect(provider.created[0]?.env[SANDBOX_ENV.workspaceResumed]).toBe("false");
 
     await completeRun(database, run.id, "succeeded");
-    let releaseBoth = () => {};
-    const bothSuspended = new Promise<void>((resolve) => {
-      releaseBoth = resolve;
-    });
     provider.suspend = async (ref) => {
       provider.suspended.push(ref.id);
-      if (provider.suspended.length === 2) releaseBoth();
-      await bothSuspended;
       return ref;
     };
     await Promise.all([loop.tick(), reconciler(provider).tick()]);
 
-    expect(provider.suspended).toEqual(["sb-1", "sb-1"]);
+    expect(provider.suspended).toEqual(["sb-1"]);
     expect(provider.deleted).toEqual([]);
     expect(provider.stopped).toEqual([]);
     expect((await getSession(database, session.id))?.sandboxId).toBe("sb-1");
@@ -193,6 +187,7 @@ describe("completion and teardown", () => {
     provider.resume = async (ref, spec) => {
       provider.resumed.push(ref.id);
       provider.resumeSpecs.push(spec);
+      await spec.onAllocated?.({ provider: "fake", id: "live-2" });
       return { provider: "fake", id: "live-2" };
     };
     await tick(loop);

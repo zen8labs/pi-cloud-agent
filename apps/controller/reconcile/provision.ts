@@ -11,14 +11,8 @@ import {
 import type { Config } from "../config";
 import type { Database } from "../db/client";
 import { getRepositorySandboxImage } from "../db/environments";
-import {
-  appendEvent,
-  attachSandbox,
-  completeRun,
-  markRunning,
-  requeueRun,
-  setRunPlugins,
-} from "../db/runs";
+import { failProvisioningAttempt, renewProvisioningClaim } from "../db/provisioning";
+import { appendEvent, attachSandbox, markRunning, requeueRun, setRunPlugins } from "../db/runs";
 import type { RunRow } from "../db/schema";
 import { pinSessionSandboxImage } from "../db/session-images";
 import { clearSessionWorkspace, getSessionForRun } from "../db/sessions";
@@ -46,6 +40,7 @@ export interface ProvisionDeps {
   /** Resolve a provider recorded on a parked session after a config change. */
   createProvider?: (name: string) => SandboxProvider;
   log: Logger;
+  claimLeaseSeconds?: number;
 }
 
 /** How many times a retryable provisioning failure is worth another attempt. */
@@ -54,6 +49,7 @@ const MAX_ATTEMPTS = 3;
 export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<void> {
   const { config, database, broker, sandbox } = deps;
   const log = deps.log.child({ runId: run.id, repo: run.repoFullName });
+  const heartbeat = startProvisioningHeartbeat(run, deps);
 
   try {
     const task = buildTask(run);
@@ -108,14 +104,11 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
       run.provider,
       run.repoFullName,
     );
-    const sessionProvider = session?.sandboxId
-      ? (session.sandboxProvider ?? sandbox.name)
-      : (session?.sandboxImageProvider ?? sandbox.name);
+    const sessionProvider = sessionProviderName(session, sandbox.name);
     let sessionSandbox = providerFor(deps, sandbox, sessionProvider);
     const requestedImageRef = session?.sandboxImageRef || environment?.imageRef || "";
-    let imageRef = session?.sandboxImageRef
-      ? session.sandboxImageRef
-      : await sessionSandbox.resolveImage(requestedImageRef);
+    let imageRef =
+      session?.sandboxImageRef ?? (await sessionSandbox.resolveImage(requestedImageRef));
     if (session && session.sandboxImageRef === null) {
       const pinnedImage = await pinSessionSandboxImage(
         database,
@@ -129,6 +122,7 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
       imageRef = pinnedImage.imageRef;
       sessionSandbox = providerFor(deps, sandbox, pinnedImage.provider);
     }
+    let allocated = false;
     const spec = {
       runId: run.id,
       image: imageRef,
@@ -136,29 +130,23 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
       env,
       secrets,
       command: `cd ${SANDBOX_PATHS.app} && ./bin/node --import tsx ./run.js`,
+      onAllocated: async (ref: SandboxRef) => {
+        await attachOwnedSandbox(database, run, ref, wallClockSeconds);
+        allocated = true;
+        clearInterval(heartbeat);
+      },
     };
     const ref = await startSandbox(session, spec, sessionSandbox, database, log);
 
-    // First durable write after the machine exists. Until this commits, a crash
-    // would leak the sandbox; after it, the reconciler will always find it.
-    const attached = await attachSandbox(
-      database,
-      run.id,
-      ref,
-      new Date(Date.now() + wallClockSeconds * 1000),
-    );
-
-    if (!attached) {
-      // The run left `provisioning` while we were creating the machine — almost
-      // always a cancel. The machine is ours to clean up, not the reconciler's,
-      // because its id was never stored.
-      log.warn("run left provisioning during create; stopping the orphan sandbox", {
+    // Every provider must report allocation before launching the runtime.
+    if (!allocated) {
+      log.warn("provider skipped allocation reporting; stopping the orphan sandbox", {
         sandboxId: ref.id,
       });
       await sessionSandbox
         .stop(ref)
         .catch((error) => log.error("orphan stop failed", { error }));
-      return;
+      throw new Error("sandbox provider did not report allocation before launch");
     }
 
     await markRunning(database, run.id);
@@ -170,7 +158,48 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
     });
   } catch (error) {
     await handleFailure(run, error, deps, log);
+  } finally {
+    clearInterval(heartbeat);
   }
+}
+
+function sessionProviderName(
+  session: Awaited<ReturnType<typeof getSessionForRun>>,
+  fallback: string,
+): string {
+  return session?.sandboxId
+    ? (session.sandboxProvider ?? fallback)
+    : (session?.sandboxImageProvider ?? fallback);
+}
+
+async function attachOwnedSandbox(
+  database: Database,
+  run: RunRow,
+  ref: SandboxRef,
+  wallClockSeconds: number,
+) {
+  const attached = await attachSandbox(
+    database,
+    run.id,
+    ref,
+    new Date(Date.now() + wallClockSeconds * 1000),
+    run.attempt,
+  );
+  if (!attached) throw new Error("provisioning ownership was lost before runtime launch");
+}
+
+function startProvisioningHeartbeat(run: RunRow, deps: ProvisionDeps) {
+  const leaseSeconds = deps.claimLeaseSeconds ?? 120;
+  const heartbeat = setInterval(
+    () => {
+      void renewProvisioningClaim(deps.database, run, leaseSeconds).catch((error: unknown) =>
+        deps.log.warn("provisioning heartbeat failed", { runId: run.id, error }),
+      );
+    },
+    Math.max(10, (leaseSeconds * 1000) / 3),
+  );
+  heartbeat.unref();
+  return heartbeat;
 }
 
 function providerFor(
@@ -230,12 +259,11 @@ async function handleFailure(
       attempt: run.attempt,
       error,
     });
-    await requeueRun(deps.database, run.id);
-    return;
+    if (await requeueRun(deps.database, run.id, { attempt: run.attempt })) return;
   }
 
   log.error("provisioning failed", { attempt: run.attempt, error });
-  await completeRun(deps.database, run.id, "failed", message);
+  await failProvisioningAttempt(deps.database, run, message);
 }
 
 function buildTask(run: RunRow): TaskSpec {

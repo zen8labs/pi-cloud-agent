@@ -16,7 +16,9 @@ import type { RunRow, SessionRow } from "../db/schema";
 import {
   claimSessionOperation,
   releaseSessionOperation,
+  releaseStaleReconcilerOperations,
   startSessionOperationHeartbeat,
+  withSessionOperation,
 } from "../db/session-operations";
 import { markSessionSandboxReplacementPending } from "../db/session-workspace";
 import {
@@ -33,6 +35,7 @@ import {
   deleteMarkedWorkspace,
   deleteReplacedWorkspace,
   finalizeSuspendedSource,
+  prepareSessionParking,
   retryPendingSessionFinalizations,
   retryPendingSessionSandboxReplacements,
   type SessionFinalizationDeps,
@@ -104,6 +107,15 @@ function isParkableSessionRun(run: RunRow): run is ParkableSessionRun {
   return Boolean(run.sessionId && run.sandboxId && run.sandboxProvider);
 }
 
+function previousWorkspace(
+  previous: SessionRow | null,
+  currentId: string,
+): WorkspaceRef | null {
+  return previous?.sandboxProvider && previous.sandboxId && previous.sandboxId !== currentId
+    ? { provider: previous.sandboxProvider, id: previous.sandboxId }
+    : null;
+}
+
 export function createReconciler(options: ReconcilerOptions): Reconciler {
   const {
     config,
@@ -126,6 +138,7 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
     sandbox,
     createProvider,
     log,
+    claimLeaseSeconds,
   };
   const finalizationDeps: SessionFinalizationDeps = {
     database,
@@ -183,6 +196,31 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
   }
 
   async function parkWithSandbox(run: ParkableSessionRun, reason: string): Promise<void> {
+    await withSessionOperation(
+      database,
+      run.sessionId,
+      "parking",
+      { activeRunId: run.id },
+      (token) => parkClaimedSandbox(run, reason, token),
+      (error) =>
+        log.warn("session parking heartbeat failed", { sessionId: run.sessionId, error }),
+    );
+  }
+
+  async function parkClaimedSandbox(
+    run: ParkableSessionRun,
+    reason: string,
+    token: Date,
+  ): Promise<void> {
+    if (!(await prepareSessionParking(finalizationDeps, run))) return;
+    await suspendAndPark(run, reason, token);
+  }
+
+  async function suspendAndPark(
+    run: ParkableSessionRun,
+    reason: string,
+    token: Date,
+  ): Promise<void> {
     const provider =
       run.sandboxProvider === sandbox.name ? sandbox : createProvider(run.sandboxProvider);
     const ref = { provider: run.sandboxProvider, id: run.sandboxId };
@@ -190,11 +228,15 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
     try {
       const workspace = await provider.suspend(ref);
       const expiresAt = new Date(Date.now() + config.sessionWorkspaceRetentionSeconds * 1000);
-      const replacedWorkspace =
-        previous?.sandboxProvider && previous.sandboxId && previous.sandboxId !== workspace.id
-          ? { provider: previous.sandboxProvider, id: previous.sandboxId }
-          : null;
-      const parked = await parkSession(database, run, workspace, expiresAt, replacedWorkspace);
+      const replacedWorkspace = previousWorkspace(previous, workspace.id);
+      const parked = await parkSession(
+        database,
+        run,
+        workspace,
+        expiresAt,
+        replacedWorkspace,
+        token,
+      );
       if (parked) {
         await deleteReplacedWorkspace(
           finalizationDeps,
@@ -218,14 +260,7 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
           reason,
         });
       } else {
-        const current = await getSession(database, run.sessionId);
-        // A follow-up may have claimed the session while the provider was
-        // snapshotting. If the CAS lost, the newly-created artifact is not the
-        // checkpoint the follow-up owns and must be reclaimed immediately.
-        const stillOwned = current?.sandboxId === workspace.id;
-        if (!stillOwned) {
-          await cleanupUnownedWorkspace(run, ref, workspace);
-        }
+        await cleanupUnownedWorkspace(run, ref, workspace);
       }
     } catch (error) {
       log.error("session workspace suspension failed; continuing cold", {
@@ -233,9 +268,12 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
         runId: run.id,
         error,
       });
-      await provider.stop(ref).catch(() => undefined);
-      const parked = await parkSession(database, run, null, null);
-      await cleanupFailedSuspension(provider, previous, ref, parked, run.sessionId);
+      // Keep the run attached until stopping succeeds so reconciliation retries it.
+      await provider.stop(ref);
+      const replaced = previousWorkspace(previous, ref.id);
+      const parked = await parkSession(database, run, null, null, replaced, token);
+      if (parked && replaced)
+        await deleteMarkedWorkspace(finalizationDeps, replaced, run.sessionId, run.id);
     }
   }
 
@@ -244,6 +282,8 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
     source: SandboxRef,
     workspace: WorkspaceRef,
   ): Promise<void> {
+    const current = await getSession(database, run.sessionId);
+    if (current?.sandboxId === workspace.id) return;
     // E2B uses the paused sandbox id as both source and checkpoint. Deleting it
     // here would destroy the source needed if parking retries after the session
     // operation releases, so leave same-id checkpoints for that retry.
@@ -253,32 +293,6 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
         await deleteMarkedWorkspace(finalizationDeps, workspace, run.sessionId, run.id);
       }
     }
-  }
-
-  async function cleanupFailedSuspension(
-    provider: SandboxProvider,
-    previous: SessionRow | null,
-    ref: { provider: string; id: string },
-    parked: boolean,
-    sessionId: string,
-  ): Promise<void> {
-    if (
-      !parked ||
-      !previous?.sandboxId ||
-      previous.sandboxProvider !== ref.provider ||
-      previous.sandboxId === ref.id
-    ) {
-      return;
-    }
-    await provider
-      .deleteWorkspace({ provider: previous.sandboxProvider, id: previous.sandboxId })
-      .catch((cleanupError) =>
-        log.error("old session workspace cleanup failed after suspension error", {
-          sessionId,
-          workspaceId: previous.sandboxId,
-          error: cleanupError,
-        }),
-      );
   }
 
   async function expireWorkspace(session: SessionRow): Promise<void> {
@@ -370,6 +384,7 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
   }
 
   async function tick(): Promise<void> {
+    await releaseStaleReconcilerOperations(database);
     // Ordered cheapest-first, and teardown before new work so a busy queue can
     // never starve reclamation of machines that are still costing money.
     await retryPendingSessionSandboxReplacements(finalizationDeps);
@@ -402,7 +417,7 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
     for (const run of await findReclaimableClaims(database, BATCH)) {
       // Claimed but never provisioned: whoever held it is gone, and no sandbox
       // was ever created, so another attempt is safe.
-      if (await requeueRun(database, run.id)) {
+      if (await requeueRun(database, run.id, { attempt: run.attempt, expired: true })) {
         log.warn("reclaimed an expired claim", { runId: run.id, attempt: run.attempt });
       }
     }

@@ -26,7 +26,9 @@ Custom images supply project toolchains on a supported Debian/Ubuntu base. Provi
 
 ## Run state machine
 
-Every transition is one guarded SQL statement. A transition that loses a race updates zero rows instead of overwriting another worker's decision. There is no in-memory run state: provisioning claims a row, creates a sandbox, records its id, and returns; callbacks and the reconciler write the later facts.
+Every transition is one guarded SQL statement. A transition that loses a race updates zero rows instead of overwriting another worker's decision. Provisioning renews its claim while resolving images and allocating a sandbox. Before installation or runtime launch, the provider reports the allocated id; the controller attaches it only if the attempt still owns an unexpired claim. An expired worker cannot launch or fail a newer attempt. Callbacks and the reconciler write the later facts.
+
+Parking and replacement deletion share the session-operation claim with teardown. Cleanup re-reads its durable marker under that claim before deleting anything; a stale cleanup pass cannot overlap creation of a checkpoint at the same provider path. Failed suspension records the previous checkpoint for deletion in the same transaction that clears the session reference. Failed deletion keeps that marker for retry.
 
 Session teardown uses a durable `session_operation` claim with an immutable operation token and a heartbeat renewed during provider cleanup. Delete and expiry claim the row before deleting a provider checkpoint, and follow-up turns, checkpoint writes, and parking refuse to proceed while that claim is held. A follow-up can reclaim only a claim whose heartbeat has been stale for ten minutes, so a controller crash cannot leave a session permanently busy while a live cleanup continues to exclude new work. The guarded delete or clear then verifies the operation and the previously observed run/workspace ids before changing Postgres.
 

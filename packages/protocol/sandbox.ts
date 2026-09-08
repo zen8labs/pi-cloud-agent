@@ -48,6 +48,9 @@ export interface SandboxSpec {
   secrets: Record<string, Secret>;
   /** The command that starts the runtime inside the sandbox. */
   command: string;
+  /** Trusted hook: durably claim the allocated machine before installation/launch.
+   * Providers must await it and must not start the command if it rejects. */
+  onAllocated?: (ref: SandboxRef) => Promise<void>;
 }
 
 /** A handle durable enough to survive a controller restart: it is stored. */

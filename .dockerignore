@@ -17,6 +17,8 @@ apps/**/node_modules/
 apps/**/node_modules/**
 packages/**/node_modules/
 packages/**/node_modules/**
+packages/**/dist/
+packages/**/dist/**
 apps/**/.next/
 apps/**/.next/**
 apps/**/.turbo/

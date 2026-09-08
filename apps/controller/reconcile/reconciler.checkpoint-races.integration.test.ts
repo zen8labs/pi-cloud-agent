@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Database } from "../db/client";
 import * as runs from "../db/runs";
 import { claimSessionOperation, releaseSessionOperation } from "../db/session-operations";
+import { markSessionSandboxReplacementPending } from "../db/session-workspace";
 import * as sessionDb from "../db/sessions";
 import * as support from "../test-support";
 import { fakeProvider } from "./fake-sandbox-provider";
@@ -42,7 +43,87 @@ function providerWithFailingCheckpointDelete(prefix: string) {
   return provider;
 }
 
+async function expectDeletionRetried(
+  loop: Reconciler,
+  provider: ReturnType<typeof fakeProvider>,
+  runId: string,
+) {
+  expect((await runs.getRun(database, runId))?.sandboxReplacementWorkspaceId).toBe(
+    "checkpoint-1",
+  );
+  await tick(loop);
+  expect(provider.deleted).toEqual(["checkpoint-1", "checkpoint-1"]);
+  expect((await runs.getRun(database, runId))?.sandboxReplacementWorkspaceId).toBeNull();
+}
+
 describe("session checkpoint races", () => {
+  it("finishes old cleanup before another reconciler can reuse the snapshot path", async () => {
+    const { session, run } = await support.seedSession(database);
+    const provider = fakeProvider();
+    const loop = reconciler(provider);
+    await tick(loop);
+    await runs.completeRun(database, run.id, "succeeded");
+    const checkpoint = { provider: "fake", id: "same-snapshot-path" };
+    await markSessionSandboxReplacementPending(database, run.id, checkpoint);
+    let entered = () => {};
+    const deleting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let release = () => {};
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    provider.deleteWorkspace = async (ref) => {
+      provider.deleted.push(ref.id);
+      entered();
+      await released;
+    };
+    provider.suspend = async (ref) => {
+      provider.suspended.push(ref.id);
+      return checkpoint;
+    };
+    const first = loop.tick();
+    await deleting;
+    await reconciler(provider).tick();
+    expect(provider.suspended).toEqual([]);
+    release();
+    await first;
+    expect(provider.suspended).toEqual(["sb-1"]);
+    await tick(reconciler(provider));
+    expect(provider.deleted).toEqual([checkpoint.id]);
+    expect((await sessionDb.getSession(database, session.id))?.sandboxId).toBe(checkpoint.id);
+  });
+
+  it("retains the old checkpoint deletion marker when suspension and cleanup fail", async () => {
+    const { session, run } = await support.seedSession(database);
+    const provider = providerWithFailingCheckpointDelete("checkpoint");
+    const loop = reconciler(provider);
+    await tick(loop);
+    await runs.completeRun(database, run.id, "succeeded");
+    await tick(loop);
+    const followUp = await sessionDb.createSessionTurn(
+      database,
+      session.id,
+      "Continue",
+      "token",
+      null,
+      { model: session.model, modelConnectionId: session.modelConnectionId },
+    );
+    provider.resume = async (_ref, spec) => {
+      const live = { provider: "fake", id: "resumed-live" };
+      await spec.onAllocated?.(live);
+      return live;
+    };
+    await tick(loop);
+    provider.suspend = async () => {
+      throw new Error("snapshot failed");
+    };
+    await runs.completeRun(database, followUp.id, "succeeded");
+    await tick(loop);
+    expect((await sessionDb.getSession(database, session.id))?.sandboxId).toBeNull();
+    await expectDeletionRetried(loop, provider, followUp.id);
+  });
+
   it("rejects a follow-up while expiry is deleting its checkpoint", async () => {
     const { session, run } = await support.seedSession(database);
     await runs.completeRun(database, run.id, "succeeded");
@@ -160,19 +241,10 @@ describe("session checkpoint races", () => {
     await tick(loop);
 
     expect((await sessionDb.getSession(database, session.id))?.sandboxId).toBe("checkpoint-2");
-    expect((await runs.getRun(database, followUp.id))?.sandboxReplacementWorkspaceId).toBe(
-      "checkpoint-1",
-    );
-
-    await tick(loop);
-
-    expect(provider.deleted).toEqual(["checkpoint-1", "checkpoint-1"]);
-    expect(
-      (await runs.getRun(database, followUp.id))?.sandboxReplacementWorkspaceId,
-    ).toBeNull();
+    await expectDeletionRetried(loop, provider, followUp.id);
   });
 
-  it("retains an unowned checkpoint cleanup marker after a lost park lease", async () => {
+  it("does not create a checkpoint while archiving owns the session", async () => {
     const { session, run } = await support.seedSession(database);
     const provider = providerWithFailingCheckpointDelete("unowned-checkpoint");
     const loop = reconciler(provider);
@@ -187,15 +259,16 @@ describe("session checkpoint races", () => {
 
     await tick(loop);
 
-    expect(provider.deleted).toEqual(["unowned-checkpoint-1"]);
-    expect((await runs.getRun(database, run.id))?.sandboxReplacementWorkspaceId).toBe(
-      "unowned-checkpoint-1",
-    );
+    expect(provider.deleted).toEqual([]);
+    expect(provider.suspended).toEqual([]);
 
     await releaseSessionOperation(database, session.id, "archiving", operationAt ?? new Date());
     await tick(loop);
 
-    expect(provider.deleted).toEqual(["unowned-checkpoint-1", "unowned-checkpoint-1"]);
+    expect(provider.deleted).toEqual([]);
+    expect((await sessionDb.getSession(database, session.id))?.sandboxId).toBe(
+      "unowned-checkpoint-1",
+    );
     expect((await runs.getRun(database, run.id))?.sandboxReplacementWorkspaceId).toBeNull();
   });
 });
