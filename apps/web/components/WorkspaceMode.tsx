@@ -44,7 +44,7 @@ export function useWorkspaceMode() {
 export function WorkspaceModeSwitch() {
   const mode = useWorkspaceMode();
   return (
-    <nav aria-label="Workspace" className="flex rounded-lg bg-muted/70 p-0.5 text-xs">
+    <nav aria-label="Workspace" className="flex rounded-lg p-0.5 text-xs">
       {(
         [
           ["tasks", "/chat", "Tasks"],
@@ -58,7 +58,7 @@ export function WorkspaceModeSwitch() {
           className={cn(
             "flex-1 rounded-md px-3 py-1.5 text-center transition-colors",
             mode === value
-              ? "bg-background font-medium text-foreground shadow-sm"
+              ? "bg-accent font-medium text-foreground"
               : "text-muted-foreground hover:text-foreground",
           )}
         >
