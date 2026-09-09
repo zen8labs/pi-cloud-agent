@@ -1,6 +1,11 @@
 "use client";
 
-import type { RunEvent, RunStatus } from "@pi-cloud-agent/protocol";
+import {
+  type GithubReviewSubmission,
+  githubReviewSubmissionSchema,
+  type RunEvent,
+  type RunStatus,
+} from "@pi-cloud-agent/protocol";
 import { type FileChangeStat, fileChangeStats } from "@/components/ToolArgsView";
 
 export type ToolLine = {
@@ -16,10 +21,21 @@ export type ToolLine = {
 
 export type LogLine = { key: string; kind: "log"; text: string; at: string };
 
+type ReviewLine = {
+  key: string;
+  kind: "review";
+  submission: GithubReviewSubmission;
+  status: string;
+  callId: string;
+  output: string | null;
+  at: string;
+};
+
 export type FlatBlock = { key: string } & (
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string }
   | { kind: "thinking"; text: string; at: string }
+  | ReviewLine
   | ToolLine
   | LogLine
   | { kind: "status"; status: RunStatus; error?: string | null }
@@ -51,8 +67,9 @@ export function foldEvents(events: RunEvent[], userPrompt: string | null): Activ
     ? [{ key: "prompt", kind: "user", text: userPrompt }]
     : [];
   const tools = new Map<string, ToolLine>();
+  const reviews = new Map<string, ReviewLine>();
   const state: FoldState = { assistantStartIndex: null };
-  for (const event of events) foldEvent(flat, tools, state, event);
+  for (const event of events) foldEvent(flat, tools, reviews, state, event);
   const visible = flat.filter(
     (block) => (block.kind !== "assistant" && block.kind !== "thinking") || block.text.trim(),
   );
@@ -142,6 +159,7 @@ function groupWork(blocks: FlatBlock[]): ActivityBlock[] {
 function foldEvent(
   blocks: FlatBlock[],
   tools: Map<string, ToolLine>,
+  reviews: Map<string, ReviewLine>,
   state: FoldState,
   event: RunEvent,
 ): void {
@@ -150,7 +168,7 @@ function foldEvent(
       foldToken(blocks, state, event);
       break;
     case "tool_call":
-      foldTool(blocks, tools, event);
+      foldTool(blocks, tools, reviews, event);
       break;
     case "status":
       foldStatus(blocks, event);
@@ -171,16 +189,21 @@ function foldToken(blocks: FlatBlock[], state: FoldState, event: RunEvent): void
   }
 }
 
-function foldTool(blocks: FlatBlock[], tools: Map<string, ToolLine>, event: RunEvent): void {
+function foldTool(
+  blocks: FlatBlock[],
+  tools: Map<string, ToolLine>,
+  reviews: Map<string, ReviewLine>,
+  event: RunEvent,
+): void {
   const callId = String(event.data?.callId ?? "");
   const output = toolOutput(event.data?.output);
-  const existing = callId ? tools.get(callId) : undefined;
-  if (existing) {
-    existing.status = String(event.data?.status ?? existing.status);
-    existing.at = event.at;
-    if (output !== null) existing.output = output;
+  if (updateReview(reviews, callId, event, output)) return;
+  const review = parseReviewSubmission(event.data?.tool, event.data?.args);
+  if (review) {
+    addReview(blocks, reviews, callId, event, review, output);
     return;
   }
+  if (updateTool(tools, callId, event, output)) return;
   const block: ToolLine = {
     key: `tool-${callId || event.seq}`,
     kind: "tool",
@@ -193,6 +216,61 @@ function foldTool(blocks: FlatBlock[], tools: Map<string, ToolLine>, event: RunE
   };
   if (callId) tools.set(callId, block);
   blocks.push(block);
+}
+
+function updateReview(
+  reviews: Map<string, ReviewLine>,
+  callId: string,
+  event: RunEvent,
+  output: string | null,
+): boolean {
+  const existing = callId ? reviews.get(callId) : undefined;
+  if (!existing) return false;
+  existing.status = String(event.data?.status ?? existing.status);
+  existing.at = event.at;
+  if (output !== null) existing.output = output;
+  return true;
+}
+
+function addReview(
+  blocks: FlatBlock[],
+  reviews: Map<string, ReviewLine>,
+  callId: string,
+  event: RunEvent,
+  submission: GithubReviewSubmission,
+  output: string | null,
+): void {
+  const block: ReviewLine = {
+    key: `review-${callId || event.seq}`,
+    kind: "review",
+    submission,
+    status: String(event.data?.status ?? "running"),
+    callId,
+    output,
+    at: event.at,
+  };
+  if (callId) reviews.set(callId, block);
+  blocks.push(block);
+}
+
+function updateTool(
+  tools: Map<string, ToolLine>,
+  callId: string,
+  event: RunEvent,
+  output: string | null,
+): boolean {
+  const existing = callId ? tools.get(callId) : undefined;
+  if (!existing) return false;
+  existing.status = String(event.data?.status ?? existing.status);
+  existing.at = event.at;
+  if (output !== null) existing.output = output;
+  return true;
+}
+
+function parseReviewSubmission(tool: unknown, args: unknown): GithubReviewSubmission | null {
+  if (typeof tool !== "string" || tool.toLowerCase() !== "submit_github_review") return null;
+  const parsed = githubReviewSubmissionSchema.safeParse(args);
+  return parsed.success ? parsed.data : null;
 }
 
 function toolOutput(value: unknown): string | null {
