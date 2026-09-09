@@ -30,10 +30,14 @@ const envSchema = z.object({
   SANDBOX_RUNTIME_DIR: z.string().default(""),
 });
 
+/** E2B rejects sandbox lifetimes above one hour (`400: Timeout cannot be greater than 1 hours`). */
+const E2B_MAX_TIMEOUT_MS = 60 * 60 * 1000;
+
 function sessionOpts(apiKey: string, timeoutMs: number) {
   // The SDK's 60s request timeout is too short for a 120MB runtime upload,
   // especially after a filesystem-only pause that cold-boots the VM.
-  return { apiKey, timeoutMs, requestTimeoutMs: timeoutMs };
+  const bounded = Math.min(timeoutMs, E2B_MAX_TIMEOUT_MS);
+  return { apiKey, timeoutMs: bounded, requestTimeoutMs: bounded };
 }
 
 export function createE2BProvider(
