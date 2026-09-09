@@ -9,6 +9,8 @@ function recordingReporter(): Reporter {
     log: vi.fn(),
     status: vi.fn(),
     modelCredential: vi.fn(),
+    review: vi.fn(),
+    comment: vi.fn(),
     flush: vi.fn(),
   };
 }

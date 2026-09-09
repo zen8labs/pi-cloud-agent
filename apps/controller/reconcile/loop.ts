@@ -24,6 +24,7 @@ import {
   findExpiredSessionWorkspaces,
   findSessionRunsToPark,
 } from "../db/sessions";
+import { processPendingGithubDeliveries } from "../integrations/github";
 import type { Logger } from "../logger";
 import type { CredentialBroker } from "../secrets/broker";
 import { type ProvisionDeps, provisionRun } from "./provision";
@@ -293,6 +294,10 @@ export function createReconciler(options: ReconcilerOptions): Reconciler {
       }
     }
 
+    // Webhooks are durable inbox rows, not work done inside the HTTP request.
+    // Drain a small bounded batch before queueing runs so duplicate delivery
+    // retries are collapsed before they can create duplicate sessions.
+    await processPendingGithubDeliveries(database, config, log, BATCH);
     await drainQueue();
   }
 

@@ -12,13 +12,17 @@ It reaches exactly one thing: `CONTROL_PLANE_URL`, outbound only.
 
 | File | Role |
 |---|---|
+| File | Role |
+|---|---|
 | `run.ts` | entry point and one terminal report |
 | `config.ts` | parses sandbox environment into typed values |
 | `workspace.ts` | credential helper, clone, checkout, and git diff |
 | `agent.ts` | one Pi turn and native telemetry |
 | `oauth-credential.ts` | persists Pi OAuth rotation before cleanup |
 | `session-state.ts` | authenticated JSONL checkpoint download/upload |
-| `reporter.ts` | telemetry, OAuth, and terminal status callback |
+| `reporter.ts` | telemetry, OAuth, structured GitHub publication, and terminal status |
+| `github-review.ts` | schema-shaped Pi tool that requests one trusted controller-side PR review |
+| `github-comment.ts` | schema-shaped Pi tool that requests one trusted controller-side reply |
 | `build.ts` | bundles `dist/run.js` |
 | `Dockerfile.sandbox` | default project environment, without the agent runtime |
 | `Dockerfile.runtime` | app-managed Linux runtime archives for amd64 and arm64 |
@@ -31,6 +35,8 @@ It reaches exactly one thing: `CONTROL_PLANE_URL`, outbound only.
 - Credentials are never written to the parked checkout or provider checkpoint.
 - The runtime never executes an app-managed repository setup script. Repository dependencies and toolchains belong in the configured base image.
 - The controller composes plugin skills and the user request into `TASK_PROMPT`; no plugin package is shipped in the image.
+- GitHub review actuation is explicit. Review runs receive one `submit_github_review` tool; the controller never infers a review from streamed prose.
+- GitHub task replies are explicit. Mention-triggered runs receive one `reply_github_comment` tool targeting the original comment through the controller.
 - MCP is opt-in via `MCP_CONFIG` and is loaded only for that run.
 
 ## Image contract

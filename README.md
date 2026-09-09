@@ -43,7 +43,7 @@ The interesting decisions are subtractions:
 
 - **No workflow engine.** Run state lives in Postgres and one reconciliation loop repairs it, so a restart is indistinguishable from a slow tick. No Temporal, no trigger.dev, no run lifecycle held in memory to lose. → [docs/resumability.md](docs/resumability.md)
 - **No event bus, no Redis.** Postgres already stores every event; `LISTEN/NOTIFY` is a wake-up hint and polling is the correctness baseline.
-- **No publishing step.** The agent posts its own review. No output parser, no findings table, and therefore no way for the controller to disagree with what the agent actually did.
+- **No prose publishing step.** The controller never parses agent text. GitHub reviews and replies use explicit structured tools when controller-owned credentials and durable idempotency are required; ordinary repository mutations remain agent-driven.
 - **A lifecycle-shaped sandbox contract.** `resolveImage`, `create`, `resume`, `suspend`, `finalizeSuspend`, `deleteWorkspace`, and `stop`. The sandbox remains outbound-only; persistence is a provider concern, not an agent server. → [docs/adding-a-sandbox-provider.md](docs/adding-a-sandbox-provider.md)
 - **User-owned model connections.** The controller resolves the selected connection for each run, while the sandbox receives only the model configuration and credential needed for that run. → [docs/model-connections.md](docs/model-connections.md)
 

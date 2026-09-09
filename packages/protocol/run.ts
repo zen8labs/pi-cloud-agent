@@ -4,9 +4,9 @@ import { z } from "zod";
  * The run lifecycle.
  *
  * Six states, and every transition is a single guarded UPDATE (see
- * docs/resumability.md). There is deliberately no "publishing" state: the agent
- * actuates its own outcomes from inside the sandbox, so there is no step
- * between "the agent finished" and "the run is done".
+ * docs/resumability.md). There is deliberately no separate "publishing" state:
+ * structured provider actuators run during the agent turn, and terminal status
+ * verifies any required publication before the run becomes successful.
  */
 export const RUN_STATUSES = [
   "queued",

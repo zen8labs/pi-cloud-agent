@@ -10,6 +10,7 @@ None of these require touching the controller.
 |---|---|
 | [adding-a-sandbox-provider.md](adding-a-sandbox-provider.md) | a new compute backend: Docker, Modal, Daytona |
 | [adding-a-vcs-provider.md](adding-a-vcs-provider.md) | a new VCS adapter and OAuth connection |
+| [adding-an-integration.md](adding-an-integration.md) | an external event source, webhook projection, and structured provider actuation |
 
 ## Working on the core
 

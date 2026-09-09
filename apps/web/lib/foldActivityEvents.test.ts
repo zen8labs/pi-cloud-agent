@@ -130,3 +130,83 @@ describe("foldEvents thinking", () => {
     expect(blocks[0]).toMatchObject({ kind: "thinking", text: "Check tests." });
   });
 });
+
+describe("foldEvents GitHub reviews", () => {
+  it("promotes the structured review tool call into a review block", () => {
+    const blocks = foldEvents(
+      [
+        {
+          seq: 1,
+          type: "tool_call",
+          data: {
+            callId: "review-1",
+            tool: "submit_github_review",
+            status: "running",
+            args: {
+              body: "## Summary\nLooks good overall.",
+              comments: [
+                {
+                  path: "src/request.ts",
+                  line: 42,
+                  side: "RIGHT",
+                  body: "Please handle the empty response here.",
+                },
+              ],
+            },
+          },
+          at: "2026-08-05T00:00:01.000Z",
+        },
+        {
+          seq: 2,
+          type: "tool_call",
+          data: {
+            callId: "review-1",
+            tool: "submit_github_review",
+            status: "completed",
+            output: "GitHub review submitted successfully.",
+          },
+          at: "2026-08-05T00:00:02.000Z",
+        },
+      ],
+      null,
+    );
+
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({
+      kind: "review",
+      status: "completed",
+      submission: {
+        body: "## Summary\nLooks good overall.",
+        comments: [
+          {
+            path: "src/request.ts",
+            line: 42,
+            side: "RIGHT",
+            body: "Please handle the empty response here.",
+          },
+        ],
+      },
+    });
+  });
+
+  it("keeps malformed review arguments in the normal tool feed", () => {
+    const blocks = foldEvents(
+      [
+        {
+          seq: 1,
+          type: "tool_call",
+          data: {
+            callId: "review-1",
+            tool: "submit_github_review",
+            status: "completed",
+            args: { body: "" },
+          },
+          at: "2026-08-05T00:00:01.000Z",
+        },
+      ],
+      null,
+    );
+
+    expect(blocks.map((block) => block.kind)).toEqual(["work"]);
+  });
+});

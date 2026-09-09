@@ -58,7 +58,7 @@ export function bindTestApp(
 
 export async function resetTables(database: Database): Promise<void> {
   await database.execute(
-    sql`truncate table plugin_audit_log, plugin_oauth_tokens, plugin_oauth_clients, plugin_user_variables, plugin_user_state, plugin_settings, plugin_versions, plugins, llm_connections, web_sessions, oauth_states, vcs_connections, repository_environments, observability_exports, run_events, sessions, app_users cascade`,
+    sql`truncate table plugin_audit_log, plugin_oauth_tokens, plugin_oauth_clients, plugin_user_variables, plugin_user_state, plugin_settings, plugin_versions, plugins, llm_connections, web_sessions, oauth_states, vcs_connections, repository_environments, observability_exports, github_comment_publications, github_review_publications, integration_deliveries, external_threads, github_installations, run_events, runs, sessions, app_users cascade`,
   );
 }
 
@@ -74,6 +74,8 @@ export function testConfig(overrides: Record<string, string> = {}): Config {
     GITHUB_APP_CLIENT_ID: "github-test-client",
     GITHUB_APP_CLIENT_SECRET: "github-test-secret",
     GITHUB_APP_REDIRECT_URI: "http://localhost:8080/auth/github/callback",
+    GITHUB_WEBHOOK_SECRET: "github-webhook-test-secret",
+    GITHUB_MENTION: "@pi-cloud-agent",
     AZURE_DEVOPS_CLIENT_ID: "azure-test-client",
     AZURE_DEVOPS_CLIENT_SECRET: "azure-test-secret",
     AZURE_DEVOPS_REDIRECT_URI: "http://localhost:8080/vcs/connections/azure-devops/callback",
@@ -168,6 +170,8 @@ export function manualTrigger(overrides: Partial<Trigger["repo"]> = {}): Trigger
       prNumber: null,
       ...overrides,
     },
+    source: "manual",
+    intent: "general",
   };
 }
 

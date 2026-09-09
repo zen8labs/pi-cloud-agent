@@ -7,13 +7,18 @@
  * controller, the sandbox runtime, and the browser all agree on one vocabulary.
  */
 export * from "./api";
+export * from "./api-reviews";
 export * from "./env";
 export * from "./events";
+export * from "./github-review";
+export * from "./github-task";
 export * from "./llm";
+export * from "./provenance";
 export * from "./repo";
 export * from "./run";
 export * from "./sandbox";
 export * from "./secret";
+export * from "./session-command";
 export * from "./task";
 export * from "./trigger";
 export * from "./vcs";

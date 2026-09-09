@@ -31,20 +31,20 @@ The vocabulary for reasoning about a cloud agent, mapped onto the tree. Note tha
 
 | Building block | Where it lives |
 |---|---|
-| **Trigger**: why a run exists | `apps/controller/http/manual.ts`, shared by `http/runs.ts` and `http/sessions.ts` |
+| **Trigger**: why a run exists | `packages/protocol/session-command.ts`, `packages/protocol/trigger.ts`, `apps/controller/commands/session.ts` |
 | **Sandbox**: isolated compute | `packages/sandbox` |
 | **Harness**: the agent loop | `packages/runtime/agent.ts` (Pi, embedded as a library) |
 | **Secret broker**: credentials for one run | `apps/controller/secrets/broker.ts` |
-| **Actuation**: how work becomes an outcome | *no code.* The agent uses `git` and `gh` itself |
+| **Actuation**: how work becomes an outcome | structured callbacks such as `submit_github_review`; the controller owns provider writes |
 | **Observability**: what happened | `run_events` + `/runs/:id/stream` + trusted OTLP projection + `apps/web` |
 | **Task behavior**: the user request and attached skills | `packages/protocol`, `packages/plugins` |
 
-Actuation having no implementation is the point, not an omission. A controller that posted the agent's findings would need to parse them, and then it could disagree with what the agent actually did.
+Actuation is explicit rather than inferred: the runtime requests a provider side effect through a typed tool, and the controller validates, authorizes, and records the publication without parsing ordinary agent prose.
 
 ## Run lifecycle
 
 ```text
-trigger ──► runs row (queued)
+client (dashboard, GitHub, future Slack/Linear) ──► SessionCommand ──► runs row (queued)
               │
               │  reconciler tick: claim with `for update skip locked`
               ▼
@@ -71,7 +71,7 @@ Provisioning is a **short transaction**, not a long-lived task. Once `attachSand
 
 ## State
 
-Eight tables. That is the entire persistent state of the system.
+The execution core remains small, while integration delivery and publication are durable state rather than in-memory jobs.
 
 | Table | Role |
 |---|---|
@@ -83,6 +83,11 @@ Eight tables. That is the entire persistent state of the system.
 | `oauth_states` | one-time PKCE state for connection callbacks |
 | `app_users` | stable application users established by GitHub App authorization |
 | `web_sessions` | hashed, expiring browser sessions |
+| `external_threads` | provider-neutral identity that maps an external thread (for example a PR) to one session |
+| `integration_deliveries` | verified webhook inbox with idempotency key, lease, and processing result |
+| `github_installations` | verified GitHub App installation bound to an application user |
+| `github_review_publications` | one structured review publication state per review run |
+| `github_comment_publications` | one structured comment-reply publication state per task run |
 
 Session state and runtime lifetime are deliberately separate. Postgres owns the conversation checkpoint; the sandbox provider owns a filesystem checkpoint; live compute exists only while a turn runs. If the checkpoint expires, the next turn cold-clones the repository and still opens the same Pi session. See [docs/resumability.md](docs/resumability.md).
 
@@ -105,6 +110,15 @@ All three live in `packages/protocol`, so an implementation package depends on t
 |---|---|---|
 | `SandboxProvider` | `createSandboxProvider(name, env)` | `microsandbox` (default), `e2b` |
 | `VCSProvider` | `createVcsProvider(name, accessToken)` | `github`, `azure-devops` |
+| `SessionCommand` | `queueSessionCommand(database, config, command)` | dashboard chat, GitHub webhooks, future Slack/Linear adapters |
+
+`SessionCommand` is the client-facing seam: it carries the repository revision, prompt, optional model and `thinkingLevel` (default `medium`), intent, and provider-neutral provenance. A new integration should project its events into this command instead of teaching the reconciler about another workflow. External sessions use an `externalThreadKey` for idempotent append semantics.
+
+GitHub output follows the opposite direction through narrow trusted actuators. The runtime can call `submit_github_review` with a schema-validated body and inline comments, or `reply_github_comment` with a Markdown reply to the triggering comment; the controller checks the run's pinned target and the GitHub provider posts one durable, idempotent publication. Ordinary agent prose is never parsed into side effects.
+
+External triggers are clients, not alternate execution systems. GitHub currently provides the webhook adapter; Slack, Linear, and Azure DevOps should project their events into the same `SessionCommand` and provider-neutral `Trigger` shape. See [docs/adding-an-integration.md](docs/adding-an-integration.md).
+
+The current environment-backed integration configuration is intentionally an MVP. A future trusted admin web with organization-scoped RBAC should manage encrypted integration settings such as App keys and webhook secrets, while the controller continues to materialize only short-lived operation capabilities for runs.
 
 `TaskSpec` is the pivot: a user request is resolved into the repository, prompt, and optional budget. Enabled plugin skills are composed into the prompt at provisioning. Everything below that line is infrastructure.
 

@@ -1,14 +1,32 @@
 import {
+  type GithubCommentSubmission,
+  type GithubReviewSubmission,
+  githubCommentSubmissionSchema,
+  githubReviewSubmissionSchema,
   isDebugAgentEvent,
   oauthCredentialUpdateSchema,
+  type RunStatusReport,
   redactUrlCredentials,
   runEventInputSchema,
   runStatusReportSchema,
   sessionCheckpointSchema,
 } from "@pi-cloud-agent/protocol";
+import {
+  createGithubCommentPublisher,
+  createGithubInstallationToken,
+  createGithubReviewPublisher,
+} from "@pi-cloud-agent/vcs";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import type { Database } from "../db/client";
+import {
+  beginGithubCommentPublication,
+  beginGithubReviewPublication,
+  finishGithubCommentPublication,
+  finishGithubReviewPublication,
+  hasPublishedGithubComment,
+  hasPublishedGithubReview,
+} from "../db/integrations";
 import { appendEvent, completeRun, getRunByCallbackToken } from "../db/runs";
 import type { RunRow } from "../db/schema";
 import {
@@ -77,14 +95,8 @@ export function internalRoutes(observability?: Observability): Hono<AppEnv> {
     const parsed = runStatusReportSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "unrecognized status" }, 422);
 
-    let { status, detail } = parsed.data;
     const database = c.get("database");
-
-    const session = await getSessionForRun(database, run);
-    if (status === "done" && session && !session.agentCheckpoint) {
-      status = "error";
-      detail = "the turn completed without a durable Pi session checkpoint";
-    }
+    const { status, detail } = await normalizeStatus(database, run, parsed.data);
 
     // Recorded as an event first, so the reason survives even if the transition
     // below loses a race with the reconciler.
@@ -142,7 +154,232 @@ export function internalRoutes(observability?: Observability): Hono<AppEnv> {
     return c.json({ updated });
   });
 
+  app.post("/runs/:runId/github-review", async (c) => {
+    const run = await requireRun(c, c.req.param("runId"));
+    if (run instanceof Response) return run;
+    if (
+      run.status !== "running" ||
+      run.trigger.intent !== "github_review" ||
+      !run.userId ||
+      !run.trigger.integrationId ||
+      !run.trigger.repo.prNumber ||
+      !run.trigger.repo.headSha
+    ) {
+      return c.json({ error: "run is not a GitHub review" }, 409);
+    }
+    const parsed = githubReviewSubmissionSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success || !validReviewSubmission(parsed.data)) {
+      return c.json({ error: "invalid GitHub review submission" }, 422);
+    }
+    return publishGithubReview(c, run, parsed.data, run.trigger.repo.prNumber);
+  });
+
+  app.post("/runs/:runId/github-comment", async (c) => {
+    const run = await requireRun(c, c.req.param("runId"));
+    if (
+      run instanceof Response ||
+      run.status !== "running" ||
+      run.trigger.intent !== "github_task" ||
+      !run.userId ||
+      !run.trigger.repo.prNumber ||
+      !run.trigger.integrationId ||
+      !run.trigger.externalMessageId
+    ) {
+      return c.json({ error: "run is not a GitHub comment task" }, 409);
+    }
+    const parsed = githubCommentSubmissionSchema.safeParse(
+      await c.req.json().catch(() => null),
+    );
+    if (!parsed.success) return c.json({ error: "invalid GitHub comment submission" }, 422);
+    return publishGithubComment(c, run, parsed.data, run.trigger.repo.prNumber);
+  });
+
   return app;
+}
+
+async function normalizeStatus(
+  database: Database,
+  run: RunRow,
+  report: RunStatusReport,
+): Promise<RunStatusReport> {
+  if (report.status !== "done") return report;
+  if (
+    run.trigger.intent === "github_review" &&
+    !(await hasPublishedGithubReview(database, run.id))
+  ) {
+    return {
+      status: "error",
+      detail: "the review session completed without submitting its structured GitHub review",
+    };
+  }
+  if (
+    run.trigger.intent === "github_task" &&
+    !(await hasPublishedGithubComment(database, run.id))
+  ) {
+    return {
+      status: "error",
+      detail: "the task session completed without submitting its GitHub comment reply",
+    };
+  }
+  const session = await getSessionForRun(database, run);
+  if (session && !session.agentCheckpoint) {
+    return {
+      status: "error",
+      detail: "the turn completed without a durable Pi session checkpoint",
+    };
+  }
+  return report;
+}
+
+function validReviewSubmission(submission: GithubReviewSubmission): boolean {
+  return submission.comments.every(
+    (comment) =>
+      safeReviewPath(comment.path) &&
+      (comment.startLine === undefined
+        ? comment.startSide === undefined
+        : comment.startLine <= comment.line && comment.startSide !== undefined),
+  );
+}
+
+async function publishGithubReview(
+  c: Context<AppEnv>,
+  run: RunRow,
+  submission: GithubReviewSubmission,
+  pullNumber: number,
+): Promise<Response> {
+  const database = c.get("database");
+  const claim = await beginGithubReviewPublication(database, run.id, submission);
+  if (!claim) return c.json({ error: "could not reserve GitHub review publication" }, 500);
+  const publication = claim.publication;
+  if (publication.status === "published") {
+    return c.json({ ok: true, reviewId: publication.githubReviewId, duplicate: true });
+  }
+  if (!claim.claimed) {
+    const message =
+      publication.status === "processing"
+        ? "GitHub review publication is still processing"
+        : `GitHub review publication is ${publication.status}`;
+    return c.json({ error: message }, 409);
+  }
+  const accessToken = await githubPublicationToken(c, run.trigger.integrationId);
+  if (!accessToken) {
+    await finishGithubReviewPublication(database, run.id, {
+      status: "failed",
+      error: "GitHub connection is unavailable",
+    });
+    return c.json({ error: "GitHub connection is unavailable" }, 409);
+  }
+  try {
+    const review = await createGithubReviewPublisher(accessToken).submitReview({
+      owner: run.trigger.repo.owner,
+      repo: run.trigger.repo.name,
+      pullNumber,
+      commitId: run.trigger.repo.headSha,
+      body: submission.body,
+      comments: submission.comments,
+    });
+    await finishGithubReviewPublication(database, run.id, {
+      status: "published",
+      githubReviewId: review.id,
+    });
+    return c.json({ ok: true, reviewId: review.id });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    await finishGithubReviewPublication(database, run.id, {
+      status: "uncertain",
+      error: detail,
+    });
+    c.get("log").error("GitHub review publication failed", { runId: run.id, error });
+    return c.json({ error: "GitHub review publication failed" }, 502);
+  }
+}
+
+async function publishGithubComment(
+  c: Context<AppEnv>,
+  run: RunRow,
+  submission: GithubCommentSubmission,
+  pullNumber: number,
+): Promise<Response> {
+  const database = c.get("database");
+  const claim = await beginGithubCommentPublication(database, run.id, submission);
+  if (!claim) return c.json({ error: "could not reserve GitHub comment publication" }, 500);
+  const publication = claim.publication;
+  if (publication.status === "published") {
+    return c.json({ ok: true, commentId: publication.githubCommentId, duplicate: true });
+  }
+  if (!claim.claimed) {
+    const message =
+      publication.status === "processing"
+        ? "GitHub comment publication is still processing"
+        : `GitHub comment publication is ${publication.status}`;
+    return c.json({ error: message }, 409);
+  }
+  const messageId = run.trigger.externalMessageId;
+  const integrationId = run.trigger.integrationId;
+  if (!messageId || !integrationId) {
+    await finishGithubCommentPublication(database, run.id, {
+      status: "failed",
+      error: "comment target is unavailable",
+    });
+    return c.json({ error: "comment target is unavailable" }, 409);
+  }
+  const accessToken = await githubPublicationToken(c, integrationId);
+  if (!accessToken) {
+    await finishGithubCommentPublication(database, run.id, {
+      status: "failed",
+      error: "GitHub connection is unavailable",
+    });
+    return c.json({ error: "GitHub connection is unavailable" }, 409);
+  }
+  try {
+    const comment = await createGithubCommentPublisher(accessToken).submitComment({
+      owner: run.trigger.repo.owner,
+      repo: run.trigger.repo.name,
+      issueNumber: pullNumber,
+      commentId: messageId,
+      replyKind:
+        run.trigger.eventType === "pull_request_review_comment"
+          ? "review_comment"
+          : "issue_comment",
+      body: submission.body,
+    });
+    await finishGithubCommentPublication(database, run.id, {
+      status: "published",
+      githubCommentId: comment.id,
+    });
+    return c.json({ ok: true, commentId: comment.id });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    await finishGithubCommentPublication(database, run.id, {
+      status: "uncertain",
+      error: detail,
+    });
+    c.get("log").error("GitHub comment publication failed", { runId: run.id, error });
+    return c.json({ error: "GitHub comment publication failed" }, 502);
+  }
+}
+
+async function githubPublicationToken(
+  c: Context<AppEnv>,
+  installationId: string | undefined,
+): Promise<string | null> {
+  const config = c.get("config");
+  if (config.github.appId && config.github.privateKey && installationId) {
+    try {
+      const token = await createGithubInstallationToken(
+        { appId: config.github.appId, privateKey: config.github.privateKey },
+        installationId,
+      );
+      return token.token;
+    } catch (error) {
+      c.get("log").error("GitHub App installation token failed", {
+        installationId,
+        error,
+      });
+      return null;
+    }
+  }
+  return null;
 }
 
 async function saveDiffBase(
@@ -179,4 +416,8 @@ function scrub(data: Record<string, unknown>): Record<string, unknown> {
     out[key] = typeof value === "string" ? redactUrlCredentials(value) : value;
   }
   return out;
+}
+
+function safeReviewPath(path: string): boolean {
+  return !path.startsWith("/") && !path.split("/").includes("..") && !path.includes("\\");
 }

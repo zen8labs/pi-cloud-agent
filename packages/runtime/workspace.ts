@@ -350,9 +350,16 @@ export async function prepareCheckout(
   // checkout path. Cold starts must not trust that state: remove only the
   // derived checkout directory before cloning the requested revision.
   await rm(repo.path, { recursive: true, force: true });
-  const candidates = [...new Set([repo.headBranch, repo.defaultBranch].filter(Boolean))];
+  await cloneFreshCheckout(config, reporter);
+  await checkoutHeadRevision(repo);
+  await fetchDiffRevisions(config);
+  reporter.log("git.checkout_ready", { path: repo.path, headSha: repo.headSha || null });
+  return "created";
+}
 
-  let cloned = false;
+async function cloneFreshCheckout(config: RuntimeConfig, reporter: Reporter): Promise<void> {
+  const { repo } = config;
+  const candidates = [...new Set([repo.headBranch, repo.defaultBranch].filter(Boolean))];
   let lastOutput = "";
   for (const branch of candidates) {
     const result = await run("git", [
@@ -366,54 +373,64 @@ export async function prepareCheckout(
     ]);
     if (result.code === 0) {
       reporter.log("git.cloned", { branch });
-      cloned = true;
-      break;
+      return;
     }
     lastOutput = result.output;
     reporter.log("git.clone_branch_failed", { branch, output: lastOutput });
   }
 
-  if (!cloned) {
-    const result = await run("git", [
-      "clone",
-      "--depth",
-      String(CLONE_DEPTH),
-      repo.cloneUrl,
-      repo.path,
-    ]);
-    if (result.code !== 0) {
-      throw new Error(`clone failed: ${result.output || lastOutput || "git exited non-zero"}`);
-    }
-    reporter.log("git.cloned", { branch: "(default)" });
+  const result = await run("git", [
+    "clone",
+    "--depth",
+    String(CLONE_DEPTH),
+    repo.cloneUrl,
+    repo.path,
+  ]);
+  if (result.code !== 0) {
+    throw new Error(`clone failed: ${result.output || lastOutput || "git exited non-zero"}`);
   }
+  reporter.log("git.cloned", { branch: "(default)" });
+}
 
-  if (repo.headSha) {
-    await run("git", ["fetch", "--depth", String(CLONE_DEPTH), "origin", repo.headSha], {
-      cwd: repo.path,
-    });
-    const checkout = await run("git", ["reset", "--hard", repo.headSha], { cwd: repo.path });
-    if (checkout.code !== 0) {
-      throw new Error(`could not check out ${repo.headSha}: ${checkout.output}`);
-    }
+async function checkoutHeadRevision(repo: RuntimeConfig["repo"]): Promise<void> {
+  if (!repo.headSha) return;
+  const fetched = await run(
+    "git",
+    ["fetch", "--depth", String(CLONE_DEPTH), "origin", repo.headSha],
+    { cwd: repo.path },
+  );
+  if (fetched.code !== 0) {
+    throw new Error(`could not fetch head revision ${repo.headSha}: ${fetched.output}`);
   }
-
-  await fetchDiffRevisions(config);
-
-  reporter.log("git.checkout_ready", { path: repo.path, headSha: repo.headSha || null });
-  return "created";
+  const checkout = await run("git", ["reset", "--hard", repo.headSha], { cwd: repo.path });
+  if (checkout.code !== 0) {
+    throw new Error(`could not check out ${repo.headSha}: ${checkout.output}`);
+  }
 }
 
 async function fetchDiffRevisions(config: RuntimeConfig): Promise<void> {
-  const revisions = [config.repo.baseSha, config.sessionBaseSha].filter(
-    (revision, index, all): revision is string =>
-      Boolean(revision) && all.indexOf(revision) === index,
-  );
-  for (const revision of revisions) {
+  const revisions = [
+    config.repo.baseSha
+      ? { revision: config.repo.baseSha, remote: config.repo.baseCloneUrl }
+      : null,
+    config.sessionBaseSha ? { revision: config.sessionBaseSha, remote: "origin" } : null,
+  ].filter((entry): entry is { revision: string; remote: string } => entry !== null);
+  const fetched = new Set<string>();
+  for (const { revision, remote } of revisions) {
+    if (fetched.has(revision)) continue;
+    fetched.add(revision);
     // Fetched but not checked out: a shallow clone would not otherwise have the
     // revision needed for a cumulative diff.
-    await run("git", ["fetch", "--depth", String(CLONE_DEPTH), "origin", revision], {
-      cwd: config.repo.path,
-    });
+    const result = await run(
+      "git",
+      ["fetch", "--depth", String(CLONE_DEPTH), remote, revision],
+      {
+        cwd: config.repo.path,
+      },
+    );
+    if (result.code !== 0) {
+      throw new Error(`could not fetch diff revision ${revision}: ${result.output}`);
+    }
   }
 }
 

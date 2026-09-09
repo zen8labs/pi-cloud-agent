@@ -6,9 +6,9 @@ Users authenticate through the configured GitHub App. The controller creates a l
 
 `VCS_ENCRYPTION_KEY` is supplied only to the controller. The controller refreshes an expiring provider token, resolves the user's provider, and asks `CredentialBroker` for the credential needed by a run.
 
-The current broker injects the token into the sandbox as `SCM_TOKEN` and provider-specific aliases. This is intentionally temporary: repository code and the agent run in the same untrusted machine, so a malicious repository can read or exfiltrate a token visible to its process.
+The current broker injects the token into the sandbox as `SCM_TOKEN` and provider-specific aliases. GitHub webhook-triggered runs use the connected-user token for checkout. Controller-owned reviews and comment replies require a short-lived installation token, so GitHub attributes automation to the App and scopes it to the installation. Missing App credentials or token-minting failures stop publication; the controller never falls back to a connected-user token. The private key never crosses into the sandbox. The checkout token remains intentionally temporary: repository code and the agent run in the same untrusted machine, so a malicious repository can read or exfiltrate a token visible to its process.
 
-Repository-specific dependencies belong in a user-selected base image/template. The Settings **Test environment** action runs a disposable compatibility check and destroys it. The image executes in the same untrusted sandbox as repository code, so image authors must be trusted. Provider checkpoints are filesystem-only and must not retain credential values.
+Repository-specific dependencies belong in a user-selected base image/template. Settings **Test** runs a disposable compatibility check and destroys it. The image executes in the same untrusted sandbox as repository code, so image authors must be trusted. Provider checkpoints are filesystem-only and must not retain credential values.
 
 ## Security concerns
 
@@ -37,6 +37,6 @@ Host-mediated plugin OAuth reuses the same encryption key (`VCS_ENCRYPTION_KEY`)
 
 ## Planned secrets broker
 
-The broker should replace the direct token handoff, not add another token alias. The preferred shape is a broker-backed git credential helper or egress proxy that authorizes a repository operation and injects credentials outside the sandbox. GitHub installation tokens are the intended GitHub execution target: they can be limited to repositories and permissions and expire after one hour.
+The broker should replace the direct checkout-token handoff, not add another token alias. The preferred shape is a broker-backed git credential helper or egress proxy that authorizes a repository operation and injects credentials outside the sandbox. GitHub installation tokens are required for controller-owned publication; they can be limited to repositories and permissions and expire after one hour. Extending that broker boundary to sandbox checkout remains future work.
 
 The seam is `CredentialBroker` in `apps/controller/secrets/broker.ts`. Keep the reconciler dependent on that small interface so the broker can change without spreading secret policy through run orchestration.

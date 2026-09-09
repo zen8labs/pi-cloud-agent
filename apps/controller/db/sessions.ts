@@ -6,8 +6,9 @@ import {
   type Trigger,
   type WorkspaceRef,
 } from "@pi-cloud-agent/protocol";
-import { and, desc, eq, inArray, isNotNull, isNull, lt, or, type SQL, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lt, or, type SQL, sql } from "drizzle-orm";
 import { CHANNELS, type Database, notify } from "./client";
+import { bindExternalThread } from "./integrations";
 import { type RunRow, runs, type SessionOperation, type SessionRow, sessions } from "./schema";
 import { CLEARED_SESSION_OPERATION, isSessionOperationStale } from "./session-operations";
 import {
@@ -15,6 +16,8 @@ import {
   buildReplacementUpdate,
   buildWorkspaceUpdate,
 } from "./session-workspace";
+
+export { listSessions } from "./session-list";
 
 export interface CreateSessionInput {
   userId?: string | null;
@@ -27,6 +30,7 @@ export interface CreateSessionInput {
   thinkingLevel?: ThinkingLevel;
   modelConnectionId?: string | null;
   callbackToken: string;
+  externalThreadKey?: string;
 }
 
 export class SessionNotFoundError extends Error {
@@ -77,6 +81,8 @@ export async function createSessionWithRun(
         provider: input.provider,
         repoFullName: input.repoFullName,
         trigger: input.trigger,
+        integrationProvider: input.trigger.deliveryId ? input.trigger.source : null,
+        integrationDeliveryId: input.trigger.deliveryId ?? null,
         model: input.model,
         modelConnectionId: input.modelConnectionId ?? null,
         thinkingLevel: input.thinkingLevel ?? "medium",
@@ -84,6 +90,7 @@ export async function createSessionWithRun(
       })
       .returning();
     if (!session || !run) throw new Error("could not create session and first run");
+    await bindExternalThread(tx, input, sessionId);
     return { session, run };
   });
   await notify(database, CHANNELS.runQueued, result.run.id);
@@ -100,6 +107,7 @@ export async function createSessionTurn(
     model: string;
     modelConnectionId: string | null;
     thinkingLevel?: ThinkingLevel;
+    trigger?: Trigger;
   },
 ): Promise<RunRow> {
   const runId = randomUUID();
@@ -116,7 +124,13 @@ export async function createSessionTurn(
     const turnNumber = session.turnCount + 1;
     const startsImmediately = session.activeRunId === null;
 
-    const trigger: Trigger = { kind: "manual", repo: session.repo, prompt };
+    const trigger: Trigger = modelSelection.trigger ?? {
+      kind: "manual",
+      repo: session.repo,
+      prompt,
+      source: "manual",
+      intent: "general",
+    };
     const [created] = await tx
       .insert(runs)
       .values({
@@ -127,6 +141,8 @@ export async function createSessionTurn(
         provider: session.provider,
         repoFullName: session.repoFullName,
         trigger,
+        integrationProvider: trigger.deliveryId ? trigger.source : null,
+        integrationDeliveryId: trigger.deliveryId ?? null,
         model: modelSelection.model,
         modelConnectionId: modelSelection.modelConnectionId,
         thinkingLevel: modelSelection.thinkingLevel ?? "medium",
@@ -187,19 +203,6 @@ export async function getSession(
     .where(and(eq(sessions.id, sessionId), ...(userId ? [eq(sessions.userId, userId)] : [])))
     .limit(1);
   return row ?? null;
-}
-
-export async function listSessions(
-  database: Database,
-  limit: number,
-  userId?: string | null,
-): Promise<SessionRow[]> {
-  return database
-    .select()
-    .from(sessions)
-    .where(userId ? eq(sessions.userId, userId) : undefined)
-    .orderBy(desc(sessions.pinned), desc(sessions.updatedAt))
-    .limit(limit);
 }
 
 export async function setSessionPinned(

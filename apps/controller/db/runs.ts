@@ -56,7 +56,14 @@ export interface CreateRunInput {
 }
 
 export async function createRun(database: Database, input: CreateRunInput): Promise<RunRow> {
-  const [row] = await database.insert(runs).values(input).returning();
+  const [row] = await database
+    .insert(runs)
+    .values({
+      ...input,
+      integrationProvider: input.trigger.deliveryId ? input.trigger.source : null,
+      integrationDeliveryId: input.trigger.deliveryId ?? null,
+    })
+    .returning();
   if (!row) throw new Error("insert into runs returned no row");
   await notify(database, CHANNELS.runQueued, row.id);
   return row;

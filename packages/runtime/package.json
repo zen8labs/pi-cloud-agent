@@ -16,7 +16,8 @@
   "dependencies": {
     "@earendil-works/pi-coding-agent": "catalog:",
     "@pi-cloud-agent/protocol": "workspace:*",
-    "pi-mcp-adapter": "2.18.0"
+    "pi-mcp-adapter": "2.18.0",
+    "typebox": "1.1.38"
   },
   "devDependencies": {
     "@pi-cloud-agent/tsconfig": "workspace:*",

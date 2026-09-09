@@ -12,6 +12,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { AGENT_DEBUG_EVENT, SANDBOX_ENV } from "@pi-cloud-agent/protocol";
 import type { RuntimeConfig } from "./config";
+import { createGithubCommentTool } from "./github-comment";
+import { createGithubReviewTool } from "./github-review";
 import { persistRefreshedOAuthCredential } from "./oauth-credential";
 import type { Reporter } from "./reporter";
 import { loadSessionManager, saveSessionCheckpoint } from "./session-state";
@@ -89,6 +91,10 @@ export async function runAgentSession(
         compaction: { enabled: true },
         retry: { enabled: true, maxRetries: 3 },
       }),
+      customTools: [
+        ...(config.githubReview ? [createGithubReviewTool(reporter)] : []),
+        ...(config.githubComment ? [createGithubCommentTool(reporter)] : []),
+      ],
     });
 
     if (extensionsResult.errors.length > 0) {

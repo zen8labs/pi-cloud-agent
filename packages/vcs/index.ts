@@ -1,7 +1,6 @@
 import type { VCSProvider } from "@pi-cloud-agent/protocol";
 import { createAzureDevOpsProvider } from "./azure-devops";
 import { createGitHubProvider } from "./github";
-import { createVcsOAuthProvider } from "./oauth";
 
 type Factory = (accessToken: string) => VCSProvider;
 
@@ -19,7 +18,25 @@ export function createVcsProvider(name: string, accessToken: string): VCSProvide
   return factory(accessToken);
 }
 
-export { createAzureDevOpsProvider, createGitHubProvider, createVcsOAuthProvider };
+export { createAzureDevOpsProvider } from "./azure-devops";
+export type {
+  GithubAppCredentials,
+  GithubCommentPublisher,
+  GithubInstallation,
+  GithubPullRequestRevision,
+  GithubReviewPublisher,
+} from "./github";
+export {
+  createGitHubProvider,
+  createGithubCommentPublisher,
+  createGithubInstallationToken,
+  createGithubReviewPublisher,
+  fetchGithubPullRequestRevision,
+  verifyGithubInstallation,
+} from "./github";
+export type { GithubOpenPull, GithubReviewReader } from "./github-repositories";
+export { createGithubReviewReader, githubAppInstallUrl } from "./github-repositories";
+export { createVcsOAuthProvider } from "./oauth";
 
 export function vcsProviderNames(): string[] {
   return Object.keys(FACTORIES).sort();

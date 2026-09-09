@@ -82,16 +82,16 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
     );
 
     const session = await getSessionForRun(database, run);
-    const workspaceResumed = Boolean(session?.sandboxId);
+    const resume = sessionResumeState(run, session);
     const env = {
       ...buildEnv(
         run,
         task,
         config,
-        workspaceResumed,
+        resume.workspaceResumed,
         resolved.skillText,
         credentials.model,
-        session?.diffBaseSha ?? null,
+        resume.sessionBaseSha,
       ),
       ...credentials.env,
     };
@@ -143,7 +143,14 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
         clearInterval(heartbeat);
       },
     };
-    const ref = await startSandbox(session, spec, sessionSandbox, database, log);
+    const ref = await startSandbox(
+      session,
+      spec,
+      sessionSandbox,
+      database,
+      log,
+      resume.allowResume,
+    );
 
     // Every provider must report allocation before launching the runtime.
     if (!allocated) {
@@ -164,7 +171,7 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
     log.info("sandbox running", {
       sandboxId: ref.id,
       wallClockSeconds,
-      workspaceResumed,
+      workspaceResumed: resume.workspaceResumed,
       plugins: resolved.attached.map((plugin) => `${plugin.name}@${plugin.version}`),
     });
   } catch (error) {
@@ -172,6 +179,18 @@ export async function provisionRun(run: RunRow, deps: ProvisionDeps): Promise<vo
   } finally {
     clearInterval(heartbeat);
   }
+}
+
+function sessionResumeState(
+  run: RunRow,
+  session: Awaited<ReturnType<typeof getSessionForRun>>,
+): { allowResume: boolean; workspaceResumed: boolean; sessionBaseSha: string | null } {
+  const allowResume = run.trigger.source !== "github";
+  return {
+    allowResume,
+    workspaceResumed: Boolean(session?.sandboxId) && allowResume,
+    sessionBaseSha: allowResume ? (session?.diffBaseSha ?? null) : null,
+  };
 }
 
 function sessionProviderName(
@@ -255,8 +274,9 @@ async function startSandbox(
   sandbox: SandboxProvider,
   database: Database,
   log: Logger,
+  allowResume: boolean,
 ): Promise<SandboxRef> {
-  if (!session?.sandboxId) return sandbox.create(spec);
+  if (!allowResume || !session?.sandboxId) return sandbox.create(spec);
   const workspace = {
     provider: session.sandboxProvider ?? sandbox.name,
     id: session.sandboxId,
@@ -321,6 +341,32 @@ function buildEnv(
   sessionBaseSha: string | null,
 ): Record<string, string> {
   const { repo } = task;
+  const githubReview =
+    run.trigger.intent === "github_review" && repo.prNumber && repo.headSha
+      ? JSON.stringify({
+          owner: repo.owner,
+          repo: repo.name,
+          pullNumber: repo.prNumber,
+          headSha: repo.headSha,
+        })
+      : "";
+  const githubComment =
+    run.trigger.intent === "github_task" &&
+    repo.prNumber &&
+    run.trigger.integrationId &&
+    run.trigger.externalMessageId
+      ? JSON.stringify({
+          owner: repo.owner,
+          repo: repo.name,
+          issueNumber: repo.prNumber,
+          commentId: run.trigger.externalMessageId,
+          commentAuthor: run.trigger.externalActor,
+          replyKind:
+            run.trigger.eventType === "pull_request_review_comment"
+              ? "review_comment"
+              : "issue_comment",
+        })
+      : "";
   return {
     [SANDBOX_ENV.controlPlaneUrl]: config.controlPlaneUrl,
     [SANDBOX_ENV.runId]: run.id,
@@ -344,9 +390,12 @@ function buildEnv(
     [SANDBOX_ENV.repoOwner]: repo.owner,
     [SANDBOX_ENV.repoName]: repo.name,
     [SANDBOX_ENV.repoCloneUrl]: repo.cloneUrl,
+    [SANDBOX_ENV.repoBaseCloneUrl]: repo.baseCloneUrl ?? repo.cloneUrl,
     [SANDBOX_ENV.repoDefaultBranch]: repo.defaultBranch,
     [SANDBOX_ENV.repoBaseSha]: repo.baseSha,
     [SANDBOX_ENV.repoHeadSha]: repo.headSha,
     [SANDBOX_ENV.repoHeadBranch]: repo.headBranch,
+    [SANDBOX_ENV.githubReview]: githubReview,
+    [SANDBOX_ENV.githubComment]: githubComment,
   };
 }

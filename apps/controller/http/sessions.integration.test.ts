@@ -274,7 +274,7 @@ describe("durable session HTTP contract", () => {
         status: "succeeded" as const,
         provider: "github",
         repoFullName: "acme/widgets",
-        trigger: { kind: "manual" as const, repo: firstRun.trigger.repo, prompt: "pending" },
+        trigger: { ...firstRun.trigger, prompt: "pending" },
         model: firstRun.model,
         modelConnectionId: firstRun.modelConnectionId,
         callbackToken: randomUUID(),

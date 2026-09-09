@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import type { SandboxProvider } from "@pi-cloud-agent/protocol";
 import {
   createSessionTurnRequestSchema,
@@ -8,6 +7,8 @@ import {
   updateSessionPinRequestSchema,
 } from "@pi-cloud-agent/protocol";
 import { type Context, Hono } from "hono";
+import { queueSessionCommand } from "../commands/session";
+import { sessionHasReviews, sessionsWithReviews } from "../db/reviews";
 import {
   findSessionSandboxesToFinalize,
   findSessionSandboxReplacementsToDelete,
@@ -22,8 +23,6 @@ import {
 } from "../db/session-operations";
 import { markSessionSandboxReplacementDeleted } from "../db/session-workspace";
 import {
-  createSessionTurn,
-  createSessionWithRun,
   deleteSession as deleteSessionRow,
   getSession,
   listSessionRuns,
@@ -32,11 +31,10 @@ import {
   SessionNotFoundError,
   setSessionPinned,
 } from "../db/sessions";
-import type { resolveLlmModel } from "../llm/connections";
+import { LlmModelSelectionError } from "../llm/connections";
 import { requireAuthenticatedUser, userOwns } from "./auth";
 import type { AppEnv, Deps } from "./deps";
 import { readManualRouteRequest } from "./manual";
-import { resolveRequestedLlmModel } from "./model-selection";
 import { toDetail } from "./runs";
 
 type SessionContext = Context<AppEnv>;
@@ -51,13 +49,24 @@ export function sessionRoutes(
 
   app.get("/", async (c) => {
     const limit = Math.min(Number(c.req.query("limit") ?? 100) || 100, 200);
-    const rows = await listSessions(c.get("database"), limit, c.get("user")?.id);
+    const mode = c.req.query("mode");
+    const rows = await listSessions(
+      c.get("database"),
+      limit,
+      c.get("user")?.id,
+      mode === "reviews" || mode === "tasks" ? mode : undefined,
+    );
+    const reviewSessions = await sessionsWithReviews(
+      c.get("database"),
+      rows.map((row) => row.id),
+    );
     const summaries = await Promise.all(
       rows.map((row) =>
         toSessionSummary(
           c.get("database"),
           row,
           c.get("config").sessionWorkspaceRetentionSeconds,
+          reviewSessions.has(row.id),
         ),
       ),
     );
@@ -71,38 +80,35 @@ export function sessionRoutes(
     const resolved = await readManualRouteRequest(c);
     if (!resolved.ok) return c.json(resolved.error, 422);
     const { body, request: manual } = resolved;
-    const selected = await resolveRequestedLlmModel(
-      c.get("database"),
-      config,
-      user.id,
-      body.modelConnectionId,
-      body.modelId,
-      body.thinkingLevel,
-    );
-    if (!selected.ok) return c.json({ error: selected.error }, 422);
-    const model = selected.model;
-
-    const created = await createSessionWithRun(c.get("database"), {
-      userId: user.id,
-      title: titleFrom(body.prompt, body.repo),
-      provider: body.provider,
-      repoFullName: body.repo,
-      repo: manual.repo,
-      trigger: manual.trigger,
-      model: `${model.provider}/${model.name}`,
-      modelConnectionId: model.connectionId,
-      thinkingLevel: body.thinkingLevel,
-      callbackToken: randomBytes(32).toString("hex"),
-    });
+    let queued: Awaited<ReturnType<typeof queueSessionCommand>>;
+    try {
+      queued = await queueSessionCommand(c.get("database"), config, {
+        userId: user.id,
+        repo: manual.repo,
+        prompt: body.prompt,
+        mode: "new_session",
+        intent: "general",
+        modelConnectionId: body.modelConnectionId,
+        modelId: body.modelId,
+        thinkingLevel: body.thinkingLevel,
+        provenance: { source: "dashboard", eventType: "manual" },
+      });
+    } catch (error) {
+      const mapped = mapSessionCommandError(error);
+      if (mapped) return c.json({ error: mapped.error }, mapped.status);
+      throw error;
+    }
+    const created = await getSession(c.get("database"), queued.sessionId ?? "", user.id);
+    if (!created) return c.json({ error: "session could not be created" }, 500);
     c.get("log").info("session queued", {
-      sessionId: created.session.id,
-      runId: created.run.id,
-      repo: created.session.repoFullName,
+      sessionId: created.id,
+      runId: queued.runId,
+      repo: created.repoFullName,
     });
     return c.json(
       await toSessionSummary(
         c.get("database"),
-        created.session,
+        created,
         config.sessionWorkspaceRetentionSeconds,
       ),
       201,
@@ -134,23 +140,35 @@ export function sessionRoutes(
       await c.req.json().catch(() => null),
     );
     if (!parsed.success) return c.json({ error: "invalid request" }, 422);
-    const result = await queueSessionTurn(
-      c.get("database"),
-      c.get("config"),
-      user.id,
-      c.req.param("sessionId"),
-      parsed.data.prompt,
-      parsed.data.modelConnectionId,
-      parsed.data.modelId,
-      parsed.data.thinkingLevel,
-    );
-    if (!result.ok) return c.json({ error: result.error }, result.status);
+    const session = await getSession(c.get("database"), c.req.param("sessionId"), user.id);
+    if (!session) return c.json({ error: "session not found" }, 404);
+    let queued: Awaited<ReturnType<typeof queueSessionCommand>>;
+    try {
+      queued = await queueSessionCommand(c.get("database"), c.get("config"), {
+        userId: user.id,
+        sessionId: session.id,
+        repo: session.repo,
+        prompt: parsed.data.prompt,
+        mode: "append_turn",
+        intent: "general",
+        modelConnectionId: parsed.data.modelConnectionId,
+        modelId: parsed.data.modelId,
+        thinkingLevel: parsed.data.thinkingLevel,
+        provenance: { source: "dashboard", eventType: "session_turn" },
+      });
+    } catch (error) {
+      const mapped = mapSessionCommandError(error);
+      if (mapped) return c.json({ error: mapped.error }, mapped.status);
+      throw error;
+    }
+    const run = await getRun(c.get("database"), queued.runId);
+    if (!run) return c.json({ error: "run could not be created" }, 500);
     c.get("log").info("session turn queued", {
-      sessionId: result.run.sessionId,
-      runId: result.run.id,
-      turnNumber: result.run.turnNumber,
+      sessionId: run.sessionId,
+      runId: run.id,
+      turnNumber: run.turnNumber,
     });
-    return c.json(toDetail(result.run), 201);
+    return c.json(toDetail(run), 201);
   });
 
   app.patch("/:sessionId/pin", async (c) => {
@@ -175,6 +193,15 @@ export function sessionRoutes(
   });
 
   return app;
+}
+
+function mapSessionCommandError(
+  error: unknown,
+): { error: string; status: 404 | 409 | 422 } | null {
+  if (error instanceof LlmModelSelectionError) return { error: error.message, status: 422 };
+  if (error instanceof SessionNotFoundError) return { error: error.message, status: 404 };
+  if (error instanceof SessionBusyError) return { error: error.message, status: 409 };
+  return null;
 }
 
 async function deleteSession(
@@ -387,65 +414,16 @@ function replacementRef(run: RunRow) {
   };
 }
 
-type SessionTurnResult =
-  | { ok: true; run: RunRow }
-  | { ok: false; error: string; status: 404 | 409 | 422 };
-
-async function queueSessionTurn(
-  database: Parameters<typeof getRun>[0],
-  config: Parameters<typeof resolveLlmModel>[1],
-  userId: string,
-  sessionId: string,
-  prompt: string,
-  modelConnectionId: string,
-  modelId: string,
-  thinkingLevel: import("@pi-cloud-agent/protocol").ThinkingLevel,
-): Promise<SessionTurnResult> {
-  const session = await getSession(database, sessionId, userId);
-  if (!session) return { ok: false, error: "session not found", status: 404 };
-  const selected = await resolveRequestedLlmModel(
-    database,
-    config,
-    userId,
-    modelConnectionId,
-    modelId,
-    thinkingLevel,
-  );
-  if (!selected.ok) return { ok: false, error: selected.error, status: 422 };
-
-  try {
-    const run = await createSessionTurn(
-      database,
-      sessionId,
-      prompt,
-      randomBytes(32).toString("hex"),
-      userId,
-      {
-        model: `${selected.model.provider}/${selected.model.name}`,
-        modelConnectionId: selected.model.connectionId,
-        thinkingLevel,
-      },
-    );
-    return { ok: true, run };
-  } catch (error) {
-    if (error instanceof SessionNotFoundError) {
-      return { ok: false, error: error.message, status: 404 };
-    }
-    if (error instanceof SessionBusyError) {
-      return { ok: false, error: error.message, status: 409 };
-    }
-    throw error;
-  }
-}
-
 async function toSessionSummary(
   database: Parameters<typeof getRun>[0],
   session: SessionRow,
   inactiveAfterSeconds: number,
+  hasReviews?: boolean,
 ): Promise<SessionSummary> {
   const activeRun = session.activeRunId ? await getRun(database, session.activeRunId) : null;
   return {
     id: session.id,
+    hasReviews: hasReviews ?? (await sessionHasReviews(database, session.id)),
     status: sessionStatus(activeRun),
     title: session.title,
     inactiveAfterSeconds,
@@ -469,9 +447,4 @@ function sessionStatus(run: RunRow | null): SessionStatus {
     return "parking";
   }
   return run.status;
-}
-
-function titleFrom(prompt: string, repo: string): string {
-  const title = prompt.replace(/\s+/g, " ").trim() || repo;
-  return title.length > 80 ? `${title.slice(0, 79)}…` : title;
 }

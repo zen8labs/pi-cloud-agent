@@ -69,6 +69,17 @@ async function json<T>(response: Response): Promise<T> {
 }
 
 describe("starting runs", () => {
+  it("hands an unauthenticated GitHub install callback to dashboard Settings", async () => {
+    const response = await app.request(
+      "/integrations/github/setup?installation_id=153581829&setup_action=install",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "http://localhost:3000/settings?github=install&installation_id=153581829",
+    );
+  });
+
   it("queues a run and echoes it back", async () => {
     const response = await post("/runs", {
       repo: "acme/widgets",

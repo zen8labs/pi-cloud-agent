@@ -5,6 +5,7 @@ import { ChevronRightIcon, LoaderCircleIcon, SquareTerminalIcon, XIcon } from "l
 import { useMemo } from "react";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
 import { ChangeStatsCard } from "@/components/ChangeStatsCard";
+import { ReviewSubmissionCard } from "@/components/ReviewSubmissionCard";
 import { ToolArgsView } from "@/components/ToolArgsView";
 import {
   type ActivityBlock,
@@ -92,6 +93,15 @@ function BlockView({
           {block.text}
         </p>
       </details>
+    );
+  }
+  if (block.kind === "review") {
+    return (
+      <ReviewSubmissionCard
+        submission={block.submission}
+        status={streaming && block.status !== "completed" ? "running" : block.status}
+        onOpenChanges={onOpenChanges}
+      />
     );
   }
   if (block.kind === "work") return <WorkGroup block={block} streaming={streaming} />;

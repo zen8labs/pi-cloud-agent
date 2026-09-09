@@ -1,6 +1,6 @@
 "use client";
 
-import { PanelLeftIcon, PlusIcon } from "lucide-react";
+import { GitPullRequestIcon, PanelLeftIcon, PlusIcon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AccountMenu } from "@/components/AccountMenu";
@@ -13,6 +13,7 @@ import {
 import { SidebarResizeHandle } from "@/components/SidebarResizeHandle";
 import { SideNav } from "@/components/SideNav";
 import { SignIn } from "@/components/SignIn";
+import { WorkspaceModeProvider } from "@/components/WorkspaceMode";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -20,7 +21,9 @@ import { cn } from "@/lib/utils";
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <NavCollapseProvider>
-      <AuthGate>{children}</AuthGate>
+      <WorkspaceModeProvider>
+        <AuthGate>{children}</AuthGate>
+      </WorkspaceModeProvider>
     </NavCollapseProvider>
   );
 }
@@ -98,6 +101,9 @@ function NavRail() {
         <PlusIcon className="size-4" />
       </Link>
       <div className="flex-1" />
+      <Link href="/reviews" aria-label="Reviews" className="rail-link">
+        <GitPullRequestIcon className="size-4" />
+      </Link>
       <AccountMenu compact placement="right" />
     </div>
   );

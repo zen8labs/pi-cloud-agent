@@ -1,4 +1,5 @@
 import type { SandboxProvider } from "@pi-cloud-agent/protocol";
+import type { GithubReviewReader } from "@pi-cloud-agent/vcs";
 import type { Config } from "../config";
 import type { Database } from "../db/client";
 import type { AppUserRow } from "../db/schema";
@@ -16,6 +17,7 @@ export interface Deps {
   sandbox?: SandboxProvider;
   /** Resolve a provider recorded on a session for deletion cleanup. */
   createSandboxProvider?: (name: string) => SandboxProvider;
+  createGithubReviewReader?: (token: string) => GithubReviewReader;
 }
 
 export type AppEnv = { Variables: Deps & { user: AppUserRow | null } };

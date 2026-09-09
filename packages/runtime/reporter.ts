@@ -1,4 +1,6 @@
 import {
+  type GithubCommentSubmission,
+  type GithubReviewSubmission,
   isDebugAgentEvent,
   type OAuthCredentialUpdate,
   type RunEventInput,
@@ -26,13 +28,21 @@ export interface Reporter {
   log(event: string, fields?: Record<string, unknown>): void;
   status(report: RunStatusReport): Promise<void>;
   modelCredential(update: OAuthCredentialUpdate): Promise<boolean>;
+  review(submission: GithubReviewSubmission): Promise<void>;
+  comment(submission: GithubCommentSubmission): Promise<void>;
   /** Wait for queued telemetry to drain. Called before reporting terminal status. */
   flush(): Promise<void>;
 }
 
 const TELEMETRY_TIMEOUT_MS = 10_000;
+// The controller's GitHub client allows 30 seconds for a provider request. Keep
+// the sandbox callback open longer than that so a slow publication is not
+// mistaken for a failed call and retried while the first request still owns it.
+const PUBLICATION_TIMEOUT_MS = 45_000;
 const DIFF_EVENT_ATTEMPTS = 4;
 const STATUS_ATTEMPTS = 4;
+const REVIEW_ATTEMPTS = 4;
+const COMMENT_ATTEMPTS = 4;
 
 export function createReporter(config: RuntimeConfig): Reporter {
   const clean = createRuntimeRedactor();
@@ -52,7 +62,7 @@ export function createReporter(config: RuntimeConfig): Reporter {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
     });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!response.ok || response.status === 202) throw new Error(`HTTP ${response.status}`);
   }
 
   async function postDiff(body: RunEventInput): Promise<void> {
@@ -142,6 +152,48 @@ export function createReporter(config: RuntimeConfig): Reporter {
         }
       }
       throw new Error(`could not persist model credential: ${clean(String(lastError))}`);
+    },
+
+    async review(submission: GithubReviewSubmission): Promise<void> {
+      const body = scrubDeep(submission, clean);
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= REVIEW_ATTEMPTS; attempt += 1) {
+        try {
+          await post(
+            `/internal/runs/${config.runId}/github-review`,
+            body,
+            PUBLICATION_TIMEOUT_MS,
+          );
+          return;
+        } catch (error) {
+          lastError = error;
+          if (attempt < REVIEW_ATTEMPTS) {
+            await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** (attempt - 1)));
+          }
+        }
+      }
+      throw new Error(`could not submit GitHub review: ${clean(String(lastError))}`);
+    },
+
+    async comment(submission: GithubCommentSubmission): Promise<void> {
+      const body = scrubDeep(submission, clean);
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= COMMENT_ATTEMPTS; attempt += 1) {
+        try {
+          await post(
+            `/internal/runs/${config.runId}/github-comment`,
+            body,
+            PUBLICATION_TIMEOUT_MS,
+          );
+          return;
+        } catch (error) {
+          lastError = error;
+          if (attempt < COMMENT_ATTEMPTS) {
+            await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** (attempt - 1)));
+          }
+        }
+      }
+      throw new Error(`could not submit GitHub comment: ${clean(String(lastError))}`);
     },
 
     async flush(): Promise<void> {

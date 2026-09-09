@@ -1,8 +1,8 @@
 # @pi-cloud-agent/vcs
 
-One job: **resolve connected VCS identities into repository metadata and run credentials**. The dashboard uses read-only metadata, while the controller mints a token for a run.
+One job: **resolve connected VCS identities into repository metadata, run credentials, and trusted integration actuators**. The dashboard uses read-only metadata, while the controller mints a token for a run.
 
-There is no write side. The agent posts its own comments and pushes its own commits from inside the sandbox using the token minted here, so this package has no publish method, no comment API, and no diff fetching.
+The sandbox still has no VCS client. GitHub reviews and comment replies are narrow controller-side actuators: the untrusted runtime sends a validated structured submission to the controller, and this package posts against the pinned PR or original comment. Repository code never receives a GitHub API client or publication permission through this path. The controller requires a short-lived installation token minted from the App's private key; it never uses the connected user token for publication.
 
 **Depends on:** `@pi-cloud-agent/protocol`, `zod`. OAuth uses the platform `fetch` and `node:crypto` for PKCE; there is no provider SDK or JWT dependency.
 
@@ -12,7 +12,8 @@ There is no write side. The agent posts its own comments and pushes its own comm
 |---|---|
 | `index.ts` | the `FACTORIES` registry, `createVcsProvider`, `vcsProviderNames` |
 | `http.ts` | `fetchJson` with a timeout and error context |
-| `github.ts` | GitHub App user-token identity and repository adapter |
+| `github.ts` | GitHub user-token identity, installation verification, App-token minting, and review/comment actuators |
+| `github-repositories.ts` | paginated installation/repository/open PR reads; errors remain explicit for review diagnostics |
 | `azure-devops.ts` | Azure DevOps through Microsoft Entra delegated OAuth |
 | `oauth.ts` | OAuth authorization, exchange, refresh, and identity lookup |
 | `index.test.ts` | the provider registry |

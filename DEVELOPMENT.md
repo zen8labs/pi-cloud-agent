@@ -23,13 +23,18 @@ LLM_ENCRYPTION_KEY=<different-64-hex-characters>
 
 GITHUB_APP_CLIENT_ID=<github-app-client-id>
 GITHUB_APP_CLIENT_SECRET=<github-app-client-secret>
+GITHUB_WEBHOOK_SECRET=<high-entropy-webhook-secret>
+GITHUB_MENTION=@pi-cloud-agent
+# Optional: App-authored reviews/replies (Advanced settings -> Generate private key)
+GITHUB_APP_ID=<numeric-github-app-id>
+GITHUB_APP_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
 ```
 
 After signing in, add an API-key or subscription connection in **Settings**. The endpoint type selection derives the provider and API format; users do not enter a provider ID.
 
 Keep the default local sandbox values unless you are intentionally using E2B.
 
-Configure the GitHub App callback as `http://localhost:8080/auth/github/callback`. The dashboard requires GitHub App sign-in by default, so `APP_SESSION_SECRET`, `GITHUB_APP_CLIENT_ID`, and `GITHUB_APP_CLIENT_SECRET` must be valid before the controller starts.
+Configure the GitHub App callback as `http://localhost:8080/auth/github/callback`. The dashboard requires GitHub App sign-in by default, so `APP_SESSION_SECRET`, `GITHUB_APP_CLIENT_ID`, and `GITHUB_APP_CLIENT_SECRET` must be valid before the controller starts. Webhook delivery also needs a public HTTPS URL; use the tunnel described below when GitHub cannot reach your laptop.
 
 ### 2. Run setup
 
@@ -55,11 +60,24 @@ Stop the development process with `Ctrl-C`. Postgres remains running and can be 
 
 ## GitHub App setup
 
-Create a GitHub App from **GitHub Settings → Developer settings → GitHub Apps → New GitHub App**. Set the local homepage to `http://localhost:3000` and the user authorization callback to `http://localhost:8080/auth/github/callback`. Enable user authorization during installation, keep user-to-server token expiration enabled, and grant the following repository permissions:
+Create a GitHub App from **GitHub Settings → Developer settings → GitHub Apps → New GitHub App**. Set the homepage to `http://localhost:3000`, the user authorization callback (Redirect URI) to `http://localhost:8080/auth/github/callback`, and the Setup URL to `https://<public-controller-host>/integrations/github/setup`. Keep user-to-server token expiration enabled. Disable **Request user authorization (OAuth) during installation** so GitHub shows the Setup URL. The setup callback redirects to the dashboard, which completes the authenticated installation binding; this works even when the dashboard is on localhost and the webhook controller is on ngrok. The OAuth client id/secret, numeric App id, private key, webhook secret, and installation must all belong to this same GitHub App; do not mix a production App with a `-dev` App.
+
+Configure the App webhook as:
+
+- **Active:** on
+- **Payload URL:** `https://<public-controller-host>/webhooks/github`
+- **Content type:** `application/json`
+- **Secret:** the same high-entropy value as `GITHUB_WEBHOOK_SECRET`
+- **Events:** Pull requests, Issue comments, and Pull request review comments
+
+The controller filters actions to pull-request `opened`, `reopened`, `ready_for_review`, and `synchronize`, plus newly created comments that mention `GITHUB_MENTION`. It acknowledges a verified delivery quickly, stores it durably by `X-GitHub-Delivery`, and processes it asynchronously.
+
+Grant the following repository permissions:
 
 - **Contents: Read and write** — clone private repositories and push agent branches and commits.
 - **Metadata: Read-only** — resolve repository and branch metadata.
 - **Pull requests: Read and write** — read pull requests and create, update, and review them.
+- **Issues: Read-only** — receive PR conversation events. The existing **Pull requests: Read and write** permission also authorizes comments on pull requests; add Issues: write only if non-PR issue replies become a supported trigger.
 
 Do not grant **Workflows** unless the agent is explicitly allowed to edit `.github/workflows/**`. Install the App only on repositories that the agent should access. Organization owners may need to approve the installation or later permission increases. After changing permissions, reapprove the installation and reconnect the GitHub identity.
 
@@ -69,7 +87,21 @@ Copy the App Client ID and Client Secret into `.env` using the names already pre
 GITHUB_APP_CLIENT_ID=<client-id>
 GITHUB_APP_CLIENT_SECRET=<client-secret>
 GITHUB_APP_REDIRECT_URI=http://localhost:8080/auth/github/callback
+GITHUB_WEBHOOK_SECRET=<same-secret-configured-on-the-App>
+GITHUB_MENTION=@pi-cloud-agent
+GITHUB_APP_ID=<numeric-app-id>
+GITHUB_APP_PRIVATE_KEY="<PEM private key; escaped newlines are accepted>"
 ```
+
+Then validate the binding in this order:
+
+1. Start the controller and dashboard, open the GitHub sign-in flow, and connect the GitHub identity.
+2. From the App's **Install App** link, install it on a test repository. GitHub redirects to the Setup URL with `installation_id`; the callback returns to dashboard Settings, where the signed-in browser verifies the installation through the connected user token and stores the binding.
+3. Open a test PR. The webhook should return `202`, create one `integration_deliveries` row, and enqueue one review session. Duplicate deliveries remain one row.
+4. The review sandbox clones the PR head repository at the exact head SHA, fetches the base SHA for diff context, and calls the structured controller tool once. The controller posts one GitHub review with a Markdown summary plus inline diff comments.
+5. A comment containing `GITHUB_MENTION` creates a task session pinned to the PR head. The agent must call `reply_github_comment` once; the controller publishes a reply to the original comment and records the result durably.
+
+When `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` are configured, controller-owned reviews and replies use a one-hour installation token and appear as the App (for example `zen8agent[bot]`). The connected user token remains the OAuth/login and checkout credential; it is used for publication only when App credentials are intentionally not configured. A configured App that cannot mint a token fails publication instead of silently changing attribution. Keep the private key only in the controller environment; it is never passed to a sandbox.
 
 ## Optional: Azure DevOps
 
