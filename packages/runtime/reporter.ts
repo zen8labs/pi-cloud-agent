@@ -62,7 +62,7 @@ export function createReporter(config: RuntimeConfig): Reporter {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
     });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!response.ok || response.status === 202) throw new Error(`HTTP ${response.status}`);
   }
 
   async function postDiff(body: RunEventInput): Promise<void> {

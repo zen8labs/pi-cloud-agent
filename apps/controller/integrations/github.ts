@@ -9,6 +9,7 @@ import {
 } from "@pi-cloud-agent/protocol";
 import { fetchGithubPullRequestRevision, verifyGithubInstallation } from "@pi-cloud-agent/vcs";
 import { type Context, Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import { queueSessionCommand } from "../commands/session";
 import type { Config } from "../config";
@@ -16,6 +17,7 @@ import type { Database } from "../db/client";
 import {
   claimIntegrationDelivery,
   finishIntegrationDelivery,
+  GithubInstallationOwnedError,
   getGithubInstallation,
   recordIntegrationDelivery,
   upsertGithubInstallation,
@@ -33,41 +35,45 @@ const githubPayloadSchema = z.record(z.string(), z.unknown());
 export function githubWebhookRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
-  app.post("/github", async (c) => {
-    const secret = c.get("config").github.webhookSecret;
-    if (!secret) return c.json({ error: "GitHub webhook intake is not configured" }, 503);
+  app.post(
+    "/github",
+    bodyLimit({
+      maxSize: MAX_WEBHOOK_BYTES,
+      onError: (c) => c.json({ error: "GitHub webhook payload is too large" }, 413),
+    }),
+    async (c) => {
+      const secret = c.get("config").github.webhookSecret;
+      if (!secret) return c.json({ error: "GitHub webhook intake is not configured" }, 503);
 
-    const deliveryId = c.req.header("x-github-delivery")?.trim();
-    const eventType = c.req.header("x-github-event")?.trim();
-    if (!deliveryId || !eventType) {
-      return c.json({ error: "GitHub delivery headers are required" }, 400);
-    }
-    const body = await c.req.text();
-    if (new TextEncoder().encode(body).byteLength > MAX_WEBHOOK_BYTES) {
-      return c.json({ error: "GitHub webhook payload is too large" }, 413);
-    }
-    if (!verifyGithubSignature(body, c.req.header("x-hub-signature-256"), secret)) {
-      return c.json({ error: "invalid GitHub webhook signature" }, 401);
-    }
-    let json: unknown;
-    try {
-      json = JSON.parse(body) as unknown;
-    } catch {
-      return c.json({ error: "GitHub webhook payload is not valid JSON" }, 422);
-    }
-    const parsed = githubPayloadSchema.safeParse(json);
-    if (!parsed.success)
-      return c.json({ error: "GitHub webhook payload must be an object" }, 422);
+      const deliveryId = c.req.header("x-github-delivery")?.trim();
+      const eventType = c.req.header("x-github-event")?.trim();
+      if (!deliveryId || !eventType) {
+        return c.json({ error: "GitHub delivery headers are required" }, 400);
+      }
+      const body = await c.req.text();
+      if (!verifyGithubSignature(body, c.req.header("x-hub-signature-256"), secret)) {
+        return c.json({ error: "invalid GitHub webhook signature" }, 401);
+      }
+      let json: unknown;
+      try {
+        json = JSON.parse(body) as unknown;
+      } catch {
+        return c.json({ error: "GitHub webhook payload is not valid JSON" }, 422);
+      }
+      const parsed = githubPayloadSchema.safeParse(json);
+      if (!parsed.success)
+        return c.json({ error: "GitHub webhook payload must be an object" }, 422);
 
-    const inserted = await recordIntegrationDelivery(c.get("database"), {
-      provider: "github",
-      deliveryId,
-      eventType,
-      action: stringValue(parsed.data.action),
-      payload: parsed.data,
-    });
-    return c.json({ accepted: true, duplicate: !inserted }, 202);
-  });
+      const inserted = await recordIntegrationDelivery(c.get("database"), {
+        provider: "github",
+        deliveryId,
+        eventType,
+        action: stringValue(parsed.data.action),
+        payload: parsed.data,
+      });
+      return c.json({ accepted: true, duplicate: !inserted }, 202);
+    },
+  );
 
   return app;
 }
@@ -139,12 +145,19 @@ async function bindGithubInstallation(
       403,
     );
   }
-  await upsertGithubInstallation(c.get("database"), {
-    installationId: installation.id,
-    userId: user.id,
-    accountId: installation.accountId,
-    accountLogin: installation.accountLogin,
-  });
+  try {
+    await upsertGithubInstallation(c.get("database"), {
+      installationId: installation.id,
+      userId: user.id,
+      accountId: installation.accountId,
+      accountLogin: installation.accountLogin,
+    });
+  } catch (error) {
+    if (error instanceof GithubInstallationOwnedError) {
+      return c.json({ error: error.message }, 409);
+    }
+    throw error;
+  }
   if (c.req.method === "POST")
     return c.json({ ok: true, accountLogin: installation.accountLogin });
   return c.redirect(`${config.web.url}/settings?github=connected`);
@@ -184,7 +197,6 @@ export async function processPendingGithubDeliveries(
   }
 }
 
-/** GitHub webhook payloads encode installation ids as JSON numbers. */
 export function githubInstallationId(payload: Record<string, unknown>): string | null {
   const id = numberValue(record(payload, "installation")?.id);
   return id ? String(id) : null;

@@ -137,32 +137,39 @@ export async function verifyGithubInstallation(
   installationId: string,
   expectedAppId?: string,
 ): Promise<GithubInstallation | null> {
-  const parsed = await fetchJson<{
-    installations?: Array<{
-      id?: number;
-      app_id?: number;
-      account?: { id?: number; login?: string };
-    }>;
-  }>(`${API_BASE}/user/installations?per_page=100`, {
-    headers: apiHeaders(accessToken),
-  });
-  const installation = parsed.installations?.find(
-    (candidate) => String(candidate.id) === installationId,
-  );
-  if (
-    !installation?.id ||
-    !installation.app_id ||
-    !installation.account?.id ||
-    !installation.account.login ||
-    (expectedAppId !== undefined && String(installation.app_id) !== expectedAppId)
-  )
-    return null;
-  return {
-    id: String(installation.id),
-    appId: String(installation.app_id),
-    accountId: String(installation.account.id),
-    accountLogin: installation.account.login,
-  };
+  for (let page = 1; ; page += 1) {
+    const parsed = await fetchJson<{
+      installations?: Array<{
+        id?: number;
+        app_id?: number;
+        account?: { id?: number; login?: string };
+      }>;
+    }>(`${API_BASE}/user/installations?per_page=100&page=${page}`, {
+      headers: apiHeaders(accessToken),
+    });
+    const installations = parsed.installations ?? [];
+    const installation = installations.find(
+      (candidate) => String(candidate.id) === installationId,
+    );
+    if (installation) {
+      if (
+        !installation.id ||
+        !installation.app_id ||
+        !installation.account?.id ||
+        !installation.account.login ||
+        (expectedAppId !== undefined && String(installation.app_id) !== expectedAppId)
+      ) {
+        return null;
+      }
+      return {
+        id: String(installation.id),
+        appId: String(installation.app_id),
+        accountId: String(installation.account.id),
+        accountLogin: installation.account.login,
+      };
+    }
+    if (installations.length < 100) return null;
+  }
 }
 
 /** Trusted controller actuator for one structured pull-request review. */

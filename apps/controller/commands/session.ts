@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import type { OwnedSessionCommand, SessionCommand, Trigger } from "@pi-cloud-agent/protocol";
 import type { Config } from "../config";
 import type { Database } from "../db/client";
-import { getExternalThread } from "../db/integrations";
+import { getExternalThread, getRunByIntegrationDelivery } from "../db/integrations";
 import { getLlmConnection } from "../db/llm-connections";
 import { type CreateRunInput, createRun } from "../db/runs";
 import { createSessionTurn, createSessionWithRun, getSession } from "../db/sessions";
@@ -21,6 +21,24 @@ export interface QueueSessionCommandResult {
 
 /** The single trusted command path shared by chat and external integrations. */
 export async function queueSessionCommand(
+  database: Database,
+  config: Config,
+  command: OwnedSessionCommand,
+): Promise<QueueSessionCommandResult> {
+  const existingDelivery = await runForDelivery(database, command);
+  if (existingDelivery) return commandResult(existingDelivery);
+
+  try {
+    return await queueNewSessionCommand(database, config, command);
+  } catch (error) {
+    if (!isUniqueViolation(error)) throw error;
+    const racedDelivery = await runForDelivery(database, command);
+    if (racedDelivery) return commandResult(racedDelivery);
+    throw error;
+  }
+}
+
+async function queueNewSessionCommand(
   database: Database,
   config: Config,
   command: OwnedSessionCommand,
@@ -72,6 +90,18 @@ export async function queueSessionCommand(
     sessionInput(command, model, trigger, title),
   );
   return { sessionId: created.session.id, runId: created.run.id, turnNumber: 1 };
+}
+
+async function runForDelivery(database: Database, command: SessionCommand) {
+  const deliveryId = command.provenance.deliveryId;
+  return deliveryId
+    ? getRunByIntegrationDelivery(database, command.provenance.source, deliveryId)
+    : null;
+}
+
+function commandResult(run: Awaited<ReturnType<typeof getRunByIntegrationDelivery>>) {
+  if (!run) throw new Error("integration delivery run is unavailable");
+  return { sessionId: run.sessionId, runId: run.id, turnNumber: run.turnNumber };
 }
 
 function sessionInput(

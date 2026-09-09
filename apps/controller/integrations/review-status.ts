@@ -95,6 +95,11 @@ function attemptStatus({
       "failed",
       "Review generated, but publishing to GitHub failed. Open the session for details.",
     );
+  if (publication?.status === "uncertain")
+    return state(
+      "failed",
+      "GitHub may have accepted the review, but publication could not be confirmed. Inspect GitHub before retrying.",
+    );
   if (run.status === "failed")
     return state("failed", run.error || "Review failed. Open the session for details.");
   if (run.status === "cancelled") return state("cancelled", "Review cancelled.");

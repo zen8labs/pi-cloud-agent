@@ -2,7 +2,7 @@
 
 One job: **resolve connected VCS identities into repository metadata, run credentials, and trusted integration actuators**. The dashboard uses read-only metadata, while the controller mints a token for a run.
 
-The sandbox still has no VCS client. GitHub reviews and comment replies are narrow controller-side actuators: the untrusted runtime sends a validated structured submission to the controller, and this package posts against the pinned PR or original comment. Repository code never receives a GitHub API client or publication permission through this path. When configured, the controller mints installation tokens from the App's private key; otherwise it uses the connected user token as a compatibility fallback.
+The sandbox still has no VCS client. GitHub reviews and comment replies are narrow controller-side actuators: the untrusted runtime sends a validated structured submission to the controller, and this package posts against the pinned PR or original comment. Repository code never receives a GitHub API client or publication permission through this path. The controller requires a short-lived installation token minted from the App's private key; it never uses the connected user token for publication.
 
 **Depends on:** `@pi-cloud-agent/protocol`, `zod`. OAuth uses the platform `fetch` and `node:crypto` for PKCE; there is no provider SDK or JWT dependency.
 

@@ -181,6 +181,17 @@ describe("reporter", () => {
     ]);
   });
 
+  it("does not treat an accepted-but-pending publication as complete", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 202 })),
+    );
+    const reporter = createReporter(readConfig());
+    await expect(reporter.review({ body: "Review", comments: [] })).rejects.toThrow(
+      /could not submit GitHub review/,
+    );
+  });
+
   it("uses the same redactor for stderr-bound failures", () => {
     const clean = createRuntimeRedactor();
     const output = clean(`model=${MODEL_KEY} callback=${CALLBACK_TOKEN}`);

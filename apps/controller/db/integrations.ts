@@ -10,12 +10,21 @@ import {
   githubReviewPublications,
   type IntegrationDeliveryRow,
   integrationDeliveries,
+  type RunRow,
+  runs,
 } from "./schema";
 
 const DELIVERY_LEASE_MS = 5 * 60 * 1000;
 const DELIVERY_RETRY_DELAY_MS = 10 * 1000;
 const MAX_DELIVERY_ATTEMPTS = 5;
 const PUBLICATION_LEASE_MS = 5 * 60 * 1000;
+
+export class GithubInstallationOwnedError extends Error {
+  constructor() {
+    super("GitHub installation is already connected to another user");
+    this.name = "GithubInstallationOwnedError";
+  }
+}
 
 export async function recordIntegrationDelivery(
   database: Database,
@@ -118,6 +127,21 @@ export async function finishIntegrationDelivery(
   return updated.length > 0;
 }
 
+export async function getRunByIntegrationDelivery(
+  database: Database,
+  provider: string,
+  deliveryId: string,
+): Promise<RunRow | null> {
+  const [row] = await database
+    .select()
+    .from(runs)
+    .where(
+      and(eq(runs.integrationProvider, provider), eq(runs.integrationDeliveryId, deliveryId)),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
 export async function upsertGithubInstallation(
   database: Database,
   input: {
@@ -139,9 +163,10 @@ export async function upsertGithubInstallation(
         active: true,
         updatedAt: new Date(),
       },
+      setWhere: eq(githubInstallations.userId, input.userId),
     })
     .returning();
-  if (!row) throw new Error("could not save GitHub installation");
+  if (!row) throw new GithubInstallationOwnedError();
   return row;
 }
 
@@ -217,7 +242,11 @@ export async function beginGithubReviewPublication(
 export async function finishGithubReviewPublication(
   database: Database,
   runId: string,
-  result: { status: "published" | "failed"; githubReviewId?: string; error?: string },
+  result: {
+    status: "published" | "failed" | "uncertain";
+    githubReviewId?: string;
+    error?: string;
+  },
 ): Promise<boolean> {
   const updated = await database
     .update(githubReviewPublications)
@@ -296,31 +325,39 @@ async function beginGithubPublication(
       .for("update");
     if (!existing) return null;
     if (existing.status === "published") return { publication: existing, claimed: false };
-    const leaseExpired = existing.updatedAt.getTime() <= Date.now() - PUBLICATION_LEASE_MS;
-    if (existing.status === "processing" && !leaseExpired) {
-      return { publication: existing, claimed: false };
+    if (
+      existing.status === "processing" &&
+      existing.updatedAt.getTime() <= Date.now() - PUBLICATION_LEASE_MS
+    ) {
+      const [uncertain] = await tx
+        .update(table)
+        .set({
+          status: "uncertain",
+          lastError: "publication ownership expired before the provider result was recorded",
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(table.runId, runId),
+            eq(table.status, "processing"),
+            eq(table.updatedAt, existing.updatedAt),
+          ),
+        )
+        .returning();
+      return { publication: uncertain ?? existing, claimed: false };
     }
-    const [reopened] = await tx
-      .update(table)
-      .set({ status: "processing", submission, lastError: null, updatedAt: new Date() })
-      .where(
-        and(
-          eq(table.runId, runId),
-          eq(table.status, existing.status),
-          eq(table.updatedAt, existing.updatedAt),
-        ),
-      )
-      .returning();
-    return reopened
-      ? { publication: reopened, claimed: true }
-      : { publication: existing, claimed: false };
+    return { publication: existing, claimed: false };
   });
 }
 
 export async function finishGithubCommentPublication(
   database: Database,
   runId: string,
-  result: { status: "published" | "failed"; githubCommentId?: string; error?: string },
+  result: {
+    status: "published" | "failed" | "uncertain";
+    githubCommentId?: string;
+    error?: string;
+  },
 ): Promise<boolean> {
   const updated = await database
     .update(githubCommentPublications)

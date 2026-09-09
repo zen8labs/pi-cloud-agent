@@ -36,7 +36,6 @@ import {
 } from "../db/sessions";
 import { persistRefreshedOAuthCredential } from "../llm/connections";
 import type { Observability } from "../observability";
-import { getVcsAccessToken } from "../vcs/connections";
 import type { AppEnv } from "./deps";
 
 /**
@@ -159,6 +158,7 @@ export function internalRoutes(observability?: Observability): Hono<AppEnv> {
     const run = await requireRun(c, c.req.param("runId"));
     if (run instanceof Response) return run;
     if (
+      run.status !== "running" ||
       run.trigger.intent !== "github_review" ||
       !run.userId ||
       !run.trigger.integrationId ||
@@ -171,13 +171,14 @@ export function internalRoutes(observability?: Observability): Hono<AppEnv> {
     if (!parsed.success || !validReviewSubmission(parsed.data)) {
       return c.json({ error: "invalid GitHub review submission" }, 422);
     }
-    return publishGithubReview(c, run, parsed.data, run.userId, run.trigger.repo.prNumber);
+    return publishGithubReview(c, run, parsed.data, run.trigger.repo.prNumber);
   });
 
   app.post("/runs/:runId/github-comment", async (c) => {
     const run = await requireRun(c, c.req.param("runId"));
     if (
       run instanceof Response ||
+      run.status !== "running" ||
       run.trigger.intent !== "github_task" ||
       !run.userId ||
       !run.trigger.repo.prNumber ||
@@ -190,7 +191,7 @@ export function internalRoutes(observability?: Observability): Hono<AppEnv> {
       await c.req.json().catch(() => null),
     );
     if (!parsed.success) return c.json({ error: "invalid GitHub comment submission" }, 422);
-    return publishGithubComment(c, run, parsed.data, run.userId, run.trigger.repo.prNumber);
+    return publishGithubComment(c, run, parsed.data, run.trigger.repo.prNumber);
   });
 
   return app;
@@ -244,7 +245,6 @@ async function publishGithubReview(
   c: Context<AppEnv>,
   run: RunRow,
   submission: GithubReviewSubmission,
-  userId: string,
   pullNumber: number,
 ): Promise<Response> {
   const database = c.get("database");
@@ -254,8 +254,14 @@ async function publishGithubReview(
   if (publication.status === "published") {
     return c.json({ ok: true, reviewId: publication.githubReviewId, duplicate: true });
   }
-  if (!claim.claimed) return c.json({ ok: true, pending: true }, 202);
-  const accessToken = await githubPublicationToken(c, userId, run.trigger.integrationId);
+  if (!claim.claimed) {
+    const message =
+      publication.status === "processing"
+        ? "GitHub review publication is still processing"
+        : `GitHub review publication is ${publication.status}`;
+    return c.json({ error: message }, 409);
+  }
+  const accessToken = await githubPublicationToken(c, run.trigger.integrationId);
   if (!accessToken) {
     await finishGithubReviewPublication(database, run.id, {
       status: "failed",
@@ -279,7 +285,10 @@ async function publishGithubReview(
     return c.json({ ok: true, reviewId: review.id });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    await finishGithubReviewPublication(database, run.id, { status: "failed", error: detail });
+    await finishGithubReviewPublication(database, run.id, {
+      status: "uncertain",
+      error: detail,
+    });
     c.get("log").error("GitHub review publication failed", { runId: run.id, error });
     return c.json({ error: "GitHub review publication failed" }, 502);
   }
@@ -289,7 +298,6 @@ async function publishGithubComment(
   c: Context<AppEnv>,
   run: RunRow,
   submission: GithubCommentSubmission,
-  userId: string,
   pullNumber: number,
 ): Promise<Response> {
   const database = c.get("database");
@@ -299,7 +307,13 @@ async function publishGithubComment(
   if (publication.status === "published") {
     return c.json({ ok: true, commentId: publication.githubCommentId, duplicate: true });
   }
-  if (!claim.claimed) return c.json({ ok: true, pending: true }, 202);
+  if (!claim.claimed) {
+    const message =
+      publication.status === "processing"
+        ? "GitHub comment publication is still processing"
+        : `GitHub comment publication is ${publication.status}`;
+    return c.json({ error: message }, 409);
+  }
   const messageId = run.trigger.externalMessageId;
   const integrationId = run.trigger.integrationId;
   if (!messageId || !integrationId) {
@@ -309,7 +323,7 @@ async function publishGithubComment(
     });
     return c.json({ error: "comment target is unavailable" }, 409);
   }
-  const accessToken = await githubPublicationToken(c, userId, integrationId);
+  const accessToken = await githubPublicationToken(c, integrationId);
   if (!accessToken) {
     await finishGithubCommentPublication(database, run.id, {
       status: "failed",
@@ -336,7 +350,10 @@ async function publishGithubComment(
     return c.json({ ok: true, commentId: comment.id });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    await finishGithubCommentPublication(database, run.id, { status: "failed", error: detail });
+    await finishGithubCommentPublication(database, run.id, {
+      status: "uncertain",
+      error: detail,
+    });
     c.get("log").error("GitHub comment publication failed", { runId: run.id, error });
     return c.json({ error: "GitHub comment publication failed" }, 502);
   }
@@ -344,7 +361,6 @@ async function publishGithubComment(
 
 async function githubPublicationToken(
   c: Context<AppEnv>,
-  userId: string,
   installationId: string | undefined,
 ): Promise<string | null> {
   const config = c.get("config");
@@ -363,12 +379,7 @@ async function githubPublicationToken(
       return null;
     }
   }
-  try {
-    return await getVcsAccessToken(c.get("database"), config, "github", userId);
-  } catch (error) {
-    c.get("log").warn("GitHub connected-user token is unavailable", { userId, error });
-    return null;
-  }
+  return null;
 }
 
 async function saveDiffBase(

@@ -47,7 +47,7 @@ await queueSessionCommand(database, config, { ...command, userId });
 Implement the adapter in the trusted controller:
 
 1. Verify the provider signature on the raw request body.
-2. Require a provider delivery id and persist the payload in an inbox table before acknowledging it. A unique `(provider, deliveryId)` key makes retries harmless.
+2. Require a provider delivery id and persist the payload in an inbox table before acknowledging it. A unique `(provider, deliveryId)` key deduplicates intake, while the same unique origin on the created run makes recovery after queueing idempotent.
 3. Return quickly (GitHub returns `202`); process pending deliveries from the reconciler or another durable worker, and retry transient projection failures with a bounded lease/backoff policy.
 4. Ignore unsupported event types/actions, bot senders, and events that do not contain the configured mention or policy signal.
 5. Resolve immutable repository coordinates before queueing: owner/name, clone URLs, base/head branches, and exact SHAs. A comment event often omits these, so fetch the current PR revision before creating the command.
@@ -64,7 +64,7 @@ GitHub is the reference implementation in `apps/controller/integrations/github.t
 
 Agent output that must become an external side effect needs a protocol schema, a runtime tool, an authenticated controller callback, and durable idempotency. For example, GitHub reviews use `submit_github_review`; comment tasks use `reply_github_comment`. The runtime sends structured data only. The controller validates the run's target and calls the provider adapter. Completion is rejected if a required publication was not recorded as successful.
 
-Keep provider credentials in the trusted controller. GitHub publication uses a short-lived App installation token when `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` are configured; the connected user token is used for publication only when App credentials are intentionally not configured and remains useful for checkout. A configured App that cannot mint a token fails publication rather than silently changing attribution. Never pass an App private key to the sandbox.
+Keep provider credentials in the trusted controller. GitHub publication requires a short-lived App installation token minted with `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY`; the connected user token remains useful for checkout but is never used for publication. Missing App credentials or token-minting failures stop publication. Never pass an App private key to the sandbox.
 
 ## Adding another integration
 

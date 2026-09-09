@@ -1,6 +1,8 @@
+import { eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDatabase } from "../db/client";
 import { getRun, listEvents } from "../db/runs";
+import { runs } from "../db/schema";
 import { getSession } from "../db/sessions";
 import {
   resetTables,
@@ -98,5 +100,42 @@ describe("sandbox event retention", () => {
     expect((await listEvents(database, run.id, 0)).map((event) => event.data.event)).toEqual([
       "agent.message_start",
     ]);
+  });
+});
+
+describe("trusted publication callbacks", () => {
+  it("rejects publication from a cancelled run", async () => {
+    const run = await seedRun(database, {
+      trigger: {
+        kind: "pr_opened",
+        source: "github",
+        intent: "github_review",
+        integrationId: "42",
+        prompt: "Review this PR",
+        repo: {
+          provider: "github",
+          host: "github.com",
+          owner: "acme",
+          name: "widgets",
+          cloneUrl: "https://github.com/acme/widgets.git",
+          defaultBranch: "main",
+          baseSha: "base",
+          headSha: "head",
+          headBranch: "feature",
+          prNumber: 7,
+        },
+      },
+    });
+    await database.update(runs).set({ status: "cancelled" }).where(eq(runs.id, run.id));
+    const app = createApp({ config: testConfig(), database, log: silentLogger() });
+    const response = await app.request(`/internal/runs/${run.id}/github-review`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${run.callbackToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ body: "Review", comments: [] }),
+    });
+    expect(response.status).toBe(409);
   });
 });

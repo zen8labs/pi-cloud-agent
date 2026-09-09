@@ -237,20 +237,18 @@ export const runs = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id").references(() => appUsers.id, { onDelete: "set null" }),
 
-    /** Null for standalone background runs; set for interactive turns. */
     sessionId: uuid("session_id").references(() => sessions.id, { onDelete: "cascade" }),
     turnNumber: integer("turn_number"),
 
     status: text("status").notNull().default("queued").$type<RunStatus>(),
 
-    /** Coordinates the trusted side needs: token minting, listing, filtering. */
     provider: text("provider").notNull(),
     repoFullName: text("repo_full_name").notNull(),
 
-    /** The normalized request/event, verbatim, for replay and diagnosis. */
     trigger: jsonb("trigger").notNull().$type<Trigger>(),
+    integrationProvider: text("integration_provider"),
+    integrationDeliveryId: text("integration_delivery_id"),
 
-    /** Resolved at creation so a run is reproducible even if config changes. */
     model: text("model").notNull(),
     thinkingLevel: text("thinking_level").notNull().default("medium").$type<ThinkingLevel>(),
     modelConnectionId: uuid("model_connection_id").references(() => llmConnections.id, {
@@ -304,6 +302,10 @@ export const runs = pgTable(
     index("runs_status_created_idx").on(table.status, table.createdAt),
     // The dashboard's list.
     index("runs_created_idx").on(table.createdAt.desc()),
+    uniqueIndex("runs_integration_delivery_idx").on(
+      table.integrationProvider,
+      table.integrationDeliveryId,
+    ),
     // The reconciler's sweep over in-flight work.
     index("runs_sandbox_idx")
       .on(table.sandboxId)
@@ -380,7 +382,7 @@ export const githubInstallations = pgTable(
   (table) => [index("github_installations_user_idx").on(table.userId)],
 );
 
-export type GithubReviewPublicationStatus = "processing" | "published" | "failed";
+export type GithubReviewPublicationStatus = "processing" | "published" | "failed" | "uncertain";
 
 export const githubReviewRepositories = defineReviewRepositories(
   () => githubInstallations.installationId,
@@ -405,7 +407,7 @@ export const githubReviewPublications = pgTable("github_review_publications", {
 
 export type ObservabilityExportStatus = "pending" | "processing" | "exported" | "failed";
 
-export type GithubCommentPublicationStatus = "processing" | "published" | "failed";
+export type GithubCommentPublicationStatus = GithubReviewPublicationStatus;
 
 /** One trusted actuation record per comment task, preventing duplicate replies. */
 export const githubCommentPublications = pgTable("github_comment_publications", {

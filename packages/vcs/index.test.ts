@@ -41,7 +41,41 @@ describe("provider registry", () => {
       accountLogin: "acme",
     });
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "https://api.github.com/user/installations?per_page=100",
+      "https://api.github.com/user/installations?per_page=100&page=1",
+    );
+  });
+
+  it("continues through installation-list pages", async () => {
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      id: index + 1,
+      app_id: 3738122,
+      account: { id: 42, login: "acme" },
+    }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ installations: firstPage }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            installations: [
+              { id: 153583609, app_id: 3738122, account: { id: 42, login: "acme" } },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(verifyGithubInstallation("token", "153583609")).resolves.toMatchObject({
+      id: "153583609",
+    });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "https://api.github.com/user/installations?per_page=100&page=2",
     );
   });
 

@@ -15,7 +15,12 @@ import {
   upsertGithubInstallation,
 } from "../db/integrations";
 import { isAutoReviewEnabled } from "../db/reviews";
-import { githubInstallations, integrationDeliveries, runs } from "../db/schema";
+import {
+  githubInstallations,
+  githubReviewPublications,
+  integrationDeliveries,
+  runs,
+} from "../db/schema";
 import { upsertVcsConnection } from "../db/vcs-connections";
 import { processPendingGithubDeliveries } from "../integrations/github";
 import { encryptSecret } from "../secrets/crypto";
@@ -166,6 +171,19 @@ it("shows GitHub PRs even when no webhook or review session exists", async () =>
   });
 });
 
+it("rejects an oversized webhook before the handler buffers it", async () => {
+  const response = await app.request("/webhooks/github", {
+    method: "POST",
+    body: "x".repeat(2 * 1024 * 1024 + 1),
+    headers: {
+      "x-github-delivery": "oversized",
+      "x-github-event": "pull_request",
+      "x-hub-signature-256": "sha256=invalid",
+    },
+  });
+  expect(response.status).toBe(413);
+});
+
 it("checks repository permissions again before enabling, but permits disabling", async () => {
   expect((await toggle(true)).status).toBe(200);
   canPublish = false;
@@ -220,7 +238,15 @@ it("persists disabled and draft decisions without launching a review", async () 
 it("connects an enabled webhook to its ordinary session, publication and current commit", async () => {
   await toggle(true);
   await deliver("review-event");
-  await deliver("review-event");
+  await database
+    .update(integrationDeliveries)
+    .set({
+      status: "processing",
+      claimedAt: new Date(Date.now() - 6 * 60 * 1000),
+      runId: null,
+    })
+    .where(eq(integrationDeliveries.deliveryId, "review-event"));
+  await processPendingGithubDeliveries(database, config, silentLogger());
   const [run] = await database.select().from(runs);
   if (!run) throw new Error("expected queued review");
   expect(await database.select().from(runs)).toHaveLength(1);
@@ -239,11 +265,13 @@ it("connects an enabled webhook to its ordinary session, publication and current
     status: "failed",
     detail: expect.stringContaining("publishing"),
   });
-  await beginGithubReviewPublication(database, run.id, { body: "No findings", comments: [] });
-  await finishGithubReviewPublication(database, run.id, {
-    status: "published",
-    githubReviewId: "1234",
-  });
+  await database
+    .update(githubReviewPublications)
+    .set({
+      status: "published",
+      githubReviewId: "1234",
+    })
+    .where(eq(githubReviewPublications.runId, run.id));
   expect((await inbox()).pullRequests[0]).toMatchObject({
     status: "reviewed",
     reviewUrl: "https://github.com/acme/widgets/pull/7#pullrequestreview-1234",
