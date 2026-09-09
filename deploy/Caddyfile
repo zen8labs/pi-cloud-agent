@@ -1,0 +1,21 @@
+# Reverse proxy for the controller on EC2.
+#
+# Copy this file to /etc/caddy/Caddyfile on the instance, then:
+#   sudo systemctl reload caddy
+#
+# TLS: Cloudflare Origin Certificate (not Let's Encrypt).
+# Place the files Cloudflare gives you at:
+#   /etc/caddy/certs/zen8agent.pem   (certificate)
+#   /etc/caddy/certs/zen8agent.key   (private key)
+#
+# Public URL: https://zen8agent.theprimitiveworks.com/_api/...
+# A Cloudflare Worker (free) strips /_api and fetches this origin hostname.
+# Traffic that reaches Caddy is already the controller's real paths.
+
+zen8agent-api.theprimitiveworks.com {
+	tls /etc/caddy/certs/zen8agent.pem /etc/caddy/certs/zen8agent.key
+
+	reverse_proxy 127.0.0.1:8080 {
+		flush_interval -1
+	}
+}

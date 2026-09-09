@@ -1,18 +1,26 @@
-# Local Postgres and controller.
+# Postgres and the controller. Same file locally and on the server.
 #
-# The sandbox runtime does not run here — it runs on whichever sandbox provider is
-# configured, and it reaches the controller at CONTROL_PLANE_URL. For a hosted
-# provider that has to be a publicly reachable URL, not localhost.
+# Ports bind to 127.0.0.1 so they are reachable on this machine (dashboard,
+# `pnpm db:migrate`, tests) and are not published on the public interface.
+# Caddy on the server is the only public listener (443) and proxies /_api.
+#
+# The sandbox runtime does not run here — it runs on whichever sandbox provider
+# is configured, and it reaches the controller at CONTROL_PLANE_URL.
+#
+# On the server, set POSTGRES_PASSWORD in `.env` to a hex string
+# (`openssl rand -hex 16`). Unset, it stays the local-dev default.
+
 services:
   db:
     image: postgres:16
+    restart: unless-stopped
     environment:
       POSTGRES_USER: pi_cloud_agent
-      POSTGRES_PASSWORD: pi_cloud_agent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pi_cloud_agent}
       POSTGRES_DB: pi_cloud_agent
     ports:
       # 5532 rather than 5432, so it does not collide with a local Postgres.
-      - "5532:5432"
+      - "127.0.0.1:5532:5432"
     volumes:
       - pi_cloud_agent_pg:/var/lib/postgresql/data
     healthcheck:
@@ -25,12 +33,13 @@ services:
     build:
       context: .
       dockerfile: apps/controller/Dockerfile
+    restart: unless-stopped
     env_file: .env
     environment:
       # Reach the compose service rather than whatever .env says for host use.
-      DATABASE_URL: postgres://pi_cloud_agent:pi_cloud_agent@db:5432/pi_cloud_agent
+      DATABASE_URL: postgres://pi_cloud_agent:${POSTGRES_PASSWORD:-pi_cloud_agent}@db:5432/pi_cloud_agent
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     depends_on:
       db:
         condition: service_healthy
