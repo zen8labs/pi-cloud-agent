@@ -1,24 +1,22 @@
 /**
  * Cloudflare Worker (free plan): send /_api on the public hostname to EC2.
  *
- * Origin Rules cannot override DNS on the free plan. A Worker route can.
+ * AWS security groups on this instance allow 80 (HTTP) and 22, not 443.
+ * Caddy therefore serves plain HTTP. The Worker must fetch http:// (not
+ * https://) and zen8agent-api must be DNS-only (grey cloud). If that record
+ * is orange-clouded, Cloudflare still dials origin :443 and you get 522.
  *
- * Dashboard: Workers & Pages → Create → paste this file → Deploy.
- * Triggers → Routes → Add:
- *   zen8agent.theprimitiveworks.com/_api*
- *
- * The Worker strips /_api so Caddy/the controller see /healthz, /auth, /runs, …
- * redirect: "manual" keeps GitHub OAuth 302s visible to the browser.
+ * Dashboard: Workers & Pages → edit this Worker → Deploy.
+ * Route: zen8agent.theprimitiveworks.com/_api*
  */
 
-const ORIGIN_HOST = "zen8agent-api.theprimitiveworks.com";
+const ORIGIN = "http://zen8agent-api.theprimitiveworks.com";
 
 export default {
   async fetch(request) {
     const incoming = new URL(request.url);
-    const origin = new URL(request.url);
-    origin.hostname = ORIGIN_HOST;
-    origin.pathname = incoming.pathname.replace(/^\/_api/, "") || "/";
+    const origin = new URL(incoming.pathname.replace(/^\/_api/, "") || "/", ORIGIN);
+    origin.search = incoming.search;
 
     const init = {
       method: request.method,
@@ -27,7 +25,6 @@ export default {
     };
     if (request.method !== "GET" && request.method !== "HEAD") {
       init.body = request.body;
-      // Required when forwarding a streamed body (POST JSON, OAuth, sandbox callbacks).
       init.duplex = "half";
     }
     return fetch(origin, init);
