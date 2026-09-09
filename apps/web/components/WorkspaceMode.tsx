@@ -6,11 +6,17 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-const ModeContext = createContext<"tasks" | "reviews">("tasks");
+export type WorkspaceMode = "tasks" | "reviews";
+
+const ModeContext = createContext<WorkspaceMode>("tasks");
+
+export function workspaceHome(mode: WorkspaceMode): "/chat" | "/reviews" {
+  return mode === "reviews" ? "/reviews" : "/chat";
+}
 
 export function WorkspaceModeProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const [mode, setMode] = useState<"tasks" | "reviews">("tasks");
+  const [mode, setMode] = useState<WorkspaceMode>("tasks");
   useEffect(() => {
     let alive = true;
     if (pathname === "/chat") setMode("tasks");

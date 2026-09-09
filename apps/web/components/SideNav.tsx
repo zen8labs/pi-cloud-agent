@@ -9,7 +9,11 @@ import { useEffect, useState } from "react";
 import { AccountMenu } from "@/components/AccountMenu";
 import { useNavCollapse } from "@/components/nav-collapse";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { useWorkspaceMode, WorkspaceModeSwitch } from "@/components/WorkspaceMode";
+import {
+  useWorkspaceMode,
+  WorkspaceModeSwitch,
+  workspaceHome,
+} from "@/components/WorkspaceMode";
 import { api } from "@/lib/api";
 import { formatDuration } from "@/lib/format";
 import { loadSessionTitles } from "@/lib/session-titles";
@@ -83,7 +87,7 @@ export function SideNav() {
       await api.deleteSession(session.id);
       setSessions((current) => current.filter((item) => item.id !== session.id));
       setDeleteTarget(null);
-      if (pathname === `/sessions/${session.id}`) router.push("/");
+      if (pathname === `/sessions/${session.id}`) router.push(workspaceHome(mode));
     } catch (cause) {
       setDeleteError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -108,14 +112,11 @@ export function SideNav() {
           <Brand />
           <CollapseButton />
         </div>
-        <div className="px-2.5">
+        <div className="flex flex-col gap-2.5 px-2.5">
           <WorkspaceModeSwitch />
           {mode === "tasks" && (
-            <Link
-              href="/chat"
-              className={cn("side-nav-link", pathname === "/chat" && "is-active")}
-            >
-              <PlusIcon className="size-3.5" />
+            <Link href="/chat" className="history-link">
+              <PlusIcon className="size-3.5 shrink-0" />
               New task
             </Link>
           )}

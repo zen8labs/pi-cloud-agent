@@ -18,6 +18,7 @@ import { SessionQueue } from "@/components/SessionQueue";
 import { SidebarResizeHandle } from "@/components/SidebarResizeHandle";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { useWorkspaceMode, workspaceHome } from "@/components/WorkspaceMode";
 import { api } from "@/lib/api";
 import { absoluteTime, formatDuration } from "@/lib/format";
 import { resolveBranch, summarizeChanges } from "@/lib/session-meta";
@@ -132,7 +133,7 @@ export default function SessionPage() {
     try {
       await api.deleteSession(session.id);
       setDeleteDialogOpen(false);
-      router.push("/");
+      router.push(workspaceHome(session.hasReviews ? "reviews" : "tasks"));
     } catch (cause) {
       setDeleteError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -289,11 +290,13 @@ function SessionHeader({
   onDelete: () => void;
   deleting: boolean;
 }) {
+  const mode = useWorkspaceMode();
+  const homeMode = session ? (session.hasReviews ? "reviews" : "tasks") : mode;
   return (
     <header className="app-header flex h-12 shrink-0 items-center gap-2.5 px-3 sm:px-4">
       <Link
-        href="/"
-        aria-label="Back to sessions"
+        href={workspaceHome(homeMode)}
+        aria-label={homeMode === "reviews" ? "Back to reviews" : "Back to tasks"}
         className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
       >
         <ArrowLeftIcon className="size-4" />
