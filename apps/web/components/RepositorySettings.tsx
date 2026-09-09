@@ -10,6 +10,7 @@ import { LoaderCircleIcon, PlayIcon, RefreshCwIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { InfoTooltip } from "./LlmConnectionSupport";
 
 export function RepositorySettings() {
   const [data, setData] = useState<ReviewRepositoriesResponse | null>(null);
@@ -60,7 +61,8 @@ export function RepositorySettings() {
           <h2 className="text-xl font-medium tracking-[-0.02em]">Repositories</h2>
           <p className="mt-2 max-w-lg text-xs leading-5 text-muted-foreground">
             Auto-review runs when a non-draft PR is opened or updated. Existing PRs wait for the
-            next push. Reviews use your default model.
+            next push. Reviews use your default model. An environment image is the public Docker
+            image used to start new sessions for a repository.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -98,7 +100,14 @@ export function RepositorySettings() {
         <div className="overflow-hidden rounded-xl border border-border">
           <div className="hidden grid-cols-[minmax(0,1fr)_minmax(0,1fr)_5.5rem] gap-4 border-b border-border bg-muted/30 px-4 py-2.5 text-xs text-muted-foreground sm:grid">
             <span>Repository</span>
-            <span>Environment image</span>
+            <span className="flex items-center gap-1.5">
+              Environment image
+              <InfoTooltip label="Environment image requirements">
+                Use a public Docker image from Docker Hub or GHCR with the tools your project
+                needs. The app adds its agent runtime and manages the checkout inside the
+                isolated sandbox.
+              </InfoTooltip>
+            </span>
             <span className="text-right">Auto-review</span>
           </div>
           <ul className="divide-y divide-border">
