@@ -132,7 +132,7 @@ export function SessionFollowUp({
               disabled={active || modelsLoading}
               ariaLabel="Model for next turn"
               placeholder={modelsLoading ? "Loading models…" : "Choose model"}
-              className="h-7 min-w-0 max-w-44 border-0 bg-transparent px-1.5 text-xs shadow-none dark:bg-transparent"
+              className="h-7 min-w-0 max-w-44 border-0 bg-transparent px-1.5 text-xs shadow-none hover:bg-accent dark:bg-transparent dark:hover:bg-accent"
             />
             <ThinkingLevelSelect
               levels={
@@ -141,7 +141,7 @@ export function SessionFollowUp({
               value={thinkingLevel}
               onChange={setThinkingLevel}
               disabled={active || modelsLoading}
-              className="h-7 min-w-0 max-w-36 border-0 bg-transparent px-1.5 text-xs shadow-none dark:bg-transparent"
+              className="h-7 min-w-0 max-w-36 border-0 bg-transparent px-1.5 text-xs shadow-none hover:bg-accent dark:bg-transparent dark:hover:bg-accent"
             />
           </div>
         }

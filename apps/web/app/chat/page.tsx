@@ -229,7 +229,7 @@ type ComposerOptionsProps = {
 
 function ComposerOptions(props: ComposerOptionsProps) {
   const triggerClass =
-    "h-7 min-w-0 max-w-36 shrink border-0 bg-transparent px-1.5 text-xs shadow-none dark:bg-transparent";
+    "h-7 min-w-0 max-w-36 shrink border-0 bg-transparent px-1.5 text-xs shadow-none hover:bg-accent dark:bg-transparent dark:hover:bg-accent";
   const model = selectedModel(props.modelConnections, props.modelSelection);
   return (
     <>
