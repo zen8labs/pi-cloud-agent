@@ -79,16 +79,11 @@ export function llmRoutes(oauth: OAuthFlowManager): Hono<AppEnv> {
     });
   });
 
-  app.post("/oauth/:flowId/input", async (c) => {
+  app.delete("/oauth/:flowId", (c) => {
     const user = c.get("user");
     if (!user) return c.json({ error: "authentication required" }, 401);
-    const body = await c.req.json().catch(() => null);
-    const value =
-      typeof body === "object" && body !== null ? (body as { value?: unknown }).value : null;
-    if (typeof value !== "string") return c.json({ error: "value is required" }, 422);
-    if (!oauth.submit(c.req.param("flowId"), user.id, value)) {
-      return c.json({ error: "OAuth flow is not waiting for input" }, 409);
-    }
+    if (!oauth.cancel(c.req.param("flowId"), user.id))
+      return c.json({ error: "OAuth flow is no longer active" }, 409);
     return c.json({ ok: true });
   });
 

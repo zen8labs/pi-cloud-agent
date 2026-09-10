@@ -15,7 +15,9 @@ import type { Database } from "../db/client";
 import { listLlmConnections } from "../db/llm-connections";
 import { saveOAuthConnections, toSummary } from "./connections";
 
-const FLOW_TIMEOUT_MS = 10 * 60_000;
+// Pi's Codex device code remains valid for 15 minutes. Leave a small margin so
+// the provider, rather than this wrapper, owns the terminal expiry message.
+const FLOW_TIMEOUT_MS = 16 * 60_000;
 const TERMINAL_RETENTION_MS = 5 * 60_000;
 
 const PROVIDER = {
@@ -27,18 +29,14 @@ const PROVIDER = {
 
 export type OAuthFlowEvent =
   | { type: "auth"; event: AuthEvent }
-  | { type: "prompt"; prompt: OauthPrompt }
   | { type: "complete"; connection: LlmConnectionSummary }
   | { type: "error"; message: string };
-
-type OauthPrompt = Omit<AuthPrompt, "signal">;
 
 interface OAuthFlow {
   id: string;
   userId: string;
   events: OAuthFlowEvent[];
   subscribers: Set<(event: OAuthFlowEvent) => void>;
-  pendingPrompt: ((value: string) => void) | null;
   abortController: AbortController;
   terminal: boolean;
 }
@@ -74,7 +72,6 @@ export class OAuthFlowManager {
       userId,
       events: [],
       subscribers: new Set(),
-      pendingPrompt: null,
       abortController: new AbortController(),
       terminal: false,
     };
@@ -102,12 +99,10 @@ export class OAuthFlowManager {
     };
   }
 
-  submit(flowId: string, userId: string, value: string): boolean {
+  cancel(flowId: string, userId: string): boolean {
     const flow = this.get(flowId, userId);
-    if (!flow?.pendingPrompt) return false;
-    const resolve = flow.pendingPrompt;
-    flow.pendingPrompt = null;
-    resolve(value);
+    if (!flow || flow.terminal) return false;
+    flow.abortController.abort(new Error("OAuth sign-in cancelled"));
     return true;
   }
 
@@ -156,7 +151,6 @@ export class OAuthFlowManager {
     } finally {
       clearTimeout(timeout);
       flow.terminal = true;
-      flow.pendingPrompt = null;
       setTimeout(
         () => this.flows.delete(flow.id),
         this.options.terminalRetentionMs ?? TERMINAL_RETENTION_MS,
@@ -173,35 +167,14 @@ export class OAuthFlowManager {
     });
   }
 
-  private prompt(flow: OAuthFlow, prompt: AuthPrompt): Promise<string> {
-    if (prompt.type === "select" && prompt.options.some((option) => option.id === "browser")) {
-      // Pi exposes browser/device-code selection for its CLI. The web button
-      // already means browser login, so do not make the user answer a second
-      // prompt while the pre-opened tab is still blank.
-      return Promise.resolve("browser");
+  private prompt(_flow: OAuthFlow, prompt: AuthPrompt): Promise<string> {
+    if (
+      prompt.type === "select" &&
+      prompt.options.some((option) => option.id === "device_code")
+    ) {
+      return Promise.resolve("device_code");
     }
-    return new Promise((resolve, reject) => {
-      if (flow.abortController.signal.aborted) {
-        reject(abortError(flow.abortController.signal));
-        return;
-      }
-      if (flow.pendingPrompt) {
-        reject(new Error("OAuth provider requested overlapping prompts"));
-        return;
-      }
-      flow.pendingPrompt = resolve;
-      const { signal, ...publicPrompt } = prompt;
-      this.emit(flow, { type: "prompt", prompt: publicPrompt });
-      const rejectOnAbort = (abortSignal: AbortSignal) => {
-        reject(abortError(abortSignal));
-      };
-      signal?.addEventListener("abort", () => rejectOnAbort(signal), { once: true });
-      flow.abortController.signal.addEventListener(
-        "abort",
-        () => rejectOnAbort(flow.abortController.signal),
-        { once: true },
-      );
-    });
+    return Promise.reject(new Error("Codex device authorization requested unsupported input"));
   }
 
   private emit(flow: OAuthFlow, event: OAuthFlowEvent): void {

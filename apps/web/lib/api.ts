@@ -37,15 +37,6 @@ export type LlmOAuthEvent =
         instructions?: string;
       };
     }
-  | {
-      type: "prompt";
-      prompt: {
-        type: string;
-        message: string;
-        placeholder?: string;
-        options?: Array<{ id: string; label: string }>;
-      };
-    }
   | { type: "complete"; connection: LlmConnectionSummary }
   | { type: "error"; message: string };
 
@@ -287,20 +278,21 @@ export const api = {
       method: "POST",
     }),
 
-  submitLlmOAuthInput: (flowId: string, value: string): Promise<{ ok: boolean }> =>
-    request<{ ok: boolean }>(`/llm/oauth/${encodeURIComponent(flowId)}/input`, {
-      method: "POST",
-      body: JSON.stringify({ value }),
+  cancelLlmOAuth: (flowId: string): Promise<{ ok: boolean }> =>
+    request<{ ok: boolean }>(`/llm/oauth/${encodeURIComponent(flowId)}`, {
+      method: "DELETE",
     }),
 
   streamLlmOAuth: async (
     eventsUrl: string,
-    onEvent: (event: LlmOAuthEvent) => void,
+    onEvent: (event: LlmOAuthEvent) => void | Promise<void>,
+    signal?: AbortSignal,
   ): Promise<void> => {
     const response = await fetch(`${API_BASE}${eventsUrl}`, {
       credentials: "include",
       cache: "no-store",
       headers: { Accept: "text/event-stream" },
+      signal,
     });
     if (!response.ok || !response.body)
       throw new Error(`OAuth stream failed (${response.status})`);
@@ -314,7 +306,7 @@ export const api = {
       buffer = messages.pop() ?? "";
       for (const message of messages) {
         const line = message.split("\n").find((entry) => entry.startsWith("data: "));
-        if (line) onEvent(JSON.parse(line.slice(6)) as LlmOAuthEvent);
+        if (line) await onEvent(JSON.parse(line.slice(6)) as LlmOAuthEvent);
       }
       if (done) return;
     }

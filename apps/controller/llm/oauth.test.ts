@@ -37,6 +37,60 @@ async function settle(): Promise<void> {
 afterEach(() => vi.useRealTimers());
 
 describe("OAuth sign-in flow lifetime", () => {
+  it("selects device authorization instead of the localhost browser callback", async () => {
+    const selected = vi.fn();
+    const manager = new OAuthFlowManager(UNUSED_DATABASE, UNUSED_CONFIG, {
+      createRuntime: async () => ({
+        async login(_providerId, _type, interaction) {
+          selected(
+            await interaction.prompt({
+              type: "select",
+              message: "Select login method",
+              options: [
+                { id: "browser", label: "Browser login" },
+                { id: "device_code", label: "Device code login" },
+              ],
+            }),
+          );
+          interaction.notify({
+            type: "device_code",
+            userCode: "ABCD-EFGH",
+            verificationUri: "https://auth.openai.com/codex/device",
+            intervalSeconds: 5,
+            expiresInSeconds: 900,
+          });
+          return new Promise<Credential>((_, reject) => {
+            interaction.signal?.addEventListener(
+              "abort",
+              () => reject(interaction.signal?.reason),
+              {
+                once: true,
+              },
+            );
+          });
+        },
+        getModels: () => [],
+      }),
+    });
+
+    const flowId = manager.start("user-1");
+    await settle();
+
+    expect(selected).toHaveBeenCalledWith("device_code");
+    expect(manager.get(flowId, "user-1")?.events).toContainEqual({
+      type: "auth",
+      event: {
+        type: "device_code",
+        userCode: "ABCD-EFGH",
+        verificationUri: "https://auth.openai.com/codex/device",
+        intervalSeconds: 5,
+        expiresInSeconds: 900,
+      },
+    });
+    expect(manager.cancel(flowId, "user-1")).toBe(true);
+    await settle();
+  });
+
   it("aborts and removes an abandoned sign-in after its expiry", async () => {
     vi.useFakeTimers();
     const aborted = vi.fn();
@@ -73,6 +127,25 @@ describe("OAuth sign-in flow lifetime", () => {
     expect(manager.get(firstFlowId, "user-1")?.events).toContainEqual({
       type: "error",
       message: "OAuth sign-in superseded by a new attempt",
+    });
+  });
+
+  it("lets the owning user cancel an active sign-in", async () => {
+    const aborted = vi.fn();
+    const manager = new OAuthFlowManager(UNUSED_DATABASE, UNUSED_CONFIG, {
+      createRuntime: async () => pendingRuntime(aborted),
+    });
+    const flowId = manager.start("user-1");
+    await settle();
+
+    expect(manager.cancel(flowId, "another-user")).toBe(false);
+    expect(manager.cancel(flowId, "user-1")).toBe(true);
+    await settle();
+
+    expect(aborted).toHaveBeenCalledOnce();
+    expect(manager.get(flowId, "user-1")?.events).toContainEqual({
+      type: "error",
+      message: "OAuth sign-in cancelled",
     });
   });
 });

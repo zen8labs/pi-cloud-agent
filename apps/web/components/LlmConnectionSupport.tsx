@@ -3,7 +3,6 @@
 import type { CreateLlmConnectionRequest } from "@pi-cloud-agent/protocol";
 import { InfoIcon } from "lucide-react";
 import { useId, useState } from "react";
-import { api, type LlmOAuthEvent } from "@/lib/api";
 
 export function InfoTooltip({ label, children }: { label: string; children: React.ReactNode }) {
   const tooltipId = useId();
@@ -35,42 +34,6 @@ export function InfoTooltip({ label, children }: { label: string; children: Reac
       </span>
     </span>
   );
-}
-
-export async function handleOAuthEvent(
-  flowId: string,
-  event: LlmOAuthEvent,
-  authWindow: Window | null,
-  onChanged: () => Promise<void>,
-  setError: (value: string) => void,
-  onNotice: (message: string, kind: "success" | "error") => void,
-): Promise<void> {
-  if (event.type === "auth") {
-    const url = event.event.type === "auth_url" ? event.event.url : event.event.verificationUri;
-    if (url && authWindow) authWindow.location.href = url;
-    else if (url) window.location.assign(url);
-    return;
-  }
-  if (event.type === "prompt") {
-    const choices = event.prompt.options
-      ?.map((option) => `${option.id}: ${option.label}`)
-      .join("\n");
-    const value = window.prompt(
-      [event.prompt.message, choices].filter(Boolean).join("\n"),
-      event.prompt.placeholder ?? event.prompt.options?.[0]?.id ?? "",
-    );
-    if (value !== null) await api.submitLlmOAuthInput(flowId, value);
-    return;
-  }
-  if (event.type === "complete") {
-    authWindow?.close();
-    await onChanged();
-    onNotice("Subscription connected.", "success");
-    return;
-  }
-  authWindow?.close();
-  setError(event.message);
-  onNotice(event.message, "error");
 }
 
 export function validateConnectionForm(form: CreateLlmConnectionRequest): string | null {

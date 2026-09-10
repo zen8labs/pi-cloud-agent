@@ -6,11 +6,8 @@ import type {
 } from "@pi-cloud-agent/protocol";
 import { PlusIcon, TestTube2Icon } from "lucide-react";
 import { useState } from "react";
-import {
-  handleOAuthEvent,
-  InfoTooltip,
-  validateConnectionForm,
-} from "@/components/LlmConnectionSupport";
+import { CodexDeviceDialog } from "@/components/CodexDeviceDialog";
+import { InfoTooltip, validateConnectionForm } from "@/components/LlmConnectionSupport";
 import { LlmConnectionTable } from "@/components/LlmConnectionTable";
 import { ModelSelect } from "@/components/ModelSelect";
 import { Button } from "@/components/ui/button";
@@ -56,6 +53,7 @@ export function LlmConnectionSection({
   onNotice: (message: string, kind: "success" | "error") => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [codexDialogOpen, setCodexDialogOpen] = useState(false);
   const [endpointId, setEndpointId] = useState<EndpointId>("openai-completions");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -156,27 +154,6 @@ export function LlmConnectionSection({
     }
   };
 
-  const connectSubscription = async () => {
-    setBusy("oauth:chatgpt");
-    setError(null);
-    const authWindow = window.open("about:blank", "pi-cloud-agent-oauth");
-    try {
-      const flow = await api.startLlmOAuth();
-      const pendingEvents: Promise<void>[] = [];
-      await api.streamLlmOAuth(flow.eventsUrl, (event) => {
-        pendingEvents.push(
-          handleOAuthEvent(flow.flowId, event, authWindow, onChanged, setError, onNotice),
-        );
-      });
-      await Promise.all(pendingEvents);
-    } catch (cause) {
-      authWindow?.close();
-      reportError(cause);
-    } finally {
-      setBusy(null);
-    }
-  };
-
   return (
     <div className="space-y-3">
       {connections.length > 0 && (
@@ -212,12 +189,12 @@ export function LlmConnectionSection({
         <div className="mt-3 flex flex-wrap gap-2">
           <Button
             type="button"
-            onClick={() => void connectSubscription()}
+            onClick={() => setCodexDialogOpen(true)}
             disabled={busy !== null}
             variant="outline"
             size="sm"
           >
-            {busy === "oauth:chatgpt" ? "Connecting…" : "Connect Codex"}
+            Connect Codex
           </Button>
         </div>
         <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground">
@@ -344,6 +321,12 @@ export function LlmConnectionSection({
           </Button>
         )}
       </section>
+      <CodexDeviceDialog
+        open={codexDialogOpen}
+        onClose={() => setCodexDialogOpen(false)}
+        onConnected={onChanged}
+        onNotice={onNotice}
+      />
     </div>
   );
 }
