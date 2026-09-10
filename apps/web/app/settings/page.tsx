@@ -13,6 +13,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { GITHUB_INSTALLATION_CHANGED } from "@/components/GithubOnboarding";
 import { LlmConnectionSection } from "@/components/LlmConnectionSection";
+import { LLM_CONNECTION_CHANGED } from "@/components/ModelOnboarding";
 import { AzureDevOpsMarkIcon, GithubMarkIcon } from "@/components/ProviderIcons";
 import { RepositorySettings } from "@/components/RepositorySettings";
 import { Button } from "@/components/ui/button";
@@ -114,7 +115,10 @@ function SettingsContent() {
     }
   };
 
-  const refreshLlm = async () => setLlmConnections(await api.listLlmConnections());
+  const refreshLlm = async () => {
+    setLlmConnections(await api.listLlmConnections());
+    window.dispatchEvent(new Event(LLM_CONNECTION_CHANGED));
+  };
 
   return (
     <div data-testid="settings-scroll" className="h-full overflow-y-auto bg-background">

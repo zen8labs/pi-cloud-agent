@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AccountMenu } from "@/components/AccountMenu";
 import { GithubOnboarding } from "@/components/GithubOnboarding";
+import { ModelOnboarding } from "@/components/ModelOnboarding";
 import {
   MAX_WIDTH,
   MIN_WIDTH,
@@ -53,6 +54,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     <Shell>
       {children}
       <GithubOnboarding />
+      <ModelOnboarding />
     </Shell>
   );
 }
