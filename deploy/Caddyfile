@@ -4,9 +4,14 @@
 #   sudo caddy validate --config /etc/caddy/Caddyfile
 #   sudo systemctl reload caddy
 #
-# This instance's security group allows TCP 80, not 443. Serve HTTP on :80.
-# TLS for browsers is at Cloudflare on zen8agent.theprimitiveworks.com.
-# The Worker fetches http://zen8agent-api.theprimitiveworks.com (grey cloud).
+# agent-api.zen8labs.io uses Caddy automatic HTTPS (Let's Encrypt).
+# Keep the previous origin on HTTP so the old Cloudflare worker path still works.
+
+agent-api.zen8labs.io {
+	reverse_proxy 127.0.0.1:8080 {
+		flush_interval -1
+	}
+}
 
 http://zen8agent-api.theprimitiveworks.com {
 	reverse_proxy 127.0.0.1:8080 {

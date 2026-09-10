@@ -1,0 +1,16 @@
+.codegraph
+.specstory
+references
+.git
+.turbo
+.next
+dist
+.pi-cloud-agent-snapshots
+.pi-plugin-artifacts
+.playwright-mcp
+test-results
+playwright-report
+*.sock
+.env
+.env.*
+!.env.example
