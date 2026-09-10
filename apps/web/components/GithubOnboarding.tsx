@@ -44,7 +44,7 @@ export function GithubOnboarding() {
   }, [refresh]);
 
   useEffect(() => {
-    if (state.kind === "ready") return;
+    if (state.kind !== "required") return;
     const shell = document.querySelector<HTMLElement>(".app-shell");
     shell?.setAttribute("inert", "");
     const previousOverflow = document.body.style.overflow;
@@ -56,7 +56,10 @@ export function GithubOnboarding() {
     };
   }, [state.kind]);
 
-  if (state.kind === "ready" || typeof document === "undefined") return null;
+  // The initial entitlement check is intentionally silent. The API still gates
+  // repository work while this runs; the dialog only appears after a confirmed
+  // missing installation or a failed check.
+  if (state.kind !== "required" || typeof document === "undefined") return null;
 
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/70 px-4 backdrop-blur-md">
@@ -128,18 +131,9 @@ export function GithubOnboarding() {
                 <ExternalLinkIcon className="size-3.5" />
               </a>
             ) : null}
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void refresh()}
-              disabled={state.kind === "checking"}
-            >
-              <RefreshCwIcon
-                className={state.kind === "checking" ? "size-4 animate-spin" : "size-4"}
-              />
-              {state.kind === "checking"
-                ? "Checking access…"
-                : "I’ve chosen repositories — check again"}
+            <Button type="button" variant="outline" onClick={() => void refresh()}>
+              <RefreshCwIcon className="size-4" />
+              I’ve chosen repositories — check again
             </Button>
             <Button
               type="button"
