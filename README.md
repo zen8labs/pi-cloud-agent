@@ -69,7 +69,7 @@ The split is by **substitutability and trust**, not by feature. `packages/runtim
 - [ARCHITECTURE.md](ARCHITECTURE.md): the two trust zones and the run lifecycle
 - [DEVELOPMENT.md](DEVELOPMENT.md): complete local setup, microSandbox image, optional E2B template, and first run
 - [AGENTS.md](AGENTS.md): index for coding agents, plus the enforced rules
-- [docs/](docs/): durable sessions, resumability, secrets, testing, operations, extension guides
+- [docs/](docs/): durable sessions, resumability, secrets, testing, operations, [production deployment](docs/deployment.md), extension guides
 
 ## Contributing
 

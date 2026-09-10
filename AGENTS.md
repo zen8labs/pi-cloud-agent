@@ -38,6 +38,7 @@ Every package and app has one, and it is the local entry point: what that packag
 | touching credentials, tokens, or anything logged | [docs/secrets.md](docs/secrets.md) |
 | writing or changing tests | [docs/testing.md](docs/testing.md) |
 | running, debugging, or validating a live run | [docs/operations.md](docs/operations.md) |
+| deploying Vercel + the controller VM | [docs/deployment.md](docs/deployment.md) |
 
 Each document is self-contained for its task. If you find yourself reading three of them to make one change, the change probably crosses a boundary it should not. See *Consult first* below.
 
@@ -54,6 +55,8 @@ packages/
   vcs/            VCSProvider implementations (github, azure-devops)
   runtime/        runs INSIDE the sandbox (untrusted)
   tsconfig/       shared compiler options
+deploy/
+  Caddyfile       TLS reverse proxy for the production controller hostname
 ```
 
 ## Commands

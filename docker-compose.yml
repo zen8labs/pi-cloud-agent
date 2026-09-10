@@ -2,7 +2,7 @@
 #
 # Ports bind to 127.0.0.1 so they are reachable on this machine (dashboard,
 # `pnpm db:migrate`, tests) and are not published on the public interface.
-# Caddy on the server is the only public listener (443) and proxies /_api.
+# Caddy on the server is the only public listener (443).
 #
 # The sandbox runtime does not run here — it runs on whichever sandbox provider
 # is configured, and it reaches the controller at CONTROL_PLANE_URL.

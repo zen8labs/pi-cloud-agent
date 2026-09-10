@@ -1,19 +1,13 @@
-# Reverse proxy for the controller on EC2.
+# Reverse proxy for the controller.
 #
-# Copy this file to /etc/caddy/Caddyfile on the instance, then:
+# Copy to /etc/caddy/Caddyfile, then:
 #   sudo caddy validate --config /etc/caddy/Caddyfile
 #   sudo systemctl reload caddy
 #
-# agent-api.zen8labs.io uses Caddy automatic HTTPS (Let's Encrypt).
-# Keep the previous origin on HTTP so the old Cloudflare worker path still works.
+# Automatic HTTPS (Let's Encrypt) on :443. Port 80 stays open for ACME
+# and HTTP→HTTPS. See docs/deployment.md.
 
 agent-api.zen8labs.io {
-	reverse_proxy 127.0.0.1:8080 {
-		flush_interval -1
-	}
-}
-
-http://zen8agent-api.theprimitiveworks.com {
 	reverse_proxy 127.0.0.1:8080 {
 		flush_interval -1
 	}

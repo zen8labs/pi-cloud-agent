@@ -201,7 +201,7 @@ Restarting the controller is safe at any moment. In-flight runs keep working: th
 
 On `SIGINT`/`SIGTERM` the reconciler stops claiming and drains in-flight provisioning before exiting, so a sandbox whose id has not yet been stored is not leaked.
 
-→ [resumability.md](resumability.md) for why this works.
+→ [resumability.md](resumability.md) for why this works. Production topology (Vercel + VM + Caddy) is [deployment.md](deployment.md).
 
 ## Live validation
 
