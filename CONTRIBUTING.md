@@ -89,5 +89,4 @@ Do not open a public issue for a vulnerability. See [SECURITY.md](SECURITY.md) f
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): the two trust zones and the run lifecycle
 - [docs/operations.md](docs/operations.md): running, debugging, and validating a live run, including what a healthy run looks like
-- [docs/deployment.md](docs/deployment.md): production Vercel dashboard + controller VM
 - Open a discussion or an issue. A question that reveals a confusing document is useful information; we'd rather fix the document than answer it twice.
