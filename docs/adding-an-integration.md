@@ -64,7 +64,7 @@ GitHub is the reference implementation in `apps/controller/integrations/github.t
 
 Agent output that must become an external side effect needs a protocol schema, a runtime tool, an authenticated controller callback, and durable idempotency. For example, GitHub reviews use `submit_github_review`; comment tasks use `reply_github_comment`. The runtime sends structured data only. The controller validates the run's target and calls the provider adapter. Completion is rejected if a required publication was not recorded as successful.
 
-Keep provider credentials in the trusted controller. GitHub publication requires a short-lived App installation token minted with `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY`; the connected user token remains useful for checkout but is never used for publication. Missing App credentials or token-minting failures stop publication. Never pass an App private key to the sandbox.
+Keep provider credentials in the trusted controller. GitHub checkout and publication require short-lived App installation tokens minted with `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY`; checkout tokens are narrowed to the selected repository. The connected user token is used only by the controller for identity and entitlement checks. Missing App credentials or token-minting failures stop the run or publication. Never pass an App private key or connected-user token to the sandbox.
 
 ## Adding another integration
 

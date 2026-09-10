@@ -4,6 +4,7 @@ import { GitPullRequestIcon, PanelLeftIcon, PlusIcon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AccountMenu } from "@/components/AccountMenu";
+import { GithubOnboarding } from "@/components/GithubOnboarding";
 import {
   MAX_WIDTH,
   MIN_WIDTH,
@@ -48,7 +49,12 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   if (state === "signed-out") {
     return <SignIn />;
   }
-  return <Shell>{children}</Shell>;
+  return (
+    <Shell>
+      {children}
+      <GithubOnboarding />
+    </Shell>
+  );
 }
 
 function Shell({ children }: { children: React.ReactNode }) {

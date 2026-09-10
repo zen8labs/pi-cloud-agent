@@ -68,6 +68,10 @@ const API_BASE =
 const CACHE_TTL_MS = 2 * 60 * 1000;
 const cache = new Map<string, { data: unknown; at: number }>();
 
+export function invalidateRepositoryCache(): void {
+  cache.delete("repos");
+}
+
 function cached<T>(key: string, load: () => Promise<T>): Promise<T> {
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return Promise.resolve(hit.data as T);

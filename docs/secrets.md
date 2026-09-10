@@ -2,11 +2,11 @@
 
 ## Current design
 
-Users authenticate through the configured GitHub App. The controller creates a local application session and stores the GitHub App user access token encrypted in the user's `vcs_connections` row. Azure DevOps can be connected from Settings and is stored against the same local user. Users never enter a PAT.
+Users authenticate through the configured GitHub App. The controller creates a local application session and stores the GitHub App user access token encrypted in the user's `vcs_connections` row. This user authorization establishes identity but does not by itself authorize repository work: authenticated production users must also install the GitHub App and select at least one repository. Manual GitHub task creation revalidates that the target repository belongs to an accessible installation. Azure DevOps can be connected from Settings and is stored against the same local user. Users never enter a PAT.
 
 `VCS_ENCRYPTION_KEY` is supplied only to the controller. The controller refreshes an expiring provider token, resolves the user's provider, and asks `CredentialBroker` for the credential needed by a run.
 
-The current broker injects the token into the sandbox as `SCM_TOKEN` and provider-specific aliases. GitHub webhook-triggered runs use the connected-user token for checkout. Controller-owned reviews and comment replies require a short-lived installation token, so GitHub attributes automation to the App and scopes it to the installation. Missing App credentials or token-minting failures stop publication; the controller never falls back to a connected-user token. The private key never crosses into the sandbox. The checkout token remains intentionally temporary: repository code and the agent run in the same untrusted machine, so a malicious repository can read or exfiltrate a token visible to its process.
+The current broker injects a short-lived credential into the sandbox as `SCM_TOKEN` and provider-specific aliases. GitHub runs receive an installation token minted for exactly the selected repository with Contents and pull-request permissions; the connected-user token remains controller-only for identity and entitlement checks. Controller-owned reviews and comment replies also require short-lived installation tokens, so GitHub attributes automation to the App and scopes it to the installation. Missing App credentials or token-minting failures stop GitHub runs and publication; the controller never falls back to a connected-user token. The private key never crosses into the sandbox. Repository code and the agent still share one untrusted machine, so malicious code could exfiltrate the one-hour, single-repository credential while a run is active.
 
 Repository-specific dependencies belong in a user-selected base image/template. Settings **Test** runs a disposable compatibility check and destroys it. The image executes in the same untrusted sandbox as repository code, so image authors must be trusted. Provider checkpoints are filesystem-only and must not retain credential values.
 
@@ -14,8 +14,8 @@ Repository-specific dependencies belong in a user-selected base image/template. 
 
 These are known limitations, not solved problems:
 
-- The controller keeps a reusable provider token in memory while resolving and provisioning a run. The upcoming secrets broker must replace this with short-lived, repository-scoped credentials or a broker-backed git helper.
-- Until the broker boundary exists, a sandbox can exfiltrate the token it is given. Do not treat redaction as containment.
+- The controller keeps the reusable GitHub user token in memory while checking identity and installation entitlement, but it never sends that token to the sandbox. Other VCS providers still require an equivalent repository-scoped credential design.
+- A sandbox can exfiltrate its short-lived GitHub installation token while a run is active. Repository and time scoping limit the blast radius; eliminating token visibility entirely requires an authenticated Git transport proxy outside the sandbox. Do not treat redaction as containment.
 - GitHub App permissions are intentionally narrow but Contents read/write still permits repository mutation. The App installation's repository selection is an additional policy boundary.
 - Azure DevOps permissions are delegated through the Microsoft Entra app and must be reviewed separately for least privilege.
 - Disconnect deletes the local connection but does not yet revoke the provider token. Add provider-side revocation to the broker/provider adapter.
@@ -37,6 +37,6 @@ Host-mediated plugin OAuth reuses the same encryption key (`VCS_ENCRYPTION_KEY`)
 
 ## Planned secrets broker
 
-The broker should replace the direct checkout-token handoff, not add another token alias. The preferred shape is a broker-backed git credential helper or egress proxy that authorizes a repository operation and injects credentials outside the sandbox. GitHub installation tokens are required for controller-owned publication; they can be limited to repositories and permissions and expire after one hour. Extending that broker boundary to sandbox checkout remains future work.
+GitHub checkout now uses a repository-scoped installation token that expires after one hour rather than a reusable user credential. The next hardening step is a broker-backed Git transport or egress proxy that authorizes a repository operation and injects credentials entirely outside the sandbox. That removes even the short-lived token from the repository process boundary.
 
 The seam is `CredentialBroker` in `apps/controller/secrets/broker.ts`. Keep the reconciler dependent on that small interface so the broker can change without spreading secret policy through run orchestration.

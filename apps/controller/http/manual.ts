@@ -6,6 +6,10 @@ import {
 import type { Context } from "hono";
 import type { Config } from "../config";
 import type { Database } from "../db/client";
+import {
+  loadReviewRepositories,
+  usableReviewRepository,
+} from "../integrations/review-repositories";
 import { getVcsProvider } from "../vcs/connections";
 import type { AppEnv } from "./deps";
 
@@ -62,6 +66,15 @@ async function resolveManualRequest(
   const repository = await vcs.getRepository(body.repo);
   if (!repository)
     throw new Error("repository is not available through the connected identity");
+  if (body.provider === "github" && config.auth.requireUser && config.github.appId) {
+    if (!userId) throw new Error("authentication is required to run a task");
+    const access = await loadReviewRepositories(database, config, userId);
+    if (!usableReviewRepository(access.repositories, body.repo)) {
+      throw new Error(
+        "Install the GitHub App on this repository and grant the required permissions before starting a task.",
+      );
+    }
+  }
   const branch =
     body.branch?.trim() || (await vcs.getDefaultBranch(body.repo).catch(() => null)) || "";
   const repo: RepoRef = {

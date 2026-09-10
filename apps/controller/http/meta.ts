@@ -3,6 +3,7 @@ import { vcsProviderNames } from "@pi-cloud-agent/vcs";
 import { Hono } from "hono";
 import type { Config } from "../config";
 import type { Database } from "../db/client";
+import { loadReviewRepositories } from "../integrations/review-repositories";
 import { getVcsProvider } from "../vcs/connections";
 import type { AppEnv } from "./deps";
 
@@ -20,6 +21,17 @@ export function metaRoutes(): Hono<AppEnv> {
     const repo = c.req.query("repo") ?? "";
     const response: BranchesResponse = { branches: [], default: null };
     try {
+      if (
+        !(await repositoryIsSelectable(
+          c.get("database"),
+          c.get("config"),
+          c.get("user")?.id ?? null,
+          provider,
+          repo,
+        ))
+      ) {
+        return c.json(response);
+      }
       const vcs = await getVcsProvider(
         c.get("database"),
         c.get("config"),
@@ -46,7 +58,17 @@ async function resolveRepos(
   for (const provider of vcsProviderNames()) {
     try {
       const vcs = await getVcsProvider(database, config, provider, userId);
-      repos.push(...(await vcs.listRepos()));
+      const available = await vcs.listRepos();
+      if (provider !== "github" || !requiresGithubInstallation(config)) {
+        repos.push(...available);
+        continue;
+      }
+      if (!userId) continue;
+      const access = await loadReviewRepositories(database, config, userId);
+      const allowed = new Set(
+        access.repositories.filter((item) => !item.problem).map((item) => item.repo),
+      );
+      repos.push(...available.filter((repo) => allowed.has(repo.fullName)));
     } catch {
       // A disconnected or expired identity contributes no repositories.
     }
@@ -55,4 +77,21 @@ async function resolveRepos(
     repos: repos.sort((left, right) => left.fullName.localeCompare(right.fullName)),
     source: repos.length > 0 ? "connection" : "none",
   };
+}
+
+async function repositoryIsSelectable(
+  database: Database,
+  config: Config,
+  userId: string | null,
+  provider: string,
+  repo: string,
+): Promise<boolean> {
+  if (provider !== "github" || !requiresGithubInstallation(config)) return true;
+  if (!userId) return false;
+  const access = await loadReviewRepositories(database, config, userId);
+  return access.repositories.some((item) => item.repo === repo && !item.problem);
+}
+
+function requiresGithubInstallation(config: Config): boolean {
+  return config.auth.requireUser && Boolean(config.github.appId);
 }

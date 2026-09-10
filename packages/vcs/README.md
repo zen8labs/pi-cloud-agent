@@ -1,6 +1,6 @@
 # @pi-cloud-agent/vcs
 
-One job: **resolve connected VCS identities into repository metadata, run credentials, and trusted integration actuators**. The dashboard uses read-only metadata, while the controller mints a token for a run.
+One job: **resolve connected VCS identities into repository metadata, run credentials, and trusted integration actuators**. The dashboard uses the GitHub App installation inventory, while the controller mints a short-lived, repository-scoped installation token for a run.
 
 The sandbox still has no VCS client. GitHub reviews and comment replies are narrow controller-side actuators: the untrusted runtime sends a validated structured submission to the controller, and this package posts against the pinned PR or original comment. Repository code never receives a GitHub API client or publication permission through this path. The controller requires a short-lived installation token minted from the App's private key; it never uses the connected user token for publication.
 

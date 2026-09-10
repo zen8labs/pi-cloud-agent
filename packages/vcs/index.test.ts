@@ -159,14 +159,20 @@ describe("provider registry", () => {
           privateKey: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
         },
         "153588170",
+        "acme/widgets",
       ),
     ).resolves.toEqual({ token: "installation-token", expiresAt: "tomorrow" });
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
     const authorization = String(new Headers(request.headers).get("authorization"));
+    expect(new Headers(request.headers).get("content-type")).toBe("application/json");
     const jwt = authorization.replace("Bearer ", "").split(".");
     expect(jwt).toHaveLength(3);
     expect(JSON.parse(Buffer.from(jwt[1] ?? "", "base64url").toString())).toMatchObject({
       iss: "3738122",
+    });
+    expect(JSON.parse(String(request.body))).toEqual({
+      repositories: ["widgets"],
+      permissions: { contents: "write", pull_requests: "write" },
     });
   });
 });

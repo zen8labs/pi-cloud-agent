@@ -227,15 +227,28 @@ export function createGithubCommentPublisher(accessToken: string): GithubComment
 export async function createGithubInstallationToken(
   credentials: GithubAppCredentials,
   installationId: string,
+  repoFullName?: string,
 ): Promise<{ token: string; expiresAt: string | null }> {
   const appId = z.string().min(1).parse(credentials.appId);
   const privateKey = z.string().min(1).parse(credentials.privateKey);
   const jwt = signGithubAppJwt(appId, privateKey);
+  const repository = repoFullName ? parseGitHubName(repoFullName) : null;
+  if (repoFullName && !repository) throw new Error("invalid GitHub repository name");
   const response = await fetchJson<{ token?: string; expires_at?: string }>(
     `${API_BASE}/app/installations/${encodeURIComponent(installationId)}/access_tokens`,
     {
       method: "POST",
-      headers: { ...apiHeaders(jwt), Authorization: `Bearer ${jwt}` },
+      headers: {
+        ...apiHeaders(jwt),
+        Authorization: `Bearer ${jwt}`,
+        ...(repository ? { "Content-Type": "application/json" } : {}),
+      },
+      body: repository
+        ? JSON.stringify({
+            repositories: [repository.name],
+            permissions: { contents: "write", pull_requests: "write" },
+          })
+        : undefined,
     },
   );
   if (!response.token)

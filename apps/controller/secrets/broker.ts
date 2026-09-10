@@ -1,6 +1,11 @@
 import { SANDBOX_ENV, Secret } from "@pi-cloud-agent/protocol";
+import { createGithubInstallationToken } from "@pi-cloud-agent/vcs";
 import type { Config } from "../config";
 import type { Database } from "../db/client";
+import {
+  loadReviewRepositories,
+  usableReviewRepository,
+} from "../integrations/review-repositories";
 import {
   modelIdFromSnapshot,
   type ResolvedLlmModel,
@@ -12,9 +17,9 @@ import { getVcsProvider } from "../vcs/connections";
 /**
  * Shapes the credentials one run needs, and nothing more.
  *
- * The forge token comes from the user's connected identity. A future secrets
- * broker can replace this implementation without changing the reconciler
- * contract; see docs/secrets.md.
+ * GitHub credentials are minted from the selected App installation and scoped
+ * to one repository. Other forges retain their provider-specific behavior; see
+ * docs/secrets.md for the remaining sandbox-boundary limitation.
  */
 export interface CredentialBroker {
   mintForRepository(input: {
@@ -72,8 +77,12 @@ export function createCredentialBroker(
       const secrets: Record<string, Secret> = {};
       const env: Record<string, string> = {};
       try {
-        const vcs = await getVcsProvider(database, config, provider, userId);
-        const token = await vcs.mintRepoToken(repoFullName);
+        const token =
+          provider === "github" && config.github.appId && config.github.privateKey
+            ? await mintGithubRepositoryToken(config, database, userId, repoFullName)
+            : await (await getVcsProvider(database, config, provider, userId)).mintRepoToken(
+                repoFullName,
+              );
         secrets[SANDBOX_ENV.scmToken] = token;
         for (const alias of CLI_TOKEN_ALIASES[provider] ?? []) secrets[alias] = token;
         env[SANDBOX_ENV.scmTokenUsername] = GIT_USERNAMES[provider] ?? "x-access-token";
@@ -117,6 +126,13 @@ export function createCredentialBroker(
       // Public repositories remain usable when no identity is connected. A
       // credential failure is reported by the agent only if the run needs it.
       const repository = await this.mintForRepository({ userId, provider, repoFullName });
+      if (
+        provider === "github" &&
+        config.auth.requireUser &&
+        !repository.secrets[SANDBOX_ENV.scmToken]
+      ) {
+        throw new Error("could not mint a repository-scoped GitHub App credential");
+      }
       Object.assign(secrets, repository.secrets);
       Object.assign(env, repository.env);
 
@@ -124,4 +140,21 @@ export function createCredentialBroker(
       return { secrets, env, model };
     },
   };
+}
+
+async function mintGithubRepositoryToken(
+  config: Config,
+  database: Database,
+  userId: string,
+  repoFullName: string,
+): Promise<Secret> {
+  const access = await loadReviewRepositories(database, config, userId);
+  const repository = usableReviewRepository(access.repositories, repoFullName);
+  if (!repository) throw new Error("repository is not accessible through the GitHub App");
+  const credential = await createGithubInstallationToken(
+    { appId: config.github.appId, privateKey: config.github.privateKey },
+    repository.installationId,
+    repoFullName,
+  );
+  return new Secret(credential.token, "repository-scoped github installation token");
 }

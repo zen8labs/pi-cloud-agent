@@ -11,12 +11,13 @@ import {
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
+import { GITHUB_INSTALLATION_CHANGED } from "@/components/GithubOnboarding";
 import { LlmConnectionSection } from "@/components/LlmConnectionSection";
 import { AzureDevOpsMarkIcon, GithubMarkIcon } from "@/components/ProviderIcons";
 import { RepositorySettings } from "@/components/RepositorySettings";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { api } from "@/lib/api";
+import { api, invalidateRepositoryCache } from "@/lib/api";
 
 export default function SettingsPage() {
   return (
@@ -86,6 +87,8 @@ function SettingsContent() {
         setConnections(await api.listConnections());
         notify("GitHub App installation connected.", "success");
         setInstallationVersion((value) => value + 1);
+        invalidateRepositoryCache();
+        window.dispatchEvent(new Event(GITHUB_INSTALLATION_CHANGED));
         window.history.replaceState(null, "", "/settings?tab=repositories");
       })
       .catch((cause) => {
@@ -125,9 +128,10 @@ function SettingsContent() {
         ) : (
           <>
             <div className="mb-8">
-              <h2 className="text-xl font-medium tracking-[-0.02em]">Git Connections</h2>
+              <h2 className="text-xl font-medium tracking-[-0.02em]">GitHub account</h2>
               <p className="mt-2 text-sm text-muted-foreground">
-                Repository access for your tasks.
+                Your signed-in identity. Repository access is selected separately in the
+                Repositories tab.
               </p>
             </div>
 

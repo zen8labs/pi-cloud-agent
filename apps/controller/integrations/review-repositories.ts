@@ -93,3 +93,13 @@ export function requireReviewRepository(
     });
   return item;
 }
+
+/** Manual work requires a live installation entry with the permissions the product promises. */
+export function usableReviewRepository(
+  repositories: ReviewRepository[],
+  repo: string,
+): ReviewRepository | null {
+  return (
+    repositories.find((candidate) => candidate.repo === repo && !candidate.problem) ?? null
+  );
+}
