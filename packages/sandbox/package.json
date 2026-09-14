@@ -19,7 +19,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@e2b/cli": "2.16.0",
+    "@e2b/cli": "2.18.0",
     "@pi-cloud-agent/tsconfig": "workspace:*",
     "@types/node": "catalog:",
     "typescript": "catalog:"
