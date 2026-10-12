@@ -56,6 +56,7 @@ const schema = z.object({
     .refine((value) => !value || URL.canParse(value), "must be a valid URL when configured")
     .default(""),
   OTEL_EXPORTER_OTLP_TRACES_HEADERS: z.string().default(""),
+  OTEL_OBSERVABILITY_DESTINATION: z.enum(["", "generic", "langfuse", "posthog"]).default(""),
   OTEL_SERVICE_NAME: z.string().min(1).default("pi-cloud-agent"),
   OTEL_EXPORT_DEBUG_EVENTS: z.enum(["true", "false"]).default("false"),
 
@@ -119,6 +120,7 @@ export interface Config {
   observability: {
     tracesEndpoint: string;
     tracesHeaders: Record<string, string>;
+    destination: ObservabilityDestination;
     serviceName: string;
     exportDebugEvents: boolean;
   };
@@ -145,6 +147,8 @@ export interface Config {
   /** Handed to provider factories so they can read their own variables. */
   env: Env;
 }
+
+export type ObservabilityDestination = "generic" | "langfuse" | "posthog";
 
 function build(env: Env): Config {
   const parsed = schema.safeParse(env);
@@ -196,6 +200,10 @@ function build(env: Env): Config {
     observability: {
       tracesEndpoint: value.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
       tracesHeaders,
+      destination: resolveObservabilityDestination(
+        value.OTEL_OBSERVABILITY_DESTINATION,
+        value.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
+      ),
       serviceName: value.OTEL_SERVICE_NAME,
       exportDebugEvents: value.OTEL_EXPORT_DEBUG_EVENTS === "true",
     },
@@ -233,6 +241,18 @@ function build(env: Env): Config {
     },
     env,
   };
+}
+
+function resolveObservabilityDestination(
+  configured: "" | ObservabilityDestination,
+  endpoint: string,
+): ObservabilityDestination {
+  if (configured) return configured;
+  if (!URL.canParse(endpoint)) return "generic";
+  const host = new URL(endpoint).hostname.toLowerCase();
+  if (host.includes("langfuse")) return "langfuse";
+  if (host.includes("posthog")) return "posthog";
+  return "generic";
 }
 
 let cached: Config | null = null;

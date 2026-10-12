@@ -18,7 +18,12 @@ import {
 import type { RunEvent } from "@pi-cloud-agent/protocol";
 import type { Config } from "./config";
 import type { RunRow } from "./db/schema";
+import { BoundedText } from "./observability-bounded-text";
 import { outputAttributes } from "./observability-content";
+import {
+  createDestinationAttributes,
+  type DestinationAttributes,
+} from "./observability-destination";
 
 const MAX_CONTENT = 32_000;
 type Tracer = ReturnType<BasicTracerProvider["getTracer"]>;
@@ -37,6 +42,7 @@ interface ToolProjection {
 }
 
 interface ProjectionState {
+  destination: DestinationAttributes;
   steps: Map<number, StepProjection>;
   tools: Map<string, ToolProjection>;
   lastTurnNumber: number;
@@ -56,13 +62,15 @@ export function projectRun(run: RunRow, events: RunEvent[], config: Config): Rea
     spanLimits: { attributeValueLengthLimit: MAX_CONTENT },
   });
   const tracer = provider.getTracer("pi-cloud-agent/controller", "0.1.0");
-  const shared = traceAttributes(run);
+  const destination = createDestinationAttributes(config);
+  const shared = { ...traceAttributes(run), ...destination.trace(run) };
   const root = tracer.startSpan("agent.run", {
     startTime: run.createdAt,
-    attributes: { ...shared, ...runAttributes(run) },
+    attributes: { ...shared, ...runAttributes(run, destination) },
   });
   const rootContext = trace.setSpan(context.active(), root);
   const state: ProjectionState = {
+    destination,
     steps: new Map(),
     tools: new Map(),
     lastTurnNumber: 0,
@@ -77,6 +85,7 @@ export function projectRun(run: RunRow, events: RunEvent[], config: Config): Rea
       tracer,
       rootContext,
       root,
+      run,
       state,
       output,
       tokenCount,
@@ -107,6 +116,7 @@ function processEvent(
   tracer: Tracer,
   rootContext: Context,
   root: Span,
+  run: RunRow,
   state: ProjectionState,
   output: BoundedText,
   tokenCount: number,
@@ -133,7 +143,7 @@ function processEvent(
     return tokenCount;
   }
   if (event.type === "log") {
-    handleLogEvent(event, at, tracer, rootContext, root, state, shared, config);
+    handleLogEvent(event, at, tracer, rootContext, root, run, state, shared, config);
   }
   return tokenCount;
 }
@@ -164,7 +174,7 @@ function handleToolEvent(
       const args = truncate(jsonValue(event.data.args));
       attributes["agent.tool.args"] = args;
       attributes["gen_ai.tool.call.arguments"] = args;
-      attributes["langfuse.observation.input"] = args;
+      Object.assign(attributes, state.destination.input(args));
     }
     const span = tracer.startSpan(
       `agent.tool.${toolName}`,
@@ -186,7 +196,7 @@ function handleToolEvent(
     tool.span.setAttribute("agent.tool.output", output);
     tool.span.setAttribute("gen_ai.tool.call.result", jsonValue(output));
     tool.span.setAttribute("gen_ai.tool.output", output);
-    tool.span.setAttribute("langfuse.observation.output", jsonValue(output));
+    setAttributes(tool.span, state.destination.output(output));
   }
   tool.span.setStatus({
     code: event.data.status === "error" ? SpanStatusCode.ERROR : SpanStatusCode.OK,
@@ -205,13 +215,14 @@ function handleLogEvent(
   tracer: Tracer,
   rootContext: Context,
   root: Span,
+  run: RunRow,
   state: ProjectionState,
   shared: Attributes,
   config: Config,
 ): void {
   const name = stringValue(event.data.event) ?? "agent.log";
   if (name === "agent.turn_end") {
-    handleTurnEnd(event.data, at, tracer, rootContext, state, shared);
+    handleTurnEnd(event.data, at, tracer, rootContext, run, state, shared);
     return;
   }
   const attributes = {
@@ -237,6 +248,7 @@ function handleTurnEnd(
   at: Date,
   tracer: Tracer,
   rootContext: Context,
+  run: RunRow,
   state: ProjectionState,
   shared: Attributes,
 ): void {
@@ -246,7 +258,11 @@ function handleTurnEnd(
   const step = ensureStep(state, turnNumber, start, tracer, rootContext, shared);
   const attributes = {
     ...shared,
-    ...generationAttributes(data),
+    ...generationAttributes(
+      runAttributesForTurn(run, state.destination),
+      data,
+      state.destination,
+    ),
   };
   const turn = tracer.startSpan("agent.turn", { startTime: start, attributes }, step.context);
   turn.setStatus({ code: SpanStatusCode.OK });
@@ -271,7 +287,11 @@ function ensureStep(
     "agent.step",
     {
       startTime: start,
-      attributes: { ...shared, "agent.step.turn_number": turnNumber },
+      attributes: {
+        ...shared,
+        "agent.step.turn_number": turnNumber,
+        ...state.destination.step(),
+      },
     },
     rootContext,
   );
@@ -300,47 +320,69 @@ function finishStep(state: ProjectionState, turnNumber: number, at: Date): void 
 
 function traceAttributes(run: RunRow): Attributes {
   const attributes: Attributes = {
-    "langfuse.trace.name": "agent.run",
     "agent.run.id": run.id,
   };
   if (run.sessionId) {
     attributes["session.id"] = run.sessionId;
-    attributes["langfuse.session.id"] = run.sessionId;
     attributes["gen_ai.conversation.id"] = run.sessionId;
   }
   if (run.userId) {
     attributes["user.id"] = run.userId;
-    attributes["langfuse.user.id"] = run.userId;
   }
   return attributes;
 }
 
-function runAttributes(run: RunRow): Attributes {
+function runAttributes(run: RunRow, destination: DestinationAttributes): Attributes {
   const attributes: Attributes = {
     "agent.trigger.kind": run.trigger.kind,
     "agent.model": run.model,
-    "gen_ai.operation.name": "invoke_agent",
-    "gen_ai.provider.name": run.model.split("/", 1)[0] ?? run.model,
-    "gen_ai.request.model": run.model,
     "agent.vcs.provider": run.provider,
     "agent.repository": run.repoFullName,
   };
-  const prompt = run.trigger.prompt ?? run.trigger.command;
-  if (prompt) {
-    const input = jsonValue([{ role: "user", content: prompt }]);
-    attributes["gen_ai.prompt"] = truncate(prompt);
-    attributes["langfuse.observation.input"] = input;
-    attributes["gen_ai.input.messages"] = input;
-  }
-  return attributes;
+  return {
+    ...attributes,
+    "gen_ai.operation.name": "invoke_agent",
+    ...modelAttributes(run),
+    ...inputAttributes(run, destination),
+  };
 }
 
-function generationAttributes(data: Record<string, unknown>): Attributes {
-  const attributes: Attributes = { "gen_ai.operation.name": "chat" };
+function runAttributesForTurn(run: RunRow, destination: DestinationAttributes): Attributes {
+  const attributes: Attributes = {
+    ...modelAttributes(run),
+  };
+  return { ...attributes, ...inputAttributes(run, destination) };
+}
+
+function modelAttributes(run: RunRow): Attributes {
+  return {
+    "gen_ai.provider.name": run.model.split("/", 1)[0] ?? run.model,
+    "gen_ai.request.model": run.model,
+  };
+}
+
+function inputAttributes(run: RunRow, destination: DestinationAttributes): Attributes {
+  const prompt = run.trigger.prompt ?? run.trigger.command;
+  if (!prompt) return {};
+  const input = jsonValue([{ role: "user", content: prompt }]);
+  return {
+    "gen_ai.prompt": truncate(prompt),
+    "gen_ai.input.messages": input,
+    ...destination.input(input),
+  };
+}
+
+function generationAttributes(
+  run: Attributes,
+  data: Record<string, unknown>,
+  destination: DestinationAttributes,
+): Attributes {
+  const attributes: Attributes = { ...run, "gen_ai.operation.name": "chat" };
   const stopReason = stringValue(data.stopReason);
   if (stopReason) attributes["gen_ai.response.finish_reasons"] = [stopReason];
   if (data.output !== undefined) {
     Object.assign(attributes, outputAttributes(data.output));
+    Object.assign(attributes, destination.output(data.output));
   }
   const usage = data.usage;
   if (!usage || typeof usage !== "object" || Array.isArray(usage)) return attributes;
@@ -360,7 +402,12 @@ function setRootOutput(root: Span, state: ProjectionState, output: BoundedText):
   const latestOutput = state.lastTurnOutput
     ? state.lastTurnOutput
     : output.value() || undefined;
-  if (latestOutput !== undefined) setAttributes(root, outputAttributes(latestOutput));
+  if (latestOutput !== undefined) {
+    setAttributes(root, {
+      ...outputAttributes(latestOutput),
+      ...state.destination.output(latestOutput),
+    });
+  }
 }
 
 function setAttributes(span: Span, attributes: Attributes): void {
@@ -449,16 +496,5 @@ class DeterministicIdGenerator implements IdGenerator {
       .update(`${this.traceId}:span:${this.sequence}`)
       .digest("hex")
       .slice(0, 16);
-  }
-}
-
-class BoundedText {
-  private text = "";
-  append(value: string): void {
-    if (this.text.length >= MAX_CONTENT) return;
-    this.text += value.slice(0, MAX_CONTENT - this.text.length);
-  }
-  value(): string {
-    return this.text;
   }
 }

@@ -21,9 +21,27 @@ describe("observability configuration", () => {
     expect(config.observability).toEqual({
       tracesEndpoint: "https://collector.example/v1/traces",
       tracesHeaders: { Authorization: "Bearer secret", "x-project": "agent" },
+      destination: "generic",
       serviceName: "pi-cloud-agent",
       exportDebugEvents: false,
     });
+  });
+
+  it("selects a destination adapter explicitly or from a known endpoint", () => {
+    expect(
+      configFrom({
+        ...baseEnv,
+        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:
+          "https://cloud.langfuse.com/api/public/otel/v1/traces",
+      }).observability.destination,
+    ).toBe("langfuse");
+    expect(
+      configFrom({
+        ...baseEnv,
+        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "https://us.i.posthog.com/i/v0/ai/otel",
+        OTEL_OBSERVABILITY_DESTINATION: "posthog",
+      }).observability.destination,
+    ).toBe("posthog");
   });
 
   it("leaves export disabled without an endpoint", () => {
