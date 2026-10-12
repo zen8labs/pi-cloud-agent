@@ -156,8 +156,9 @@ describe("durable observability delivery", () => {
       expect(requests[0]?.path).toBe("/v1/traces");
       expect(requests[0]?.body.length).toBeGreaterThan(0);
       const payload = (requests[0]?.body ?? Buffer.alloc(0)).toString("utf8");
-      expect(payload).toContain("langfuse.observation.input");
-      expect(payload).toContain("langfuse.observation.output");
+      expect(payload).toContain("gen_ai.input.messages");
+      expect(payload).toContain("gen_ai.output.messages");
+      expect(payload).not.toContain("langfuse.");
       expect(payload).toContain("Summarize this repository.");
       expect(payload).toContain("agent result");
       expect(payload).toContain("echo hi");
@@ -204,11 +205,19 @@ describe("durable observability delivery", () => {
     expect(tool?.attributes["gen_ai.tool.call.result"]).toContain("hi");
     expect(turn?.attributes["gen_ai.output.messages"]).toContain("toolCall");
     expect(turn?.attributes["gen_ai.output.messages"]).toContain("inspect the repository");
+    expect(turn?.attributes["gen_ai.operation.name"]).toBe("chat");
+    expect(turn?.attributes["gen_ai.request.model"]).toBe(run.model);
+    expect(turn?.attributes["gen_ai.provider.name"]).toBe(run.model.split("/", 1)[0]);
+    expect(turn?.attributes["gen_ai.input.messages"]).toContain(run.trigger.prompt);
+    expect(step?.attributes["gen_ai.operation.name"]).toBe("invoke_agent");
     expect(
-      spans.find((span) => span.name === "agent.run")?.attributes[
-        "langfuse.observation.output"
-      ],
+      spans.find((span) => span.name === "agent.run")?.attributes["gen_ai.completion"],
     ).toContain("inspect the repository");
+    expect(
+      spans.every((span) =>
+        Object.keys(span.attributes).every((key) => !key.startsWith("langfuse.")),
+      ),
+    ).toBe(true);
     expect(spans.some((span) => span.name.startsWith("agent.event."))).toBe(false);
   });
 
@@ -294,7 +303,7 @@ describe("durable observability delivery", () => {
       spans.every(
         (span) =>
           span.attributes["session.id"] === run.sessionId &&
-          span.attributes["langfuse.session.id"] === run.sessionId,
+          span.attributes["gen_ai.conversation.id"] === run.sessionId,
       ),
     ).toBe(true);
   });
@@ -311,10 +320,8 @@ describe("durable observability delivery", () => {
     });
     const spans = projectRun(run, await listEvents(database, run.id, 0), testConfig());
     const turn = spans.find((span) => span.name === "agent.turn");
-    expect(turn?.attributes["langfuse.observation.output"]).toContain(
-      "important trajectory detail",
-    );
-    expect(turn?.attributes["langfuse.observation.output"]).toContain("private final answer");
+    expect(turn?.attributes["gen_ai.completion"]).toContain("important trajectory detail");
+    expect(turn?.attributes["gen_ai.completion"]).toContain("private final answer");
   });
 
   it("contains a periodic drain rejection when export recovery cannot reach the database", async () => {
