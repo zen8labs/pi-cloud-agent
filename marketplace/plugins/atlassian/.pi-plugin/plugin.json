@@ -1,0 +1,33 @@
+{
+  "name": "atlassian",
+  "version": "1.0.0",
+  "description": "Read and connect Jira and Confluence context through Atlassian Rovo MCP.",
+  "author": { "name": "Zen8" },
+  "keywords": ["atlassian", "jira", "confluence", "context", "mcp"],
+  "skills": "skills/",
+  "mcpServers": "mcp.json",
+  "oauth": {
+    "resource": "https://mcp.atlassian.com/v2/mcp",
+    "tokenVariable": "ATLASSIAN_ACCESS_TOKEN",
+    "scopes": [
+      "offline_access",
+      "read:me",
+      "read:jira:agent-interface",
+      "search:jira:agent-interface",
+      "read:confluence:agent-interface",
+      "search:confluence:agent-interface",
+      "read:all:twg"
+    ]
+  },
+  "variables": {
+    "type": "object",
+    "properties": {
+      "ATLASSIAN_ACCESS_TOKEN": {
+        "type": "string",
+        "title": "Atlassian OAuth access token",
+        "description": "Prefer Connect (OAuth). The token is stored encrypted and attached only to runs for this user."
+      }
+    },
+    "required": ["ATLASSIAN_ACCESS_TOKEN"]
+  }
+}

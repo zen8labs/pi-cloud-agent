@@ -225,11 +225,13 @@ pnpm db:migrate
 pnpm plugins:seed   # publishes every package under marketplace/plugins as approved / default_off
 ```
 
-Set `PLUGIN_OAUTH_REDIRECT_URI` to a browser-reachable controller URL (for local dev usually `http://localhost:8080/plugins/oauth/callback` — not the sandbox gateway host). Keep `PLUGIN_OAUTH_ISSUER_ALLOWLIST` tight (default `auth.exa.ai`).
+Set `PLUGIN_OAUTH_REDIRECT_URI` to a browser-reachable controller URL (for local dev usually `http://localhost:8080/plugins/oauth/callback` — not the sandbox gateway host). Keep `PLUGIN_OAUTH_ISSUER_ALLOWLIST` tight (defaults: `auth.exa.ai,auth.atlassian.com`).
 
 Demo with Context7: Install → Configure with a key from https://context7.com/dashboard → start a `general` run that asks about a library API.
 
 Demo with Exa: Install → **Connect** (OAuth) → start a `general` run that needs live web search. Paste an API key under Configure only as a fallback.
+
+Demo with Atlassian: Install → **Connect** (OAuth) → start a `general` run whose prompt includes a Jira work-item key or URL and a Confluence page URL. The plugin grants read/search access only. The Atlassian organization administrator may need to allow the deployment's callback domain in Rovo MCP settings.
 
 Plugin skills are composed into the task prompt; MCP arrives as resolved `MCP_CONFIG` in the sandbox (never from the cloned repo).
 

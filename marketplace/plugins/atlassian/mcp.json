@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "atlassian": {
+      "url": "https://mcp.atlassian.com/v2/mcp",
+      "headers": {
+        "Authorization": "Bearer ${ATLASSIAN_ACCESS_TOKEN}"
+      },
+      "lifecycle": "lazy"
+    }
+  }
+}

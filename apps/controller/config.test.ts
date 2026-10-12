@@ -30,6 +30,13 @@ describe("observability configuration", () => {
     expect(configFrom(baseEnv).observability.tracesEndpoint).toBe("");
   });
 
+  it("allows the bundled OAuth plugin issuers by default", () => {
+    expect(configFrom(baseEnv).plugins.oauthIssuerAllowlist).toEqual([
+      "auth.exa.ai",
+      "auth.atlassian.com",
+    ]);
+  });
+
   it("rejects malformed OTLP headers and endpoints", () => {
     expect(() =>
       configFrom({

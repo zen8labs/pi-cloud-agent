@@ -4,6 +4,7 @@ In-repo **single source of truth** for plugin packages. The controller seeds and
 
 | Package | Role |
 |---|---|
+| [`atlassian`](atlassian/) | read-only Jira + Confluence context through Atlassian Rovo MCP |
 | [`context7`](context7/) | skills + remote Context7 MCP (reference package) |
 | [`exa`](exa/) | skills + remote Exa MCP (OAuth endpoint; Bearer token) |
 
