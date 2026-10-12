@@ -68,7 +68,7 @@ When an MCP server supports OAuth 2.1 (RFC 9728), declare it on the manifest. Th
 }
 ```
 
-The issuer host must be on `PLUGIN_OAUTH_ISSUER_ALLOWLIST` (default `auth.exa.ai`). See [`marketplace/plugins/exa`](../marketplace/plugins/exa).
+The issuer host must be on `PLUGIN_OAUTH_ISSUER_ALLOWLIST` (defaults include `auth.exa.ai` and `auth.atlassian.com`). See [`marketplace/plugins/exa`](../marketplace/plugins/exa) and [`marketplace/plugins/atlassian`](../marketplace/plugins/atlassian).
 
 Dashboard flow: Install → **Connect** → browser sign-in → token injected as `${tokenVariable}` at provision. Paste into Configure remains a fallback.
 

@@ -123,6 +123,25 @@ describe("loadPluginPackage", () => {
     const catalog = toCatalogVersion(loaded, "approved", root);
     expect(catalog.skillTexts[0]).toContain("sample skill");
   });
+
+  it("loads the bundled Atlassian context plugin", () => {
+    const root = join(import.meta.dirname, "../../marketplace/plugins/atlassian");
+    const loaded = loadPluginPackage(root);
+    const catalog = toCatalogVersion(loaded, "approved", root);
+
+    expect(loaded.manifest.oauth).toMatchObject({
+      resource: "https://mcp.atlassian.com/v2/mcp",
+      tokenVariable: "ATLASSIAN_ACCESS_TOKEN",
+    });
+    expect(loaded.manifest.oauth?.scopes).not.toEqual(
+      expect.arrayContaining([
+        "write:jira:agent-interface",
+        "write:confluence:agent-interface",
+      ]),
+    );
+    expect(catalog.components).toEqual({ skills: true, mcp: true });
+    expect(catalog.skillTexts[0]).toContain("Context discipline");
+  });
 });
 
 function baseVersion(name: string): CatalogPluginVersion {

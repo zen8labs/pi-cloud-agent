@@ -96,7 +96,7 @@ const schema = z.object({
   /** Callback for plugin MCP OAuth. Defaults to CONTROL_PLANE_URL/plugins/oauth/callback. */
   PLUGIN_OAUTH_REDIRECT_URI: z.string().default(""),
   /** Comma-separated authorization-server hostnames allowed for plugin OAuth. */
-  PLUGIN_OAUTH_ISSUER_ALLOWLIST: z.string().default("auth.exa.ai"),
+  PLUGIN_OAUTH_ISSUER_ALLOWLIST: z.string().default("auth.exa.ai,auth.atlassian.com"),
 });
 
 export type Env = Readonly<Record<string, string | undefined>>;

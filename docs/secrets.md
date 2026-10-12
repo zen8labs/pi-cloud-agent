@@ -34,6 +34,7 @@ Host-mediated plugin OAuth reuses the same encryption key (`VCS_ENCRYPTION_KEY`)
 - Authorization-server hosts must be listed in `PLUGIN_OAUTH_ISSUER_ALLOWLIST`.
 - Tokens must never appear in `run_events`, logs, or audit detail payloads.
 - Dynamic client registration caches `client_id` in `plugin_oauth_clients` (public client, PKCE only — no client secret).
+- The resolved MCP authorization header is visible inside the untrusted sandbox for the duration of a run. For Atlassian, this can expose every Jira and Confluence object the connected user and granted read scopes can access, not only the ticket or page named in the prompt. Use the bundled read-only scopes for pilot deployments; production containment requires a trusted MCP proxy that exchanges a narrow run capability without revealing the provider token.
 
 ## Planned secrets broker
 

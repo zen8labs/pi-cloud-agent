@@ -30,7 +30,7 @@ A **plugin** is an installable bundle of skills and/or MCP servers. This package
 
 ## Adding a plugin
 
-See [../../docs/adding-a-plugin.md](../../docs/adding-a-plugin.md). Reference packages live under `marketplace/plugins/` (`context7`, `exa` with host-mediated OAuth).
+See [../../docs/adding-a-plugin.md](../../docs/adding-a-plugin.md). Reference packages live under `marketplace/plugins/` (`context7`, `exa`, and read-only Atlassian context through host-mediated OAuth).
 
 ```bash
 pnpm vitest run packages/plugins/plugins.test.ts
