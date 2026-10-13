@@ -5,25 +5,25 @@ packages:
 # One version of every shared dependency, declared once. Packages reference
 # these with "catalog:" so a bump happens in exactly one place.
 catalog:
-  "@earendil-works/pi-ai": 0.82.1
-  "@earendil-works/pi-coding-agent": 0.82.1
-  "@hono/node-server": 2.0.12
+  "@earendil-works/pi-ai": 0.99.2
+  "@earendil-works/pi-coding-agent": 0.99.2
+  "@hono/node-server": 2.1.3
   "@opentelemetry/api": 1.9.1
-  "@opentelemetry/exporter-trace-otlp-proto": 0.221.0
-  "@opentelemetry/resources": 2.10.0
-  "@opentelemetry/sdk-trace-base": 2.10.0
+  "@opentelemetry/exporter-trace-otlp-proto": 0.222.0
+  "@opentelemetry/resources": 2.11.0
+  "@opentelemetry/sdk-trace-base": 2.11.0
   # Tracks the engines.node floor, not the newest release: typings for a runtime
   # we do not target describe APIs we cannot call.
-  "@types/node": 24.13.3
-  drizzle-kit: 0.31.10
-  drizzle-orm: 0.45.2
-  e2b: 2.36.1
-  hono: 4.12.32
-  microsandbox: 0.6.7
+  "@types/node": 24.19.1
+  drizzle-kit: 0.31.11
+  drizzle-orm: 0.45.3
+  e2b: 2.52.1
+  hono: 4.13.13
+  microsandbox: 0.7.7
   postgres: 3.4.9
-  tsx: 4.23.1
+  tsx: 4.23.15
   typescript: 5.9.3
-  zod: 4.4.3
+  zod: 4.6.5
 
 # Refuse to install a version published in the last day. The blast radius of a
 # typosquat or a compromised release is usually contained within hours.
